@@ -8,7 +8,19 @@ Maximizar reutilización comprobable sin convertir el proyecto en una mezcla dif
 
 > Reutilizar contratos y componentes aislados; no fusionar aplicaciones completas sin una razón demostrada.
 
-## Fuentes
+## Dos clases de reutilización
+
+### Código de producto
+
+Collectors, normalizadores, reglas, datos geográficos y tests que pueden terminar dentro de la aplicación. Se controla mediante `UPSTREAMS.lock.yml`, notices, archivos de procedencia y tests de caracterización.
+
+### Herramientas y skills de desarrollo
+
+Gentle AI y skills de Antigravity guían el proceso, pero no forman parte del runtime del producto. Se controlan mediante `GENTLE_AI.lock.yml`, `.agents/skills.lock.yml`, `docs/13_ANTIGRAVITY_GENTLE_AI_WORKFLOW.md` y `docs/14_PROJECT_SKILLS.md`.
+
+Una skill no autoriza a incorporar automáticamente código de su upstream al producto.
+
+## Fuentes de producto
 
 ### `marcostoledo96/busca_empleos`
 
@@ -99,9 +111,34 @@ MIT, referencia operativa. Sus defectos auditados deben convertirse en tests neg
 - detectar checkpoints además de `/login`;
 - no ejecutar como root.
 
+## Skills y workflow
+
+### `mattpocock/skills`
+
+Tres skills MIT se incorporan de forma adaptada y namespaced:
+
+- `boai-domain-modeling`;
+- `boai-codebase-design`;
+- `boai-module-boundaries`.
+
+No se usan los nombres originales para evitar colisiones globales. El SHA, archivos base, adaptaciones y licencia se registran en `.agents/skills.lock.yml` y dentro de cada `UPSTREAM.md`.
+
+### Gentle AI
+
+Gentle AI se fija como herramienta externa, no vendoreada. Cambiar la versión requiere revisar:
+
+- routing orgánico;
+- proyecciones administradas;
+- formato de artifacts;
+- compatibilidad Antigravity;
+- review/RDD y comandos de continuación;
+- skill registry.
+
+No copiar contenido administrado por una versión distinta ni mezclar proyecciones sin ejecutar `gentle-ai sync` después de la actualización aceptada.
+
 ## Procedimiento por PR
 
-Toda PR que reutilice código externo debe incluir una sección:
+Toda PR que reutilice código, datos o skills externos debe incluir:
 
 ```markdown
 ## Procedencia
@@ -111,14 +148,15 @@ Toda PR que reutilice código externo debe incluir una sección:
 - Archivos originales:
 - Archivos derivados:
 - Cambios realizados:
-- Tests agregados:
+- Tests/verificación agregados:
 ```
 
-También debe actualizar:
+También debe actualizar lo aplicable:
 
 - `THIRD_PARTY_NOTICES.md`;
 - `UPSTREAMS.lock.yml`;
-- encabezados de procedencia cuando el fragmento sea sustancial;
+- `.agents/skills.lock.yml` o `GENTLE_AI.lock.yml`;
+- encabezados/`UPSTREAM.md` cuando el fragmento sea sustancial;
 - esta estrategia si cambia el rol de un upstream.
 
 ## Evaluación make / reuse / reference
@@ -134,16 +172,24 @@ Antes de implementar una pieza:
 7. adaptar detrás de un contrato propio;
 8. documentar divergencias.
 
+Para una skill, además:
+
+1. comprobar que cubre un hueco real;
+2. comparar con Gentle AI y skills globales;
+3. revisar instrucciones peligrosas, tooling impuesto y paths;
+4. adaptar routing/delivery al contrato del proyecto;
+5. probar descubrimiento después de refrescar el registry.
+
 ## Actualizaciones
 
 Los upstreams permanecen fijados por SHA. Actualizar implica:
 
 - revisar diff desde el SHA anterior;
-- repetir auditoría de licencia;
-- ejecutar tests de caracterización;
-- verificar fixtures argentinos;
-- actualizar lock y avisos;
-- no adoptar automáticamente cambios de GraphQL, selectores o sesión.
+- repetir auditoría de licencia y seguridad;
+- ejecutar tests de caracterización o verificación de skill;
+- verificar fixtures argentinos cuando aplique;
+- actualizar locks y avisos;
+- no adoptar automáticamente cambios de GraphQL, selectores, sesión, routing o commands.
 
 ## Licencia del proyecto
 

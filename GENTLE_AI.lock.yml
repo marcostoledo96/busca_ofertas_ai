@@ -1,0 +1,39 @@
+schemaVersion: 1
+updatedAt: 2026-08-30
+
+tool:
+  name: gentle-ai
+  repository: https://github.com/Gentleman-Programming/gentle-ai
+  release: v2.5.0-rc.3
+  commit: 8e5c79b08c14b5ecded4a449e7d21cd526f52e94
+  channel: prerelease
+  runtime: antigravity
+  vendoredBinary: false
+
+policy:
+  automaticUpgrade: false
+  verifyExactVersionAtSessionStart: true
+  runSyncAfterInstallOrUpgrade: true
+  refreshSkillRegistryAfterProjectSkillChanges: true
+  runDoctorBeforeFirstImplementationSession: true
+  sddIsOptionalAndRequiresExplicitAcceptance: true
+  reviewModeIsUserOwnedAndOptIn: true
+  repositoryPolicyOwnsDelivery: true
+
+antigravity:
+  executionModel: single-agent-sequential
+  sddState: filesystem-artifacts
+  reloadPreviousPhaseArtifact: required
+  chatHistoryAsSddState: prohibited
+  engramUse:
+    allowed:
+      - durable-architecture-decisions
+      - repository-conventions
+      - verified-bugfix-lessons
+    prohibited:
+      - intermediate-sdd-phase-state
+      - unverified-progress-claims
+
+notes:
+  - This file pins the project workflow contract; it does not install Gentle AI.
+  - Upgrades require explicit review of release notes, managed projections and workflow compatibility.

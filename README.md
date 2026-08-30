@@ -2,7 +2,7 @@
 
 Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunidades provenientes de múltiples fuentes. El primer caso de uso será encontrar **Nintendo Switch Lite en Facebook Marketplace dentro de AMBA**, pero el núcleo se diseña para admitir otros productos, precios, monedas, sitios, inmuebles y vehículos sin modificar la lógica central.
 
-> Estado actual: **producto, arquitectura y backlog definidos; implementación todavía no iniciada**.
+> Estado actual: **producto, arquitectura, workflow y backlog definidos; implementación todavía no iniciada**.
 
 ## Objetivo
 
@@ -76,6 +76,38 @@ adapters/url-watcher           # posterior al MVP
 
 Es un monorepo modular, no un sistema de microservicios.
 
+## Antigravity y Gentle AI
+
+El proyecto se desarrollará con Antigravity y Gentle AI fijado a `v2.5.0-rc.3`. La versión exacta y política de actualización viven en [`GENTLE_AI.lock.yml`](GENTLE_AI.lock.yml).
+
+Reglas principales:
+
+- una issue por unidad de trabajo;
+- Gentle AI selecciona orgánicamente trabajo directo, delegado o SDD;
+- SDD no es obligatorio: requiere ambigüedad sustancial y aceptación explícita;
+- en Antigravity las fases SDD son secuenciales y cada fase relee el artifact anterior desde filesystem;
+- review/RDD es opt-in y no reemplaza la política de PR/merge del repositorio;
+- las skills locales `boai-*` complementan, sin duplicar, las skills globales.
+
+Consultá [el workflow completo](docs/13_ANTIGRAVITY_GENTLE_AI_WORKFLOW.md) y [la auditoría de skills](docs/14_PROJECT_SKILLS.md).
+
+## Skills del workspace
+
+Antigravity descubre las skills versionadas en [`.agents/skills/`](.agents/skills/README.md):
+
+- `boai-domain-modeling`;
+- `boai-codebase-design`;
+- `boai-module-boundaries`.
+
+Después de clonar o actualizar esas carpetas:
+
+```bash
+gentle-ai skill-registry refresh
+gentle-ai doctor
+```
+
+No hace falta descargarlas globalmente ni ejecutar `npx skills add`; forman parte del repositorio y están fijadas en [`.agents/skills.lock.yml`](.agents/skills.lock.yml).
+
 ## Documentación
 
 La documentación normativa se encuentra en [`docs/`](docs/README.md):
@@ -93,20 +125,15 @@ La documentación normativa se encuentra en [`docs/`](docs/README.md):
 - [Contrato de configuración](docs/10_CONFIGURATION_CONTRACT.md)
 - [Errores y observabilidad](docs/11_ERROR_MODEL_AND_OBSERVABILITY.md)
 - [UX del CLI y reportes](docs/12_CLI_AND_REPORT_UX.md)
+- [Workflow Antigravity + Gentle AI](docs/13_ANTIGRAVITY_GENTLE_AI_WORKFLOW.md)
+- [Skills locales](docs/14_PROJECT_SKILLS.md)
 
-Las decisiones arquitectónicas permanentes viven en [`docs/decisions/`](docs/decisions/).
+El lenguaje ubicuo vive en [`CONTEXT.md`](CONTEXT.md). Las decisiones arquitectónicas permanentes viven en [`docs/decisions/`](docs/decisions/).
 
 ## Fuentes de autoridad
 
-Ante contradicciones, se aplica este orden:
-
-1. issue contractual aceptada;
-2. ADR vigente;
-3. documentación normativa en `docs/`;
-4. `AGENTS.md` raíz y el más cercano al archivo;
-5. tests y contratos de código;
-6. comentarios de implementación.
+Ante contradicciones, se aplica el orden definido en [`AGENTS.md`](AGENTS.md). Gentle AI administra routing y lifecycle; la issue, las ADR y los documentos contractuales definen qué debe construirse.
 
 ## Licencia
 
-MIT. Consultá [LICENSE](LICENSE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) y [UPSTREAMS.lock.yml](UPSTREAMS.lock.yml).
+MIT. Consultá [LICENSE](LICENSE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), [UPSTREAMS.lock.yml](UPSTREAMS.lock.yml) y [`.agents/skills.lock.yml`](.agents/skills.lock.yml).

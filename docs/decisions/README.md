@@ -28,3 +28,5 @@ Las ADR registran decisiones permanentes y sus consecuencias.
 | [006](ADR-006-manual-execution-no-notifications.md) | Ejecución manual sin notificaciones en MVP | Accepted |
 | [007](ADR-007-facebook-collectors.md) | Spike GraphQL y Playwright condicional | Accepted |
 | [008](ADR-008-static-local-reports.md) | HTML estático más JSON y CSV | Accepted |
+| [009](ADR-009-antigravity-gentle-ai-workflow.md) | Antigravity, Gentle AI fijado y artifacts secuenciales | Accepted |
+| [010](ADR-010-project-scoped-adapted-skills.md) | Skills locales adaptadas y namespaced | Accepted |

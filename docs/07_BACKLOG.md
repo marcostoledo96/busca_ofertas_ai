@@ -6,6 +6,35 @@
 - Prioridad: `P0` bloqueante, `P1` necesaria, `P2` mejora cercana, `P3` futura.
 - Épicas: `E0` a `E8`.
 - Los números reales de GitHub pueden cambiar; el ID estable debe conservarse en título, branch, PR y documentación.
+- Una issue es una unidad de trabajo; no agrupar la siguiente en la misma rama.
+
+## Ejecución con Gentle AI
+
+La ruta se decide orgánicamente al iniciar cada acción. Las orientaciones siguientes son no vinculantes:
+
+| Señal | Orientación inicial |
+|---|---|
+| Cambio mecánico conocido de 1–3 archivos | Directo inline |
+| Implementación amplia con contrato claro | Directo delegado |
+| Ambigüedad sustancial, trade-offs o artifacts durables valiosos | Candidato a SDD, requiere aceptación explícita |
+
+En Antigravity, SDD es secuencial y basado en artifacts. Consultar `docs/13_ANTIGRAVITY_GENTLE_AI_WORKFLOW.md`.
+
+## Orientación por épica
+
+| Épica | Orientación inicial | Skills locales frecuentes |
+|---|---|---|
+| E0 | BOAI-001/005 delegado; BOAI-002/003/004 candidatos a SDD solo si aparece ambigüedad real | `boai-codebase-design`, `boai-domain-modeling`, `boai-module-boundaries` |
+| E1 | Delegado directo con tests E2E offline | `boai-codebase-design` cuando cambien seams |
+| E2 | Delegado directo; SDD solo ante cambio coordinado de esquema/contrato | `boai-codebase-design` |
+| E3 | BOAI-017 candidato a SDD; money/policies normalmente delegados directos | `boai-domain-modeling`, `boai-codebase-design` |
+| E4 | BOAI-022/023/025/026 candidatos a SDD por investigación/decisión; el resto delegado | `boai-codebase-design` |
+| E5 | Delegado directo; BOAI-031 es aceptación, no nueva arquitectura | `boai-domain-modeling` cuando cambien términos |
+| E6 | BOAI-032 candidato a SDD; integración de proveedor delegada | `boai-codebase-design` |
+| E7 | Candidato a SDD cuando se elija mecanismo externo; después delegado | `boai-codebase-design` |
+| E8 | Candidato a SDD por arquitectura extensible | `boai-domain-modeling`, `boai-codebase-design` |
+
+Gentle AI debe reevaluar esta orientación según el cambio efectivo; la tabla no autoriza SDD.
 
 ## Seguimiento en GitHub
 
@@ -167,7 +196,10 @@ Una issue está lista cuando:
 - enumera criterios de aceptación verificables;
 - explicita dependencias;
 - señala procedencia si reutiliza código;
-- no depende de una decisión de producto pendiente.
+- no depende de una decisión de producto pendiente;
+- puede iniciarse como unidad aislada;
+- identifica skills probables sin convertirlas en autoridad;
+- permite que Gentle AI decida la ruta al comenzar.
 
 ## Definition of Done
 
@@ -179,4 +211,6 @@ Una issue está lista cuando:
 - datos de prueba sintéticos o sanitizados;
 - sin secretos;
 - procedencia actualizada;
+- ruta, skills y artifacts/review registrados cuando apliquen;
+- registry generado fuera del commit;
 - PR acotada y árbol limpio.

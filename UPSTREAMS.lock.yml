@@ -1,4 +1,4 @@
-version: 1
+version: 2
 updatedAt: 2026-08-30
 
 upstreams:
@@ -57,3 +57,30 @@ upstreams:
       - local-session-pattern
       - operational-reference
     status: code-copy-requires-independent-review
+
+  - id: mattpocock-skills
+    repository: https://github.com/mattpocock/skills
+    sha: 6654f6b60cd9d5be8b54c6fafe44346dabeb3b76
+    license: MIT
+    role: incorporated-adapted-workflow-skills
+    allowedUses:
+      - domain-modeling-skill
+      - codebase-design-skill
+      - module-boundaries-skill
+      - supporting-resources
+    status: incorporated-under-.agents/skills
+    lock: .agents/skills.lock.yml
+
+  - id: gentle-ai
+    repository: https://github.com/Gentleman-Programming/gentle-ai
+    sha: 8e5c79b08c14b5ecded4a449e7d21cd526f52e94
+    release: v2.5.0-rc.3
+    license: MIT
+    role: external-workflow-tool
+    allowedUses:
+      - antigravity-routing
+      - optional-sdd-lifecycle
+      - optional-review-rdd
+      - skill-registry
+    status: pinned-not-vendored
+    lock: GENTLE_AI.lock.yml

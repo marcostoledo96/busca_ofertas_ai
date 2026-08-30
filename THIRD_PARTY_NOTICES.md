@@ -1,6 +1,32 @@
 # Avisos de terceros
 
-Este archivo registra fuentes externas estudiadas o previstas para reutilización. La mera inclusión en esta lista **no significa que su código ya haya sido incorporado**.
+Este archivo registra fuentes externas estudiadas, incorporadas o previstas para reutilización. La inclusión en esta lista no significa que todo su código forme parte del producto.
+
+## Skills incorporadas y adaptadas
+
+### `mattpocock/skills`
+
+- Repositorio: `https://github.com/mattpocock/skills`
+- SHA: `6654f6b60cd9d5be8b54c6fafe44346dabeb3b76`
+- Licencia: MIT
+- Contenido utilizado: `domain-modeling`, `codebase-design`, `setup-ts-deep-modules` y recursos seleccionados.
+- Ubicación derivada: `.agents/skills/boai-*`.
+- Adaptaciones: traducción, namespacing, paths BOAI, autoridad contractual, modelo secuencial de Antigravity y límites de Gentle AI.
+- Licencia conservada: `.agents/skills/_licenses/mattpocock-skills-MIT.txt`.
+- Lock detallado: `.agents/skills.lock.yml`.
+
+La skill `setup-ts-deep-modules` está marcada upstream como `in-progress`; la variante local es explicit-only y fue reducida al alcance contractual de BOAI-001/002.
+
+## Herramienta de workflow fijada
+
+### `Gentleman-Programming/gentle-ai`
+
+- Release: `v2.5.0-rc.3`
+- Commit: `8e5c79b08c14b5ecded4a449e7d21cd526f52e94`
+- Licencia: MIT
+- Uso: routing orgánico, SDD opcional, review/RDD opcional y skill registry en Antigravity.
+- Estado: herramienta externa instalada por el usuario; no se vendorea ningún binario.
+- Contrato: `GENTLE_AI.lock.yml` y `docs/13_ANTIGRAVITY_GENTLE_AI_WORKFLOW.md`.
 
 ## Código previsto para reutilización
 
@@ -48,10 +74,11 @@ Este archivo registra fuentes externas estudiadas o previstas para reutilizació
 
 ## Obligación de actualización
 
-Toda PR que incorpore código, fixtures, datos o diseño sustancial de un tercero debe actualizar:
+Toda PR que incorpore código, fixtures, datos, skills o diseño sustancial de un tercero debe actualizar:
 
 1. este archivo;
 2. `UPSTREAMS.lock.yml`;
-3. `docs/05_REUSE_STRATEGY.md`;
-4. los encabezados o comentarios de procedencia del módulo afectado;
-5. los tests que demuestren la adaptación.
+3. el lock específico (`.agents/skills.lock.yml`, `GENTLE_AI.lock.yml` u otro);
+4. `docs/05_REUSE_STRATEGY.md` o el documento de workflow aplicable;
+5. los encabezados/archivos de procedencia del módulo afectado;
+6. los tests que demuestren la adaptación.

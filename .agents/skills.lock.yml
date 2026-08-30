@@ -1,0 +1,81 @@
+schemaVersion: 1
+updatedAt: 2026-08-30
+installRoot: .agents/skills
+runtime: antigravity
+
+source:
+  catalog: https://skills.sh/mattpocock/skills
+  repository: https://github.com/mattpocock/skills
+  sha: 6654f6b60cd9d5be8b54c6fafe44346dabeb3b76
+  license: MIT
+
+skills:
+  - id: boai-domain-modeling
+    status: active
+    upstreamSkill: domain-modeling
+    upstreamPath: skills/engineering/domain-modeling
+    localPath: .agents/skills/boai-domain-modeling
+    invocation: model-invoked-or-explicit
+    modifications:
+      - translated-and-namespaced-for-project-scope
+      - adapted-adr-path-to-docs/decisions
+      - aligned-authority-with-issue-and-repository-contracts
+      - removed-any-workflow-authority-over-gentle-ai
+
+  - id: boai-codebase-design
+    status: active
+    upstreamSkill: codebase-design
+    upstreamPath: skills/engineering/codebase-design
+    localPath: .agents/skills/boai-codebase-design
+    invocation: model-invoked-or-explicit
+    modifications:
+      - translated-and-namespaced-for-project-scope
+      - aligned-with-adapter-sdk-and-package-layout
+      - replaced-parallel-subagent-design-pattern-with-sequential-antigravity-safe-process
+      - removed-any-routing-or-delivery-authority
+
+  - id: boai-module-boundaries
+    status: active
+    upstreamSkill: setup-ts-deep-modules
+    upstreamPath: skills/in-progress/setup-ts-deep-modules
+    upstreamMaturity: in-progress
+    localPath: .agents/skills/boai-module-boundaries
+    invocation: explicit-only
+    modifications:
+      - translated-and-namespaced-for-project-scope
+      - fixed-packages-root-to-packages
+      - aligned-with-boai-001-and-boai-002
+      - removed-generic-example-package-scaffolding
+      - required-pass-fail-pass-boundary-proof
+
+reviewedButDeferred:
+  - id: vitest
+    source: https://skills.sh/antfu/skills/vitest
+    reason: The published skill targets Vitest 5 beta; BOAI-001 has not selected or pinned the test framework version yet.
+  - id: pnpm
+    reason: Project setup is simple, global knowledge is sufficient and the reviewed catalog entry showed a security warning; do not add unnecessary instructions.
+  - id: zod
+    reason: Runtime schema library has not been selected by BOAI-001/BOAI-004.
+  - id: scraper-builder
+    reason: It overlaps the future Playwright adapter and could push browser-specific decisions into the generic adapter contract.
+
+intentionallyNotInstalled:
+  - tdd
+  - code-review
+  - planning
+  - to-spec
+  - to-issues
+  - github
+  - playwright
+  - postgresql
+  - turborepo
+  - nx
+
+precedence:
+  - current-user-request
+  - contractual-issue
+  - accepted-adrs-and-normative-docs
+  - root-and-nearest-agents-md
+  - gentle-ai-routing-and-lifecycle
+  - project-scoped-skill
+  - global-skill

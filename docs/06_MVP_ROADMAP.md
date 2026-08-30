@@ -2,7 +2,22 @@
 
 ## Estado actual
 
-**Etapa 0 — documentación y gobernanza.** No existe todavía implementación ejecutable.
+**Etapa 0 — documentación, skills y gobernanza.** No existe todavía implementación ejecutable.
+
+## Capa transversal: Antigravity + Gentle AI
+
+Todas las etapas usan el workflow definido en `docs/13_ANTIGRAVITY_GENTLE_AI_WORKFLOW.md`:
+
+- Gentle AI `v2.5.0-rc.3` fijado;
+- una issue por unidad de trabajo;
+- routing orgánico por acción;
+- SDD opcional y aceptado explícitamente;
+- fases SDD secuenciales con artifacts físicos y relectura;
+- un writer y verificación read-only;
+- review/RDD opt-in sin autoridad de delivery;
+- skills locales `boai-*` cargadas solo cuando aportan técnica relevante.
+
+El backlog puede sugerir una ruta inicial, pero Gentle AI debe reevaluarla al comenzar cada acción.
 
 ## Etapa 0 — Contratos y gobierno
 
@@ -16,13 +31,19 @@ Entregables:
 - seguridad;
 - backlog;
 - ADR;
+- `CONTEXT.md`;
 - `AGENTS.md` jerárquicos;
+- workflow Antigravity/Gentle AI;
+- skills locales auditadas;
+- locks de herramienta, skills y upstreams;
 - licencia y trazabilidad.
 
 Gate:
 
 - no quedan decisiones bloqueantes para iniciar el workspace;
 - las issues implementables citan criterios de aceptación;
+- Antigravity descubre las tres skills locales;
+- `gentle-ai doctor` no presenta bloqueos para comenzar;
 - no se afirma que el programa ya funciona.
 
 ## Etapa 1 — Núcleo local con fuente sintética
@@ -39,6 +60,12 @@ Implementar:
 - adapter sintético;
 - HTML, JSON y CSV;
 - revisión manual.
+
+Skills esperadas según subproblema:
+
+- `boai-codebase-design` para packages y seams;
+- `boai-module-boundaries` explícita para BOAI-001/002;
+- `boai-domain-modeling` para BOAI-002.
 
 Gate:
 
@@ -87,6 +114,8 @@ Probar:
 - cambio de contrato;
 - zero results confirmado.
 
+Esta etapa es candidata a SDD por investigación/decisión, pero solo si Gentle AI lo propone y el usuario acepta.
+
 Gate:
 
 - informe técnico que decida `GO`, `GO_WITH_LIMITATIONS` o `NO_GO`;
@@ -114,7 +143,7 @@ Gate:
 
 ## Etapa 5 — Fallback Playwright
 
-Solo si el spike demuestra necesidad.
+Solo si el spike demuestra necesidad. La decisión debe quedar en la issue/ADR o artifact aceptado; no se implementa por prevención.
 
 Implementar:
 
@@ -166,7 +195,8 @@ Validar extremo a extremo:
 - revisión y feedback;
 - limpieza por retención;
 - errores y diagnósticos;
-- CI.
+- CI;
+- evidencia de workflow y skills sin registry generado en Git.
 
 El MVP termina aquí.
 
