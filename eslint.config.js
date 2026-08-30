@@ -10,6 +10,8 @@ export default tseslint.config(
       '**/.turbo/**',
       '**/coverage/**',
       '**/*.tsbuildinfo',
+      '.atl/**',
+      '.agents/**',
     ],
   },
   js.configs.recommended,
@@ -19,7 +21,11 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['eslint.config.js', 'vitest.config.ts'],
+          allowDefaultProject: [
+            'eslint.config.js',
+            'vitest.config.ts',
+            'dependency-cruiser.config.cjs',
+          ],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -31,5 +37,18 @@ export default tseslint.config(
   {
     files: ['**/*.js', '**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
+    files: ['**/*.cjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        module: 'readonly',
+        exports: 'writable',
+        require: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+      },
+    },
   },
 );
