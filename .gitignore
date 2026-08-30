@@ -39,6 +39,10 @@ user-data-dir/
 *.sqlite-wal
 *.db
 
+# Gentle AI generated registries
+.atl/.skill-registry.cache.json
+.atl/skill-registry.md
+
 # Runtime artifacts
 screenshots/
 traces/
