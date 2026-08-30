@@ -68,7 +68,7 @@ intentionallyNotInstalled:
   - github
   - playwright
   - postgresql
-  - turborrepo
+  - turborepo
   - nx
 
 precedence:
