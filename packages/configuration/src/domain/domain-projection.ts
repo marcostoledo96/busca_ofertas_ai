@@ -5,6 +5,7 @@ import {
   type SavedSearch,
   type SourceSearchConfig,
 } from '@busca-ofertas-ai/core';
+import { ConfigurationError } from '../errors/configuration-error.js';
 import type { SavedSearchConfigurationV1 } from '../schema/v1/types.js';
 
 export interface ToDomainSavedSearchOptions {
@@ -17,9 +18,26 @@ export const toDomainSavedSearch = (
   config: SavedSearchConfigurationV1,
   options?: ToDomainSavedSearchOptions,
 ): SavedSearch => {
-  const timestamp = options?.clock ? options.clock.now() : new Date();
-  const createdAt = options?.createdAt ?? timestamp;
-  const updatedAt = options?.updatedAt ?? timestamp;
+  let createdAt: Date;
+  let updatedAt: Date;
+
+  if (options?.clock) {
+    const now = options.clock.now();
+    createdAt = options.createdAt ?? now;
+    updatedAt = options.updatedAt ?? now;
+  } else if (options?.createdAt && options?.updatedAt) {
+    createdAt = options.createdAt;
+    updatedAt = options.updatedAt;
+  } else {
+    throw new ConfigurationError({
+      code: 'CONFIG_INVARIANT_VIOLATION',
+      path: 'toDomainSavedSearch',
+      message:
+        'toDomainSavedSearch requires an injected Clock or explicit createdAt and updatedAt timestamps.',
+      suggestion:
+        'Provide a Clock instance (e.g. from createFakeClock or SystemClock) or explicit Date timestamps.',
+    });
+  }
 
   // Extract all distinct terms across sources
   const termsSet = new Set<string>();

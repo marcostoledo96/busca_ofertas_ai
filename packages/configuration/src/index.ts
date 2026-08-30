@@ -21,7 +21,11 @@ export {
 } from './errors/configuration-error.js';
 
 // Security & Secret Scanning
-export { type SecretViolation, detectForbiddenSecrets } from './security/secret-detector.js';
+export {
+  type SecretViolation,
+  MAX_ALLOWED_NESTING_DEPTH,
+  detectForbiddenSecrets,
+} from './security/secret-detector.js';
 
 // Schema v1 Types & Validators
 export {
@@ -80,9 +84,13 @@ export {
 // Codecs & Codec Parsers
 export {
   type ParseSavedSearchYamlOptions,
+  type ImportedSavedSearchConfiguration,
+  type ImportSavedSearchYamlOptions,
   validateSavedSearchConfiguration,
   parseSavedSearchYaml,
+  importSavedSearchYaml,
   serializeSavedSearchYaml,
+  exportSavedSearchYaml,
 } from './codecs/yaml-codec.js';
 
 // Domain Projection

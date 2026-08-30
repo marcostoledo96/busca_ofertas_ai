@@ -1,5 +1,7 @@
+import type { Clock, SavedSearch } from '@busca-ofertas-ai/core';
 import YAML from 'yaml';
 import { ZodError } from 'zod';
+import { toDomainSavedSearch } from '../domain/domain-projection.js';
 import { ConfigurationError, type ConfigurationIssue } from '../errors/configuration-error.js';
 import { isConfigurationErrorCode, type ConfigurationErrorCode } from '../errors/error-codes.js';
 import { defaultMigrationRegistry, MigrationRegistry } from '../migrations/migration-registry.js';
@@ -10,6 +12,17 @@ import { detectForbiddenSecrets } from '../security/secret-detector.js';
 export interface ParseSavedSearchYamlOptions {
   readonly migrationRegistry?: MigrationRegistry | undefined;
   readonly targetVersion?: number | undefined;
+}
+
+export interface ImportedSavedSearchConfiguration {
+  readonly configuration: SavedSearchConfigurationV1;
+  readonly savedSearch: SavedSearch;
+}
+
+export interface ImportSavedSearchYamlOptions extends ParseSavedSearchYamlOptions {
+  readonly clock?: Clock | undefined;
+  readonly createdAt?: Date | undefined;
+  readonly updatedAt?: Date | undefined;
 }
 
 const formatZodPath = (path: Array<string | number>): string => {
@@ -59,18 +72,28 @@ const mapZodIssuesToConfigurationIssues = (error: ZodError): ConfigurationIssue[
 };
 
 export const validateSavedSearchConfiguration = (doc: unknown): SavedSearchConfigurationV1 => {
-  // 1. Recursive forbidden secret scan on raw input document
+  // 1. Recursive forbidden secret and depth scan on raw input document
   const secretViolations = detectForbiddenSecrets(doc);
   if (secretViolations.length > 0) {
-    const issues: ConfigurationIssue[] = secretViolations.map((violation) => ({
-      code: 'CONFIG_SECRET_FORBIDDEN' as const,
-      path: violation.path,
-      message: `Inline secret is forbidden at ${violation.path}. Use sessionRef or SecretProvider.`,
-      suggestion: `Remove inline secret key "${violation.key}" and reference credentials via sessionRef or SecretProvider.`,
-    }));
+    const issues: ConfigurationIssue[] = secretViolations.map((violation) => {
+      if (violation.code === 'CONFIG_MAX_DEPTH_EXCEEDED') {
+        return {
+          code: 'CONFIG_MAX_DEPTH_EXCEEDED' as const,
+          path: violation.path,
+          message: 'Configuration nesting exceeds supported maximum depth.',
+          suggestion: 'Flatten source.options or reduce object nesting.',
+        };
+      }
+      return {
+        code: 'CONFIG_SECRET_FORBIDDEN' as const,
+        path: violation.path,
+        message: `Inline secret is forbidden at ${violation.path}. Use sessionRef or SecretProvider.`,
+        suggestion: `Remove inline secret key "${violation.key}" and reference credentials via sessionRef or SecretProvider.`,
+      };
+    });
     const primary = issues[0]!;
     throw new ConfigurationError({
-      code: 'CONFIG_SECRET_FORBIDDEN',
+      code: primary.code,
       path: primary.path,
       message: primary.message,
       ...(primary.suggestion !== undefined ? { suggestion: primary.suggestion } : {}),
@@ -185,6 +208,22 @@ export const parseSavedSearchYaml = (
   return validateSavedSearchConfiguration(migratedResult.document);
 };
 
+export const importSavedSearchYaml = (
+  yamlText: string,
+  options?: ImportSavedSearchYamlOptions,
+): ImportedSavedSearchConfiguration => {
+  const configuration = parseSavedSearchYaml(yamlText, options);
+  const savedSearch = toDomainSavedSearch(configuration, {
+    clock: options?.clock,
+    createdAt: options?.createdAt,
+    updatedAt: options?.updatedAt,
+  });
+  return {
+    configuration,
+    savedSearch,
+  };
+};
+
 export const serializeSavedSearchYaml = (config: SavedSearchConfigurationV1): string => {
   return YAML.stringify(config, {
     indent: 2,
@@ -192,4 +231,11 @@ export const serializeSavedSearchYaml = (config: SavedSearchConfigurationV1): st
     defaultStringType: 'PLAIN',
     defaultKeyType: 'PLAIN',
   });
+};
+
+export const exportSavedSearchYaml = (
+  source: ImportedSavedSearchConfiguration | SavedSearchConfigurationV1,
+): string => {
+  const config = 'configuration' in source ? source.configuration : source;
+  return serializeSavedSearchYaml(config);
 };
