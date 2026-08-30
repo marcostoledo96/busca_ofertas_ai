@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@busca-ofertas-ai/adapter-sdk':
+        specifier: workspace:*
+        version: link:packages/adapter-sdk
       '@busca-ofertas-ai/core':
         specifier: workspace:*
         version: link:packages/core
@@ -35,6 +38,16 @@ importers:
       typescript-eslint:
         specifier: ^8.25.0
         version: 8.68.0(eslint@9.39.5)(typescript@5.8.3)
+      vitest:
+        specifier: ^3.0.7
+        version: 3.2.7(@types/node@22.20.1)
+
+  packages/adapter-sdk:
+    dependencies:
+      '@busca-ofertas-ai/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       vitest:
         specifier: ^3.0.7
         version: 3.2.7(@types/node@22.20.1)

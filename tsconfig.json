@@ -1,4 +1,8 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/core" }, { "path": "./tests" }]
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/adapter-sdk" },
+    { "path": "./tests" }
+  ]
 }
