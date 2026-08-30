@@ -7,6 +7,55 @@
 - Épicas: `E0` a `E8`.
 - Los números reales de GitHub pueden cambiar; el ID estable debe conservarse en título, branch, PR y documentación.
 
+## Seguimiento en GitHub
+
+- Issue índice: [#41 — Roadmap general](https://github.com/marcostoledo96/busca_ofertas_ai/issues/41).
+- Implementación del MVP: `BOAI-001` a `BOAI-031`.
+- El MVP termina contractualmente en [#32 — BOAI-031](https://github.com/marcostoledo96/busca_ofertas_ai/issues/32).
+- Trabajo posterior al MVP: `BOAI-032` a `BOAI-039`.
+
+| ID estable | Issue |
+|---|---:|
+| BOAI-001 | [#2](https://github.com/marcostoledo96/busca_ofertas_ai/issues/2) |
+| BOAI-002 | [#3](https://github.com/marcostoledo96/busca_ofertas_ai/issues/3) |
+| BOAI-003 | [#4](https://github.com/marcostoledo96/busca_ofertas_ai/issues/4) |
+| BOAI-004 | [#5](https://github.com/marcostoledo96/busca_ofertas_ai/issues/5) |
+| BOAI-005 | [#6](https://github.com/marcostoledo96/busca_ofertas_ai/issues/6) |
+| BOAI-006 | [#7](https://github.com/marcostoledo96/busca_ofertas_ai/issues/7) |
+| BOAI-007 | [#8](https://github.com/marcostoledo96/busca_ofertas_ai/issues/8) |
+| BOAI-008 | [#9](https://github.com/marcostoledo96/busca_ofertas_ai/issues/9) |
+| BOAI-009 | [#10](https://github.com/marcostoledo96/busca_ofertas_ai/issues/10) |
+| BOAI-010 | [#11](https://github.com/marcostoledo96/busca_ofertas_ai/issues/11) |
+| BOAI-011 | [#12](https://github.com/marcostoledo96/busca_ofertas_ai/issues/12) |
+| BOAI-012 | [#13](https://github.com/marcostoledo96/busca_ofertas_ai/issues/13) |
+| BOAI-013 | [#14](https://github.com/marcostoledo96/busca_ofertas_ai/issues/14) |
+| BOAI-014 | [#15](https://github.com/marcostoledo96/busca_ofertas_ai/issues/15) |
+| BOAI-015 | [#16](https://github.com/marcostoledo96/busca_ofertas_ai/issues/16) |
+| BOAI-016 | [#17](https://github.com/marcostoledo96/busca_ofertas_ai/issues/17) |
+| BOAI-017 | [#18](https://github.com/marcostoledo96/busca_ofertas_ai/issues/18) |
+| BOAI-018 | [#19](https://github.com/marcostoledo96/busca_ofertas_ai/issues/19) |
+| BOAI-019 | [#20](https://github.com/marcostoledo96/busca_ofertas_ai/issues/20) |
+| BOAI-020 | [#21](https://github.com/marcostoledo96/busca_ofertas_ai/issues/21) |
+| BOAI-021 | [#22](https://github.com/marcostoledo96/busca_ofertas_ai/issues/22) |
+| BOAI-022 | [#23](https://github.com/marcostoledo96/busca_ofertas_ai/issues/23) |
+| BOAI-023 | [#24](https://github.com/marcostoledo96/busca_ofertas_ai/issues/24) |
+| BOAI-024 | [#25](https://github.com/marcostoledo96/busca_ofertas_ai/issues/25) |
+| BOAI-025 | [#26](https://github.com/marcostoledo96/busca_ofertas_ai/issues/26) |
+| BOAI-026 | [#27](https://github.com/marcostoledo96/busca_ofertas_ai/issues/27) |
+| BOAI-027 | [#28](https://github.com/marcostoledo96/busca_ofertas_ai/issues/28) |
+| BOAI-028 | [#29](https://github.com/marcostoledo96/busca_ofertas_ai/issues/29) |
+| BOAI-029 | [#30](https://github.com/marcostoledo96/busca_ofertas_ai/issues/30) |
+| BOAI-030 | [#31](https://github.com/marcostoledo96/busca_ofertas_ai/issues/31) |
+| BOAI-031 | [#32](https://github.com/marcostoledo96/busca_ofertas_ai/issues/32) |
+| BOAI-032 | [#33](https://github.com/marcostoledo96/busca_ofertas_ai/issues/33) |
+| BOAI-033 | [#34](https://github.com/marcostoledo96/busca_ofertas_ai/issues/34) |
+| BOAI-034 | [#35](https://github.com/marcostoledo96/busca_ofertas_ai/issues/35) |
+| BOAI-035 | [#36](https://github.com/marcostoledo96/busca_ofertas_ai/issues/36) |
+| BOAI-036 | [#37](https://github.com/marcostoledo96/busca_ofertas_ai/issues/37) |
+| BOAI-037 | [#38](https://github.com/marcostoledo96/busca_ofertas_ai/issues/38) |
+| BOAI-038 | [#39](https://github.com/marcostoledo96/busca_ofertas_ai/issues/39) |
+| BOAI-039 | [#40](https://github.com/marcostoledo96/busca_ofertas_ai/issues/40) |
+
 ## E0 — Fundación y contratos
 
 | ID | P | Título | Depende de |
