@@ -1,28 +1,31 @@
 /**
  * Sanitization and secret redaction utilities for Busca Ofertas AI.
- * Ensures tokens, passwords, cookies, authorization headers, and sentinel secrets
- * (such as SUPER_SECRET_TOKEN_DO_NOT_LEAK) never leak into errors, logs, diagnostics, or artifacts.
+ * Ensures tokens, passwords, cookies, authorization headers, and API keys
+ * never leak into errors, logs, diagnostics, or artifacts.
  */
 
-export const REDACTED_PLACEHOLDER = '[REDACTED]';
+export const REDACTED_PLACEHOLDER = '[REDACTED]' as const;
+export const MAX_SANITIZATION_DEPTH = 10;
 
-const SENSITIVE_KEY_PATTERNS = [
+const SENSITIVE_KEY_PATTERNS: RegExp[] = [
   /token/i,
   /password/i,
   /secret/i,
   /auth/i,
   /cookie/i,
   /session/i,
-  /key/i,
+  /(?:^|[_\-.])key$/i,
+  /(?:api|access|secret|private|public|session|auth|client|encryption)[_\-.]?key/i,
   /bearer/i,
   /credential/i,
+  /jwt/i,
 ];
 
 const KNOWN_SENSITIVE_STRING_PATTERNS: RegExp[] = [
-  /SUPER_SECRET_TOKEN_DO_NOT_LEAK/g,
   /Bearer\s+[A-Za-z0-9_\-.~+/=]+/gi,
-  /(?:password|token|secret|api_?key|access_?token)\s*[:=]\s*["']?[^"'\s,;]+["']?/gi,
+  /(?:password|token|secret|api_?key|access_?token|credential|authorization)\s*[:=]\s*["']?[^"'\s,;]+["']?/gi,
   /(?:Set-Cookie|Cookie):\s*[^;\r\n]+/gi,
+  /(?:token|access_token|refresh_token|api_key|apikey|secret|password)=[^&\s]+/gi,
 ];
 
 /**
@@ -53,9 +56,15 @@ export function sanitizeEvidence(evidence?: readonly string[]): readonly string[
 
 /**
  * Recursively redacts sensitive keys and values in plain objects and arrays.
+ * When nesting exceeds MAX_SANITIZATION_DEPTH, returns REDACTED_PLACEHOLDER
+ * to guarantee that deeply nested secrets can never bypass sanitization.
  */
 export function sanitizeData<T>(data: T, depth = 0): T {
-  if (depth > 10 || data === null || data === undefined) {
+  if (depth > MAX_SANITIZATION_DEPTH) {
+    return REDACTED_PLACEHOLDER as unknown as T;
+  }
+
+  if (data === null || data === undefined) {
     return data;
   }
 
