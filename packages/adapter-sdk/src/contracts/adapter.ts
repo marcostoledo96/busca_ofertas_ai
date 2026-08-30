@@ -99,7 +99,7 @@ export function validateAdapterMethodCoherence(adapter: SourceAdapter): MethodCo
 export interface SourceAdapter {
   readonly id: string;
   readonly version: string;
-  readonly sdkVersion?: string;
+  readonly sdkVersion: string;
   readonly capabilities: SourceCapabilities;
 
   /**

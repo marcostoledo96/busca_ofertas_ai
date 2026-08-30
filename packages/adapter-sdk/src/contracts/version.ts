@@ -68,7 +68,7 @@ export function checkAdapterCompatibility(
     };
   }
 
-  // Pre-1.0: 0.y.z requires exact minor version match
+  // Pre-1.0: 0.y.z requires exact minor version match, and adapter patch must be <= target patch
   if (parsedTarget.major === 0) {
     if (parsedAdapter.major !== 0 || parsedAdapter.minor !== parsedTarget.minor) {
       return {
@@ -78,6 +78,16 @@ export function checkAdapterCompatibility(
         reason: `Pre-1.0 SDK requires matching minor version. Expected 0.${parsedTarget.minor}.x, got ${adapterSdkVersion}`,
       };
     }
+
+    if (parsedAdapter.patch > parsedTarget.patch) {
+      return {
+        compatible: false,
+        sdkVersion: targetSdkVersion,
+        adapterSdkVersion,
+        reason: `Adapter requires newer patch version 0.${parsedAdapter.minor}.${parsedAdapter.patch} than target SDK 0.${parsedTarget.minor}.${parsedTarget.patch}`,
+      };
+    }
+
     return {
       compatible: true,
       sdkVersion: targetSdkVersion,
@@ -85,13 +95,25 @@ export function checkAdapterCompatibility(
     };
   }
 
-  // 1.0+: requires matching major version, and adapter must be <= target
+  // 1.0+: requires matching major version, and adapter must not require newer minor/patch than target host
   if (parsedAdapter.major !== parsedTarget.major) {
     return {
       compatible: false,
       sdkVersion: targetSdkVersion,
       adapterSdkVersion,
       reason: `Incompatible major version. Expected ${parsedTarget.major}.x.x, got ${adapterSdkVersion}`,
+    };
+  }
+
+  if (
+    parsedAdapter.minor > parsedTarget.minor ||
+    (parsedAdapter.minor === parsedTarget.minor && parsedAdapter.patch > parsedTarget.patch)
+  ) {
+    return {
+      compatible: false,
+      sdkVersion: targetSdkVersion,
+      adapterSdkVersion,
+      reason: `Adapter requires newer SDK version ${adapterSdkVersion} than target ${targetSdkVersion}`,
     };
   }
 

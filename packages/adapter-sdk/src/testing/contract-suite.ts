@@ -14,17 +14,45 @@ import {
   validateCapabilities,
 } from '../index.js';
 
+export type AdapterConformanceScenario =
+  | 'SUCCESS'
+  | 'ZERO_RESULTS'
+  | 'NETWORK_ERROR'
+  | 'TIMEOUT'
+  | 'AUTHENTICATION_REQUIRED'
+  | 'RATE_LIMITED';
+
 export interface SourceAdapterContractSuiteOptions {
   readonly adapterName: string;
   readonly createAdapter: () => SourceAdapter | Promise<SourceAdapter>;
+  readonly configureScenario: (
+    adapter: SourceAdapter,
+    scenario: AdapterConformanceScenario,
+  ) => void | Promise<void>;
   readonly createContext?: (clock?: Clock) => AdapterContext | Promise<AdapterContext>;
   readonly validSearchRequest?: (control: OperationControl) => SourceSearchRequest;
   readonly expectedCapabilities?: Partial<SourceCapabilities>;
-  readonly simulateFailure?: (
-    adapter: SourceAdapter,
-    errorType: 'network' | 'timeout' | 'auth' | 'rateLimit',
-  ) => void | Promise<void>;
-  readonly simulateZeroResults?: (adapter: SourceAdapter) => void | Promise<void>;
+}
+
+/**
+ * Validates that contract suite options contain all mandatory scenario hooks.
+ * Prevents test configurations from silently passing without exercising critical scenarios.
+ */
+export function validateContractSuiteOptions(options: SourceAdapterContractSuiteOptions): void {
+  if (!options) {
+    throw new Error('Contract suite options cannot be null or undefined');
+  }
+  if (!options.adapterName || typeof options.adapterName !== 'string') {
+    throw new Error('Contract suite requires a non-empty string adapterName');
+  }
+  if (typeof options.createAdapter !== 'function') {
+    throw new Error('Contract suite requires a createAdapter factory function');
+  }
+  if (typeof options.configureScenario !== 'function') {
+    throw new Error(
+      'Contract suite requires a configureScenario hook to ensure critical scenarios (SUCCESS, ZERO_RESULTS, NETWORK_ERROR, TIMEOUT) are not silently skipped',
+    );
+  }
 }
 
 /**
@@ -56,12 +84,16 @@ export function createMockAdapterContext(clock?: Clock): AdapterContext {
 
 /**
  * Reusable Vitest contract test suite for validating SourceAdapter implementations.
- * Can be executed by any concrete adapter (e.g. synthetic adapter, facebook adapters).
+ * Enforces identity, versioning, capabilities, method coherence, lifecycle idempotency,
+ * cancellation, deadlines, pagination, and strict differentiation between SUCCESS, ZERO_RESULTS, and external errors.
  */
 export function runSourceAdapterContract(options: SourceAdapterContractSuiteOptions): void {
+  validateContractSuiteOptions(options);
+
   const {
     adapterName,
     createAdapter,
+    configureScenario,
     createContext = () => createMockAdapterContext(),
     validSearchRequest = (control: OperationControl) => ({
       savedSearchId: 'test-saved-search-001',
@@ -98,11 +130,11 @@ export function runSourceAdapterContract(options: SourceAdapterContractSuiteOpti
         expect(adapter.version.trim().length).toBeGreaterThan(0);
       });
 
-      it('is compatible with the current Adapter SDK version when sdkVersion is declared', () => {
-        if (adapter.sdkVersion) {
-          const compat = checkAdapterCompatibility(adapter.sdkVersion);
-          expect(compat.compatible).toBe(true);
-        }
+      it('declares a mandatory non-empty sdkVersion compatible with ADAPTER_SDK_VERSION', () => {
+        expect(typeof adapter.sdkVersion).toBe('string');
+        expect(adapter.sdkVersion.trim().length).toBeGreaterThan(0);
+        const compat = checkAdapterCompatibility(adapter.sdkVersion);
+        expect(compat.compatible).toBe(true);
       });
     });
 
@@ -149,15 +181,23 @@ export function runSourceAdapterContract(options: SourceAdapterContractSuiteOpti
     });
 
     describe('4. Cancellation and Deadline Control', () => {
-      it('aborts search operation when AbortSignal is triggered', async () => {
+      it('aborts search operation with typed TIMEOUT error when AbortSignal is triggered', async () => {
         const controller = new AbortController();
         controller.abort();
 
         const request = validSearchRequest({ signal: controller.signal });
-        await expect(adapter.search(request)).rejects.toThrow();
+        try {
+          await adapter.search(request);
+          expect.unreachable('Expected search to reject when AbortSignal is triggered');
+        } catch (error) {
+          expect(isSourceAdapterError(error)).toBe(true);
+          if (isSourceAdapterError(error)) {
+            expect(error.code).toBe('TIMEOUT');
+          }
+        }
       });
 
-      it('rejects search with TIMEOUT when deadline is already in the past', async () => {
+      it('rejects search with typed TIMEOUT error when deadline is already in the past', async () => {
         const controller = new AbortController();
         const pastDeadline = new Date(context.clock.now().getTime() - 10000);
 
@@ -166,12 +206,21 @@ export function runSourceAdapterContract(options: SourceAdapterContractSuiteOpti
           deadlineAt: pastDeadline,
         });
 
-        await expect(adapter.search(request)).rejects.toThrow();
+        try {
+          await adapter.search(request);
+          expect.unreachable('Expected search to reject when deadline is already in the past');
+        } catch (error) {
+          expect(isSourceAdapterError(error)).toBe(true);
+          if (isSourceAdapterError(error)) {
+            expect(error.code).toBe('TIMEOUT');
+          }
+        }
       });
     });
 
     describe('5. Search Result Invariants (SUCCESS vs ZERO_RESULTS_CONFIRMED)', () => {
       it('returns SUCCESS with items >= 1 and valid diagnostics on normal search', async () => {
+        await configureScenario(adapter, 'SUCCESS');
         const controller = new AbortController();
         const request = validSearchRequest({ signal: controller.signal });
 
@@ -188,6 +237,7 @@ export function runSourceAdapterContract(options: SourceAdapterContractSuiteOpti
       });
 
       it('enforces that candidates have non-empty externalId, canonicalUrl, and title', async () => {
+        await configureScenario(adapter, 'SUCCESS');
         const controller = new AbortController();
         const request = validSearchRequest({ signal: controller.signal });
 
@@ -205,42 +255,56 @@ export function runSourceAdapterContract(options: SourceAdapterContractSuiteOpti
         }
       });
 
-      it('returns ZERO_RESULTS_CONFIRMED with items: [] when 0 results are found', async () => {
-        if (options.simulateZeroResults) {
-          await options.simulateZeroResults(adapter);
-          const controller = new AbortController();
-          const request = validSearchRequest({ signal: controller.signal });
+      it('returns ZERO_RESULTS_CONFIRMED with items: [] when valid search yields 0 items', async () => {
+        await configureScenario(adapter, 'ZERO_RESULTS');
+        const controller = new AbortController();
+        const request = validSearchRequest({ signal: controller.signal });
 
-          const result = await adapter.search(request);
-          expect(result.status).toBe('ZERO_RESULTS_CONFIRMED');
-          if (result.status === 'ZERO_RESULTS_CONFIRMED') {
-            expect(result.items).toHaveLength(0);
-            expect(result.diagnostics.rawItemsCount).toBe(0);
-          }
+        const result = await adapter.search(request);
+        expect(result.status).toBe('ZERO_RESULTS_CONFIRMED');
+        if (result.status === 'ZERO_RESULTS_CONFIRMED') {
+          expect(result.items).toHaveLength(0);
+          expect(result.diagnostics.rawItemsCount).toBe(0);
         }
       });
     });
 
     describe('6. Failure Model: Source Failure != Zero Results', () => {
-      it('throws SourceAdapterError on external failure and never returns empty success', async () => {
-        if (options.simulateFailure) {
-          await options.simulateFailure(adapter, 'network');
-          const controller = new AbortController();
-          const request = validSearchRequest({ signal: controller.signal });
+      it('throws typed SourceAdapterError on external network failure and never returns empty success', async () => {
+        await configureScenario(adapter, 'NETWORK_ERROR');
+        const controller = new AbortController();
+        const request = validSearchRequest({ signal: controller.signal });
 
-          try {
-            const result = await adapter.search(request);
-            // Must not reach here
-            expect.unreachable(
-              `Expected search to throw SourceAdapterError, but returned status: ${(result as { status?: string }).status}`,
-            );
-          } catch (error) {
-            expect(isSourceAdapterError(error)).toBe(true);
-            if (isSourceAdapterError(error)) {
-              expect(error.code).toBe('NETWORK_ERROR');
-              expect(typeof error.retryable).toBe('boolean');
-              expect(Array.isArray(error.evidence)).toBe(true);
-            }
+        try {
+          const result = await adapter.search(request);
+          expect.unreachable(
+            `Expected search to throw SourceAdapterError, but returned status: ${(result as { status?: string }).status}`,
+          );
+        } catch (error) {
+          expect(isSourceAdapterError(error)).toBe(true);
+          if (isSourceAdapterError(error)) {
+            expect(error.code).toBe('NETWORK_ERROR');
+            expect(error.retryable).toBe(true);
+            expect(Array.isArray(error.evidence)).toBe(true);
+          }
+        }
+      });
+
+      it('throws typed SourceAdapterError on rate limit and never returns zero results', async () => {
+        await configureScenario(adapter, 'RATE_LIMITED');
+        const controller = new AbortController();
+        const request = validSearchRequest({ signal: controller.signal });
+
+        try {
+          const result = await adapter.search(request);
+          expect.unreachable(
+            `Expected search to throw SourceAdapterError, but returned status: ${(result as { status?: string }).status}`,
+          );
+        } catch (error) {
+          expect(isSourceAdapterError(error)).toBe(true);
+          if (isSourceAdapterError(error)) {
+            expect(error.code).toBe('RATE_LIMITED');
+            expect(error.retryable).toBe(true);
           }
         }
       });
@@ -248,6 +312,7 @@ export function runSourceAdapterContract(options: SourceAdapterContractSuiteOpti
 
     describe('7. Pagination Limits & Diagnostics', () => {
       it('respects maxItems pagination limit and reports accurate diagnostics', async () => {
+        await configureScenario(adapter, 'SUCCESS');
         const controller = new AbortController();
         const request: SourceSearchRequest = {
           ...validSearchRequest({ signal: controller.signal }),

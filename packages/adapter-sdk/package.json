@@ -27,5 +27,16 @@
   },
   "dependencies": {
     "@busca-ofertas-ai/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "vitest": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "vitest": "^3.0.7"
   }
 }

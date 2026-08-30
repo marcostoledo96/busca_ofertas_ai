@@ -10,7 +10,9 @@ export {
 } from './testing/fake-adapter.js';
 
 export {
+  type AdapterConformanceScenario,
   type SourceAdapterContractSuiteOptions,
   createMockAdapterContext,
   runSourceAdapterContract,
+  validateContractSuiteOptions,
 } from './testing/contract-suite.js';
