@@ -2,7 +2,32 @@
 
 Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunidades provenientes de múltiples fuentes. El primer caso de uso será encontrar **Nintendo Switch Lite en Facebook Marketplace dentro de AMBA**, pero el núcleo se diseña para admitir otros productos, precios, monedas, sitios, inmuebles y vehículos sin modificar la lógica central.
 
-> Estado actual: **producto, arquitectura, workflow y backlog definidos; implementación todavía no iniciada**.
+> Estado actual: **workspace TypeScript inicializado con quality gates locales (`BOAI-001`); la lógica de dominio, adaptadores, persistencia y CLI se implementarán en las siguientes etapas del roadmap**.
+
+## Requisitos
+
+- **Node.js**: `22.0.0` o superior (`>=22.0.0`)
+- **pnpm**: `9.0.0` o superior (versión fijada del repositorio: `10.33.2`)
+
+## Instalación
+
+```bash
+pnpm install --frozen-lockfile
+```
+
+## Comandos disponibles
+
+Todos los scripts se ejecutan desde la raíz del monorepo:
+
+- `pnpm format:check`: verifica el formato del código mediante Prettier.
+- `pnpm format`: formatea automáticamente los archivos compatibles mediante Prettier.
+- `pnpm lint`: ejecuta ESLint con reglas TypeScript estrictas, límites de export maps y verificación de tipos.
+- `pnpm lint:boundaries`: valida las reglas arquitectónicas y límites de módulos con dependency-cruiser.
+- `pnpm typecheck`: verifica los tipos en todo el monorepo sin emitir archivos mediante TypeScript (`tsc -b --noEmit`).
+- `pnpm test`: compila los paquetes del workspace y ejecuta la suite de tests locales mediante Vitest.
+- `pnpm test:watch`: ejecuta Vitest en modo interactivo/watch.
+- `pnpm build`: compila los paquetes del workspace mediante TypeScript (`tsc -b`).
+- `pnpm clean`: limpia los artefactos de build y cachés de compilación.
 
 ## Objetivo
 
