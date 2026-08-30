@@ -1,0 +1,59 @@
+version: 1
+updatedAt: 2026-08-30
+
+upstreams:
+  - id: secondhand-mcp
+    repository: https://github.com/jlsookiki/secondhand-mcp
+    sha: 6241a770013348c3f69db3a5301999c536e0e700
+    license: MIT
+    role: planned-code-donor
+    allowedUses:
+      - facebook-graphql-collector
+      - retry-and-backoff
+      - parser-tests
+    status: not-yet-incorporated
+
+  - id: facebook-marketplace-nationwide
+    repository: https://github.com/gmoz22/facebook-marketplace-nationwide
+    sha: d5f02ea075e89e6f8e2460cb218f1077dcaee2e8
+    license: MIT
+    role: planned-data-donor
+    allowedUses:
+      - argentina-location-identifiers
+      - marketplace-query-parameters
+    status: not-yet-incorporated
+
+  - id: busca-empleos
+    repository: https://github.com/marcostoledo96/busca_empleos
+    sha: 38455d152963794a8e07a5b324a2c0f03dd265e3
+    license: owner-authorized-reuse
+    role: owned-code-reference
+    allowedUses:
+      - source-registry-pattern
+      - normalization-pattern
+      - deterministic-rules
+      - strict-ai-parser
+      - evaluation-cache
+      - test-structure
+    status: not-yet-incorporated
+
+  - id: ai-marketplace-monitor
+    repository: https://github.com/BoPeng/ai-marketplace-monitor
+    sha: 16394b3e2a8c232f6d78a942fb85237f4e193a85
+    license: AGPL-3.0
+    role: reference-only
+    allowedUses:
+      - functional-comparison
+      - layout-study
+      - test-case-inspiration
+    status: code-copy-prohibited-without-license-decision
+
+  - id: fb-car-bot
+    repository: https://github.com/evanoseen/fb-car-bot
+    sha: c0f293dc24153bc73500bf6d26033b3064f0d0eb
+    license: MIT
+    role: reference-only
+    allowedUses:
+      - local-session-pattern
+      - operational-reference
+    status: code-copy-requires-independent-review

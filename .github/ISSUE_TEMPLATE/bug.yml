@@ -1,0 +1,50 @@
+name: Defecto
+description: Reportar un comportamiento reproducible
+title: "[BUG][P?] "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Comportamiento observado
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportamiento esperado
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Pasos mínimos de reproducción
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidencia
+      description: Logs sanitizados, fixture, run ID o captura sin secretos.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impacto
+    validations:
+      required: true
+  - type: textarea
+    id: regression
+    attributes:
+      label: Test de regresión esperado
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Seguridad
+      options:
+        - label: Verifiqué que la evidencia no contiene cookies, tokens ni datos personales innecesarios.
+          required: true
