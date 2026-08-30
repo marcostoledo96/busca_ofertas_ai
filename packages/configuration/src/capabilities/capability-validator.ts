@@ -85,6 +85,22 @@ export const validateSearchCapabilities = (
       });
     }
 
+    // 1. Text-search sources must provide at least one non-empty query when enabled
+    if (
+      entry.capabilities.textSearch &&
+      (!sourceConfig.queries ||
+        sourceConfig.queries.length === 0 ||
+        sourceConfig.queries.some((q) => typeof q !== 'string' || q.trim().length === 0))
+    ) {
+      throw new ConfigurationError({
+        code: 'CONFIG_QUERY_REQUIRED',
+        path: `sources[${i}].queries`,
+        sourceId: sourceConfig.id,
+        message: `Enabled source "${sourceConfig.id}" requires at least one search query because it declares textSearch capability.`,
+        suggestion: `Add at least one non-empty search query to sources[${i}].queries, or configure a source that does not require text search.`,
+      });
+    }
+
     const requiredCaps = deriveRequiredCapabilities(sourceConfig, config);
     for (const req of requiredCaps) {
       if (!entry.capabilities[req.capability]) {

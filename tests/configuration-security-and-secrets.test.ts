@@ -3,10 +3,12 @@ import {
   validateSavedSearchConfiguration,
   ConfigurationError,
   detectForbiddenSecrets,
+  MAX_ALLOWED_NESTING_DEPTH,
 } from '@busca-ofertas-ai/configuration';
 
 describe('Configuration Security and Inline Secret Prevention (BOAI-004)', () => {
   const SECRET_SENTINEL = 'INLINE_SECRET_MUST_NOT_LEAK_82F1';
+  const DEEP_SECRET_SENTINEL = 'DEEP_INLINE_SECRET_SHOULD_NOT_PASS_99A2';
 
   const createBaseConfig = (): Record<string, unknown> => ({
     schemaVersion: 1,
@@ -145,6 +147,43 @@ describe('Configuration Security and Inline Secret Prevention (BOAI-004)', () =>
         expect(configErr.toFormattedString().includes(SECRET_SENTINEL)).toBe(false);
         expect(JSON.stringify(configErr.toJSON()).includes(SECRET_SENTINEL)).toBe(false);
       }
+    }
+  });
+
+  it('rejects deeply nested options exceeding maximum depth and prevents secret bypass', () => {
+    const config = createBaseConfig();
+    const sources = config['sources'] as Array<Record<string, unknown>>;
+
+    // Build 25 levels of nested objects inside options with a secret at the bottom
+    let currentLevel: Record<string, unknown> = {
+      token: DEEP_SECRET_SENTINEL,
+    };
+    for (let depth = MAX_ALLOWED_NESTING_DEPTH + 5; depth >= 1; depth--) {
+      currentLevel = {
+        [`level_${depth}`]: currentLevel,
+      };
+    }
+    sources[0] = {
+      ...sources[0],
+      options: currentLevel,
+    };
+
+    try {
+      validateSavedSearchConfiguration(config);
+      expect.unreachable('Should have rejected configuration exceeding max depth');
+    } catch (err: unknown) {
+      expect(err).toBeInstanceOf(ConfigurationError);
+      const configErr = err as ConfigurationError;
+
+      expect(configErr.code).toBe('CONFIG_MAX_DEPTH_EXCEEDED');
+      expect(configErr.message).toContain('Configuration nesting exceeds supported maximum depth');
+      expect(configErr.suggestion).toContain('Flatten');
+
+      // CRITICAL: Ensure deep secret sentinel NEVER leaks into error messages or serialization
+      expect(configErr.message.includes(DEEP_SECRET_SENTINEL)).toBe(false);
+      expect(configErr.toFormattedString().includes(DEEP_SECRET_SENTINEL)).toBe(false);
+      expect(JSON.stringify(configErr.toJSON()).includes(DEEP_SECRET_SENTINEL)).toBe(false);
+      expect(JSON.stringify(configErr).includes(DEEP_SECRET_SENTINEL)).toBe(false);
     }
   });
 
