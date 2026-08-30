@@ -18,10 +18,13 @@ export {
   isAbortedOrExpired,
   type LogEventContext,
   type StructuredLogger,
+  createSanitizedLogger,
   type SecretProvider,
   type WriteArtifactParams,
   type RawArtifactWriter,
+  createSanitizedArtifactWriter,
   type AdapterContext,
+  createSanitizedAdapterContext,
 } from './contracts/context.js';
 
 // Adapter & Capabilities
@@ -78,6 +81,7 @@ export {
 
 export {
   REDACTED_PLACEHOLDER,
+  MAX_SANITIZATION_DEPTH,
   sanitizeString,
   sanitizeEvidence,
   sanitizeData,

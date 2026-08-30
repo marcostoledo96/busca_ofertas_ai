@@ -9,6 +9,8 @@ import type {
 } from '../index.js';
 import {
   checkAdapterCompatibility,
+  createSanitizedArtifactWriter,
+  createSanitizedLogger,
   isSourceAdapterError,
   validateAdapterMethodCoherence,
   validateCapabilities,
@@ -64,17 +66,17 @@ export function createMockAdapterContext(clock?: Clock): AdapterContext {
 
   return {
     runId: 'contract-test-run-001',
-    logger: {
+    logger: createSanitizedLogger({
       debug: () => {},
       info: () => {},
       warn: () => {},
       error: () => {},
-    },
+    }),
     clock: currentClock,
     abortSignal: abortController.signal,
-    artifactWriter: {
+    artifactWriter: createSanitizedArtifactWriter({
       writeArtifact: () => Promise.resolve('artifact-ref-001'),
-    },
+    }),
     secretProvider: {
       getSecret: () => Promise.resolve(null),
     },
