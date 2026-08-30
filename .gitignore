@@ -1,0 +1,62 @@
+# Dependencies and build
+node_modules/
+dist/
+build/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# Package manager caches
+.pnpm-store/
+.yarn/
+.npm/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.test.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local application state
+.data/
+data/
+.local/
+reports/
+raw/
+logs/
+sessions/
+.auth/
+playwright/.auth/
+storageState*.json
+user-data-dir/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# Runtime artifacts
+screenshots/
+traces/
+test-results/
+playwright-report/
+*.har
+*.log
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Temporary files
+.tmp/
+tmp/
+temp/
+*.tmp
