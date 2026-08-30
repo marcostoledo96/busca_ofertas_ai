@@ -6,5 +6,9 @@
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo"
   },
   "include": ["**/*"],
-  "references": [{ "path": "../packages/core" }, { "path": "../packages/adapter-sdk" }]
+  "references": [
+    { "path": "../packages/core" },
+    { "path": "../packages/adapter-sdk" },
+    { "path": "../packages/configuration" }
+  ]
 }
