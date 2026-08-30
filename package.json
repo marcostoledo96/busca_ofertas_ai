@@ -14,6 +14,7 @@
     "lint": "eslint .",
     "lint:boundaries": "depcruise --config dependency-cruiser.config.cjs packages apps adapters tests",
     "typecheck": "tsc -b",
+    "pretest": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "tsc -b",

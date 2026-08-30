@@ -21,10 +21,10 @@ Todos los scripts se ejecutan desde la raíz del monorepo:
 
 - `pnpm format:check`: verifica el formato del código mediante Prettier.
 - `pnpm format`: formatea automáticamente los archivos compatibles mediante Prettier.
-- `pnpm lint`: ejecuta ESLint con reglas TypeScript estrictas y verificación de tipos.
+- `pnpm lint`: ejecuta ESLint con reglas TypeScript estrictas, límites de export maps y verificación de tipos.
 - `pnpm lint:boundaries`: valida las reglas arquitectónicas y límites de módulos con dependency-cruiser.
-- `pnpm typecheck`: verifica los tipos en todo el monorepo mediante TypeScript (`tsc -b`).
-- `pnpm test`: ejecuta la suite de tests locales mediante Vitest.
+- `pnpm typecheck`: verifica los tipos en todo el monorepo sin emitir archivos mediante TypeScript (`tsc -b --noEmit`).
+- `pnpm test`: compila los paquetes del workspace y ejecuta la suite de tests locales mediante Vitest.
 - `pnpm test:watch`: ejecuta Vitest en modo interactivo/watch.
 - `pnpm build`: compila los paquetes del workspace mediante TypeScript (`tsc -b`).
 - `pnpm clean`: limpia los artefactos de build y cachés de compilación.

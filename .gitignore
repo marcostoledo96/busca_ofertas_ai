@@ -64,5 +64,3 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
-# Local AI runtime state
-.atl/

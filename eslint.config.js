@@ -32,6 +32,40 @@ export default tseslint.config(
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/packages/**', '../packages/**', '../../packages/**'],
+              message:
+                'Do not import packages via relative physical paths. Use the public package name (e.g. @busca-ofertas-ai/core).',
+            },
+            {
+              group: ['@busca-ofertas-ai/*/src/**', '@busca-ofertas-ai/*/dist/**'],
+              message:
+                'Do not import internal package paths. Use the public package entrypoint (e.g. @busca-ofertas-ai/core).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/**/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@busca-ofertas-ai/*/src/**', '@busca-ofertas-ai/*/dist/**'],
+              message:
+                'Do not import internal package paths. Use the public package entrypoint (e.g. @busca-ofertas-ai/core).',
+            },
+          ],
+        },
+      ],
     },
   },
   {

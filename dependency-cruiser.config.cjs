@@ -1,18 +1,41 @@
 // @ts-check
 /**
  * Dependency Cruiser Configuration — Busca Ofertas AI
- * Contractual Rules: BOAI-001 (Architectural Boundaries)
+ * Contractual Rules: BOAI-001 (Architectural Boundaries & Export Maps)
  * Reference: .agents/skills/boai-module-boundaries/SKILL.md
  */
 
 const PACKAGES_ROOT = 'packages';
 const R = PACKAGES_ROOT;
-const PACKAGE_ENTRYPOINTS = `^${R}/[^/]+/(src/index\\.(ts|js|d\\.ts)|dist/index\\.(ts|js|d\\.ts)|index\\.(ts|js))$`;
 const PACKAGE_INTERNALS = `^${R}/[^/]+/(src|dist)/.+`;
+const PACKAGE_ENTRYPOINTS = `^${R}/[^/]+/(src/index\\.(ts|js|d\\.ts)|dist/index\\.(ts|js|d\\.ts)|index\\.(ts|js))$`;
 
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
+    {
+      name: 'no-relative-package-imports-from-outside',
+      comment:
+        'Consumidores externos (tests, apps, adapters) deben importar packages mediante @busca-ofertas-ai/*, nunca mediante paths relativos físicos.',
+      severity: 'error',
+      from: { pathNot: `^${R}/` },
+      to: {
+        path: `^${R}/`,
+        dependencyTypes: ['local'],
+      },
+    },
+    {
+      name: 'no-relative-cross-package-imports',
+      comment:
+        'Un package no puede importar otro package mediante paths relativos físicos; debe usar @busca-ofertas-ai/*.',
+      severity: 'error',
+      from: { path: `^${R}/([^/]+)/` },
+      to: {
+        path: `^${R}/`,
+        pathNot: `^${R}/$1/`,
+        dependencyTypes: ['local'],
+      },
+    },
     {
       name: 'entrypoint-boundary-from-outside',
       comment: 'Apps, adapters y root solo pueden importar entrypoints de packages.',
