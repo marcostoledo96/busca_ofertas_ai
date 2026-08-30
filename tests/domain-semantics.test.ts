@@ -172,9 +172,13 @@ describe('Domain Ubiquitous Language & Semantics (BOAI-002)', () => {
 
       expect(globalRun.status).toBe('PARTIAL_SUCCESS');
       expect(sourceRun1.status).toBe('ZERO_RESULTS_CONFIRMED');
-      expect(sourceRun1.itemsCount).toBe(0);
+      if (sourceRun1.status === 'ZERO_RESULTS_CONFIRMED') {
+        expect(sourceRun1.itemsCount).toBe(0);
+      }
       expect(sourceRun2.status).toBe('RATE_LIMITED');
-      expect(sourceRun2.error).toContain('HTTP 429');
+      if (sourceRun2.status === 'RATE_LIMITED') {
+        expect(sourceRun2.error).toContain('HTTP 429');
+      }
     });
   });
 });

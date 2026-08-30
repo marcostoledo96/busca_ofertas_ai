@@ -303,6 +303,7 @@ describe('Domain Ports, Clock and IdGenerator Injectability (BOAI-002)', () => {
       savedSearchId: search.id,
       status: 'SUCCESS',
       startedAt: baseDate,
+      finishedAt: baseDate,
     });
     await runRepo.save(run);
     const sourceRun = createSourceRun({
@@ -311,6 +312,7 @@ describe('Domain Ports, Clock and IdGenerator Injectability (BOAI-002)', () => {
       sourceId: 'src-1',
       status: 'SUCCESS',
       startedAt: baseDate,
+      finishedAt: baseDate,
       itemsCount: 1,
     });
     await runRepo.saveSourceRun(sourceRun);

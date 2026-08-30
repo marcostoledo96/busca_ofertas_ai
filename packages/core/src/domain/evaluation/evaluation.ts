@@ -35,6 +35,13 @@ export const canPromoteToMatch = (evaluation: Evaluation): boolean => {
   return true;
 };
 
+export const canPromoteToReview = (evaluation: Evaluation): boolean => {
+  if (evaluation.decision === 'REJECT' && hasHardRejection(evaluation.reasons)) {
+    return false;
+  }
+  return true;
+};
+
 export const createEvaluation = (params: CreateEvaluationParams): Evaluation => {
   if (typeof params.id !== 'string' || params.id.trim().length === 0) {
     throw new InvariantViolationError('Evaluation id cannot be empty');
@@ -84,6 +91,13 @@ export const createEvaluation = (params: CreateEvaluationParams): Evaluation => 
     params.evaluatedBy as readonly EvaluatorType[]
   ).slice();
 
+  // Enforce decision coherence with reason severity
+  if (hasHardRejection(reasons) && params.decision !== 'REJECT') {
+    throw new InvariantViolationError(
+      `Evaluation containing a HARD severity reason must have REJECT decision, got ${params.decision}`,
+    );
+  }
+
   return {
     id: params.id.trim(),
     decision: params.decision,
@@ -97,7 +111,8 @@ export const createEvaluation = (params: CreateEvaluationParams): Evaluation => 
 
 /**
  * Applies a subsequent evaluation update onto a previous Evaluation,
- * strictly upholding the invariant that a deterministic HARD rejection cannot be overridden to MATCH.
+ * strictly upholding the invariant that a deterministic HARD rejection is terminal
+ * and cannot be overridden to MATCH or REVIEW.
  */
 export const applySubsequentEvaluation = (
   previousEvaluation: Evaluation,
@@ -106,10 +121,10 @@ export const applySubsequentEvaluation = (
   if (
     previousEvaluation.decision === 'REJECT' &&
     hasHardRejection(previousEvaluation.reasons) &&
-    nextEvaluationParams.decision === 'MATCH'
+    (nextEvaluationParams.decision === 'MATCH' || nextEvaluationParams.decision === 'REVIEW')
   ) {
     throw new InvariantViolationError(
-      'Deterministic HARD rejection cannot be promoted to MATCH by subsequent evaluation',
+      `Deterministic HARD rejection is terminal and cannot be promoted to ${nextEvaluationParams.decision} by subsequent evaluation`,
     );
   }
 

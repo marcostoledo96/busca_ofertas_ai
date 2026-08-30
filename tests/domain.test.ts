@@ -258,7 +258,9 @@ describe('Domain Construction & Value Objects (BOAI-002)', () => {
     expect(run.status).toBe('RUNNING');
     expect(sourceRun.runId).toBe('run-1');
     expect(sourceRun.status).toBe('SUCCESS');
-    expect(sourceRun.itemsCount).toBe(15);
+    if (sourceRun.status === 'SUCCESS') {
+      expect(sourceRun.itemsCount).toBe(15);
+    }
   });
 
   it('should construct SourceHealth check evidence', () => {

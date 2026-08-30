@@ -40,6 +40,7 @@ export {
   type CreateEvaluationParams,
   hasHardRejection,
   canPromoteToMatch,
+  canPromoteToReview,
   createEvaluation,
   applySubsequentEvaluation,
 } from './domain/evaluation/evaluation.js';
@@ -91,11 +92,36 @@ export {
   createSavedSearch,
 } from './domain/search/saved-search.js';
 
-// Run & SourceRun
-export { type RunStatus, type Run, type CreateRunParams, createRun } from './domain/run/run.js';
+// Run & SourceRun (Discriminated Unions)
+export {
+  type RunStatus,
+  type CreatedRun,
+  type RunningRun,
+  type SuccessRun,
+  type PartialSuccessRun,
+  type FailedRun,
+  type CancelledRun,
+  type Run,
+  type CreateRunParams,
+  createRun,
+} from './domain/run/run.js';
 
 export {
   type SourceRunStatus,
+  type PendingSourceRun,
+  type RunningSourceRun,
+  type SuccessSourceRun,
+  type ZeroResultsConfirmedSourceRun,
+  type AuthenticationRequiredSourceRun,
+  type ManualInterventionRequiredSourceRun,
+  type RateLimitedSourceRun,
+  type NetworkErrorSourceRun,
+  type SourceUnavailableSourceRun,
+  type ContractChangedSourceRun,
+  type ParserFailedSourceRun,
+  type TimeoutSourceRun,
+  type ConfigurationUnsupportedSourceRun,
+  type CancelledSourceRun,
   type SourceRun,
   type CreateSourceRunParams,
   createSourceRun,

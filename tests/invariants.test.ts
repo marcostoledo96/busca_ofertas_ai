@@ -6,6 +6,7 @@ import {
   applySubsequentEvaluation,
   hasHardRejection,
   canPromoteToMatch,
+  canPromoteToReview,
   createListing,
   createObservation,
   createSavedSearch,
@@ -108,35 +109,50 @@ describe('Domain Invariants & Rejection Contracts (BOAI-002)', () => {
     });
   });
 
-  describe('Hard Reject Invariant & IA Override Protection', () => {
-    it('should detect hard rejection severity from structured reasons', () => {
-      const softReason = createEvaluationReason({
-        code: 'BOX_MISSING',
-        message: 'No original box included',
-        impact: -10,
-        severity: 'SOFT',
-      });
-      const hardReason = createEvaluationReason({
-        code: 'ACCESSORY_ONLY_DETECTED',
-        message: 'The listing is only a case/cover, not the console itself',
-        impact: -100,
-        severity: 'HARD',
-      });
-
-      expect(hasHardRejection([softReason])).toBe(false);
-      expect(hasHardRejection([softReason, hardReason])).toBe(true);
+  describe('Hard Reject Invariant & Decision Coherence', () => {
+    const hardReason = createEvaluationReason({
+      code: 'BROKEN_SCREEN',
+      message: 'Console has broken screen, fails functional requirement',
+      impact: -100,
+      severity: 'HARD',
     });
 
-    it('should not allow promoting a HARD rejection to MATCH', () => {
-      const hardReason = createEvaluationReason({
-        code: 'BROKEN_SCREEN',
-        message: 'Console has broken screen, fails functional requirement',
-        impact: -100,
-        severity: 'HARD',
-      });
+    const softReason = createEvaluationReason({
+      code: 'BOX_MISSING',
+      message: 'No original box included',
+      impact: -10,
+      severity: 'SOFT',
+    });
 
-      const initialRejection = createEvaluation({
-        id: 'eval-rules-reject',
+    it('should reject constructing MATCH or REVIEW when a reason has HARD severity', () => {
+      expect(() =>
+        createEvaluation({
+          id: 'eval-match-with-hard',
+          decision: 'MATCH',
+          score: 90,
+          reasons: [hardReason],
+          evaluatedBy: ['RULES'],
+          policyVersion: '1.0.0',
+          createdAt: baseDate,
+        }),
+      ).toThrow(InvariantViolationError);
+
+      expect(() =>
+        createEvaluation({
+          id: 'eval-review-with-hard',
+          decision: 'REVIEW',
+          score: 50,
+          reasons: [hardReason],
+          evaluatedBy: ['RULES'],
+          policyVersion: '1.0.0',
+          createdAt: baseDate,
+        }),
+      ).toThrow(InvariantViolationError);
+    });
+
+    it('should allow constructing valid REJECT with HARD reasons', () => {
+      const evaluation = createEvaluation({
+        id: 'eval-valid-hard-reject',
         decision: 'REJECT',
         score: 0,
         reasons: [hardReason],
@@ -145,17 +161,33 @@ describe('Domain Invariants & Rejection Contracts (BOAI-002)', () => {
         createdAt: baseDate,
       });
 
-      expect(canPromoteToMatch(initialRejection)).toBe(false);
+      expect(evaluation.decision).toBe('REJECT');
+      expect(hasHardRejection(evaluation.reasons)).toBe(true);
+      expect(canPromoteToMatch(evaluation)).toBe(false);
+      expect(canPromoteToReview(evaluation)).toBe(false);
+    });
 
+    it('should block both REJECT(HARD) -> MATCH and REJECT(HARD) -> REVIEW in subsequent evaluations', () => {
+      const initialHardRejection = createEvaluation({
+        id: 'eval-initial-hard-reject',
+        decision: 'REJECT',
+        score: 0,
+        reasons: [hardReason],
+        evaluatedBy: ['RULES'],
+        policyVersion: '1.0.0',
+        createdAt: baseDate,
+      });
+
+      // Attempt REJECT(HARD) -> MATCH
       expect(() =>
-        applySubsequentEvaluation(initialRejection, {
-          id: 'eval-ai-override-attempt',
+        applySubsequentEvaluation(initialHardRejection, {
+          id: 'eval-override-match',
           decision: 'MATCH',
           score: 95,
           reasons: [
             createEvaluationReason({
               code: 'AI_OVERRULE',
-              message: 'AI hallucinated that the console is intact',
+              message: 'Attempting to promote to MATCH',
               impact: 95,
               severity: 'INFO',
             }),
@@ -165,6 +197,59 @@ describe('Domain Invariants & Rejection Contracts (BOAI-002)', () => {
           createdAt: new Date(baseDate.getTime() + 1000),
         }),
       ).toThrow(InvariantViolationError);
+
+      // Attempt REJECT(HARD) -> REVIEW
+      expect(() =>
+        applySubsequentEvaluation(initialHardRejection, {
+          id: 'eval-override-review',
+          decision: 'REVIEW',
+          score: 50,
+          reasons: [
+            createEvaluationReason({
+              code: 'AI_OVERRULE',
+              message: 'Attempting to promote to REVIEW',
+              impact: 50,
+              severity: 'INFO',
+            }),
+          ],
+          evaluatedBy: ['AI'],
+          policyVersion: '1.0.0',
+          createdAt: new Date(baseDate.getTime() + 1000),
+        }),
+      ).toThrow(InvariantViolationError);
+    });
+
+    it('should allow valid subsequent updates when reasons are SOFT and not hard-rejected', () => {
+      const initialReview = createEvaluation({
+        id: 'eval-initial-soft-review',
+        decision: 'REVIEW',
+        score: 60,
+        reasons: [softReason],
+        evaluatedBy: ['RULES'],
+        policyVersion: '1.0.0',
+        createdAt: baseDate,
+      });
+
+      const updatedToMatch = applySubsequentEvaluation(initialReview, {
+        id: 'eval-updated-match',
+        decision: 'MATCH',
+        score: 85,
+        reasons: [
+          softReason,
+          createEvaluationReason({
+            code: 'AI_VERIFIED',
+            message: 'AI verified bundle value justifies price',
+            impact: 25,
+            severity: 'INFO',
+          }),
+        ],
+        evaluatedBy: ['RULES', 'AI'],
+        policyVersion: '1.0.0',
+        createdAt: new Date(baseDate.getTime() + 1000),
+      });
+
+      expect(updatedToMatch.decision).toBe('MATCH');
+      expect(updatedToMatch.score).toBe(85);
     });
   });
 
@@ -277,37 +362,178 @@ describe('Domain Invariants & Rejection Contracts (BOAI-002)', () => {
     });
   });
 
-  describe('Run & SourceRun Invariants', () => {
-    it('should reject finishedAt earlier than startedAt', () => {
+  describe('Run Discriminated State Invariants', () => {
+    it('should reject SUCCESS or PARTIAL_SUCCESS without finishedAt', () => {
       expect(() =>
         createRun({
           id: 'run-1',
           savedSearchId: 'search-1',
-          startedAt: new Date('2026-08-30T22:00:00.000Z'),
-          finishedAt: new Date('2026-08-30T20:00:00.000Z'),
+          status: 'SUCCESS',
+          startedAt: baseDate,
         }),
       ).toThrow(InvariantViolationError);
 
       expect(() =>
-        createSourceRun({
-          id: 'src-run-1',
-          runId: 'run-1',
-          sourceId: 'facebook',
-          startedAt: new Date('2026-08-30T22:00:00.000Z'),
-          finishedAt: new Date('2026-08-30T20:00:00.000Z'),
+        createRun({
+          id: 'run-2',
+          savedSearchId: 'search-1',
+          status: 'PARTIAL_SUCCESS',
+          startedAt: baseDate,
         }),
       ).toThrow(InvariantViolationError);
     });
 
-    it('should reject ZERO_RESULTS_CONFIRMED with itemsCount > 0', () => {
+    it('should reject SUCCESS with error', () => {
+      expect(() =>
+        createRun({
+          id: 'run-1',
+          savedSearchId: 'search-1',
+          status: 'SUCCESS',
+          startedAt: baseDate,
+          finishedAt: new Date(baseDate.getTime() + 1000),
+          error: 'unexpected error',
+        }),
+      ).toThrow(InvariantViolationError);
+    });
+
+    it('should reject FAILED without finishedAt or without error', () => {
+      expect(() =>
+        createRun({
+          id: 'run-1',
+          savedSearchId: 'search-1',
+          status: 'FAILED',
+          startedAt: baseDate,
+          error: 'Some failure',
+        }),
+      ).toThrow(InvariantViolationError);
+
+      expect(() =>
+        createRun({
+          id: 'run-2',
+          savedSearchId: 'search-1',
+          status: 'FAILED',
+          startedAt: baseDate,
+          finishedAt: new Date(baseDate.getTime() + 1000),
+        }),
+      ).toThrow(InvariantViolationError);
+    });
+
+    it('should reject CREATED or RUNNING with finishedAt or error', () => {
+      expect(() =>
+        createRun({
+          id: 'run-1',
+          savedSearchId: 'search-1',
+          status: 'CREATED',
+          startedAt: baseDate,
+          finishedAt: new Date(baseDate.getTime() + 1000),
+        }),
+      ).toThrow(InvariantViolationError);
+
+      expect(() =>
+        createRun({
+          id: 'run-2',
+          savedSearchId: 'search-1',
+          status: 'RUNNING',
+          startedAt: baseDate,
+          error: 'Premature error',
+        }),
+      ).toThrow(InvariantViolationError);
+    });
+  });
+
+  describe('SourceRun Discriminated State Invariants', () => {
+    it('should reject PENDING or RUNNING with finishedAt or itemsCount or error', () => {
       expect(() =>
         createSourceRun({
-          id: 'src-run-1',
+          id: 'src-1',
+          runId: 'run-1',
+          sourceId: 'facebook',
+          status: 'PENDING',
+          startedAt: baseDate,
+          finishedAt: new Date(baseDate.getTime() + 1000),
+        }),
+      ).toThrow(InvariantViolationError);
+
+      expect(() =>
+        createSourceRun({
+          id: 'src-2',
+          runId: 'run-1',
+          sourceId: 'facebook',
+          status: 'RUNNING',
+          startedAt: baseDate,
+          itemsCount: 10,
+        }),
+      ).toThrow(InvariantViolationError);
+    });
+
+    it('should reject SUCCESS without finishedAt or without itemsCount', () => {
+      expect(() =>
+        createSourceRun({
+          id: 'src-1',
+          runId: 'run-1',
+          sourceId: 'facebook',
+          status: 'SUCCESS',
+          startedAt: baseDate,
+          itemsCount: 5,
+        }),
+      ).toThrow(InvariantViolationError);
+
+      expect(() =>
+        createSourceRun({
+          id: 'src-2',
+          runId: 'run-1',
+          sourceId: 'facebook',
+          status: 'SUCCESS',
+          startedAt: baseDate,
+          finishedAt: new Date(baseDate.getTime() + 1000),
+        }),
+      ).toThrow(InvariantViolationError);
+    });
+
+    it('should reject ZERO_RESULTS_CONFIRMED without finishedAt or with itemsCount != 0', () => {
+      expect(() =>
+        createSourceRun({
+          id: 'src-1',
           runId: 'run-1',
           sourceId: 'facebook',
           status: 'ZERO_RESULTS_CONFIRMED',
           startedAt: baseDate,
+        }),
+      ).toThrow(InvariantViolationError);
+
+      expect(() =>
+        createSourceRun({
+          id: 'src-2',
+          runId: 'run-1',
+          sourceId: 'facebook',
+          status: 'ZERO_RESULTS_CONFIRMED',
+          startedAt: baseDate,
+          finishedAt: new Date(baseDate.getTime() + 1000),
           itemsCount: 5,
+        }),
+      ).toThrow(InvariantViolationError);
+    });
+
+    it('should reject error states without finishedAt or without diagnostic error', () => {
+      expect(() =>
+        createSourceRun({
+          id: 'src-1',
+          runId: 'run-1',
+          sourceId: 'facebook',
+          status: 'RATE_LIMITED',
+          startedAt: baseDate,
+          error: 'Rate limit',
+        }),
+      ).toThrow(InvariantViolationError);
+
+      expect(() =>
+        createSourceRun({
+          id: 'src-2',
+          runId: 'run-1',
+          sourceId: 'facebook',
+          status: 'NETWORK_ERROR',
+          startedAt: baseDate,
+          finishedAt: new Date(baseDate.getTime() + 1000),
         }),
       ).toThrow(InvariantViolationError);
     });
