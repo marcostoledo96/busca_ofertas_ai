@@ -49,7 +49,7 @@ export class SourceAdapterError extends Error {
     this.retryable =
       params.retryable !== undefined ? params.retryable : DEFAULT_RETRYABLE_BY_CODE[params.code];
     this.evidence = sanitizeEvidence(params.evidence);
-    this.artifactIds = Object.freeze(params.artifactIds ? [...params.artifactIds] : []);
+    this.artifactIds = sanitizeEvidence(params.artifactIds);
     this._causeInternal = params.cause;
 
     // Ensure proper prototype chain in transpiled environments

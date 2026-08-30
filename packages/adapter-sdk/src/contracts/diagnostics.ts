@@ -35,6 +35,8 @@ export interface CreateSourceDiagnosticsParams {
   readonly collectorId?: string;
 }
 
+import { sanitizeEvidence, sanitizeString } from '../errors/sanitization.js';
+
 export function createSourceDiagnostics(params: CreateSourceDiagnosticsParams): SourceDiagnostics {
   if (params.pagesRequested < 0 || params.pagesCompleted < 0) {
     throw new Error('Diagnostics page counts cannot be negative');
@@ -49,9 +51,14 @@ export function createSourceDiagnostics(params: CreateSourceDiagnosticsParams): 
     rawItemsCount: params.rawItemsCount,
     parsedItemsCount: params.parsedItemsCount,
     rejectedItemsCount: params.rejectedItemsCount,
-    ...(params.sanitizedCursor !== undefined && { sanitizedCursor: params.sanitizedCursor }),
+    ...(params.sanitizedCursor !== undefined && {
+      sanitizedCursor:
+        params.sanitizedCursor === null ? null : sanitizeString(params.sanitizedCursor),
+    }),
     stopReason: params.stopReason,
-    warnings: params.warnings ? [...params.warnings] : [],
-    ...(params.collectorId !== undefined && { collectorId: params.collectorId }),
+    warnings: sanitizeEvidence(params.warnings),
+    ...(params.collectorId !== undefined && {
+      collectorId: sanitizeString(params.collectorId),
+    }),
   };
 }
