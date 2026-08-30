@@ -216,6 +216,39 @@ export class SourceRegistry {
       });
     }
 
+    if (adapter.sdkVersion !== entry.sdkVersion) {
+      throw new ConfigurationError({
+        code: 'REGISTRY_FACTORY_MISMATCH',
+        path: `registry.${id}.sdkVersion`,
+        sourceId: id,
+        message: `Factory for source "${id}" produced an adapter with mismatched sdkVersion "${adapter.sdkVersion}" (expected "${entry.sdkVersion}").`,
+        suggestion: `Ensure the adapter instance sdkVersion matches registered sdkVersion "${entry.sdkVersion}".`,
+      });
+    }
+
+    const sdkCompatibility = checkAdapterCompatibility(adapter.sdkVersion);
+    if (!sdkCompatibility.compatible) {
+      throw new ConfigurationError({
+        code: 'REGISTRY_FACTORY_MISMATCH',
+        path: `registry.${id}.sdkVersion`,
+        sourceId: id,
+        message: `Factory for source "${id}" produced an adapter targeting incompatible SDK version "${adapter.sdkVersion}".`,
+        suggestion: `Update adapter instance to target SDK version "${ADAPTER_SDK_VERSION}".`,
+      });
+    }
+
+    for (const capKey of REQUIRED_CAPABILITY_KEYS) {
+      if (adapter.capabilities[capKey] !== entry.capabilities[capKey]) {
+        throw new ConfigurationError({
+          code: 'REGISTRY_FACTORY_MISMATCH',
+          path: `registry.${id}.capabilities.${capKey}`,
+          sourceId: id,
+          message: `Factory for source "${id}" produced an adapter with mismatched capability "${capKey}" (${String(adapter.capabilities[capKey])} vs expected ${String(entry.capabilities[capKey])}).`,
+          suggestion: `Ensure the adapter instance capabilities match the registered capabilities for "${id}".`,
+        });
+      }
+    }
+
     const coherence = validateAdapterMethodCoherence(adapter);
     if (!coherence.valid) {
       throw new ConfigurationError({

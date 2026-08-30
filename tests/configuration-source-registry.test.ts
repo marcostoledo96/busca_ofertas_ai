@@ -56,7 +56,8 @@ describe('Source Registry and Adapter Lifecycle Invariants (BOAI-004)', () => {
 
   it('registers enabled source adapter with lazy factory', () => {
     const registry = new SourceRegistry();
-    const factorySpy = vi.fn(() => createMockAdapter());
+    const mockInit = vi.fn().mockResolvedValue(undefined);
+    const factorySpy = vi.fn(() => createMockAdapter({ initialize: mockInit }));
 
     registry.register({
       id: 'mock-source',
@@ -77,6 +78,7 @@ describe('Source Registry and Adapter Lifecycle Invariants (BOAI-004)', () => {
     const adapterInstance = registry.createAdapter('mock-source');
     expect(factorySpy).toHaveBeenCalledTimes(1);
     expect(adapterInstance.id).toBe('mock-source');
+    expect(mockInit).not.toHaveBeenCalled(); // Invariant: do not call initialize() during creation
   });
 
   it('registers disabled source adapter with mandatory reason', () => {
@@ -197,26 +199,138 @@ describe('Source Registry and Adapter Lifecycle Invariants (BOAI-004)', () => {
     }
   });
 
-  it('validates factory coherence against registered descriptor upon creation', () => {
-    const registry = new SourceRegistry();
+  describe('Factory Descriptor Coherence Verification', () => {
+    it('rejects factory ID mismatch with REGISTRY_FACTORY_MISMATCH and keeps registry intact', () => {
+      const registry = new SourceRegistry();
+      registry.register({
+        id: 'declared-id',
+        version: '1.0.0',
+        sdkVersion: ADAPTER_SDK_VERSION,
+        capabilities: createMockCapabilities(),
+        status: 'ENABLED',
+        factory: () => createMockAdapter({ id: 'different-runtime-id' }),
+      });
 
-    // Mismatched ID produced by factory
-    registry.register({
-      id: 'declared-id',
-      version: '1.0.0',
-      sdkVersion: ADAPTER_SDK_VERSION,
-      capabilities: createMockCapabilities(),
-      status: 'ENABLED',
-      factory: () => createMockAdapter({ id: 'different-runtime-id' }),
+      expect(() => registry.createAdapter('declared-id')).toThrow(ConfigurationError);
+      try {
+        registry.createAdapter('declared-id');
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(ConfigurationError);
+        const configErr = err as ConfigurationError;
+        expect(configErr.code).toBe('REGISTRY_FACTORY_MISMATCH');
+        expect(configErr.path).toBe('registry.declared-id.id');
+        expect(configErr.sourceId).toBe('declared-id');
+      }
+
+      // Verify registry entry remains intact
+      expect(registry.has('declared-id')).toBe(true);
+      expect(registry.getOrThrow('declared-id').id).toBe('declared-id');
     });
 
-    try {
-      registry.createAdapter('declared-id');
-      expect.unreachable('Should have rejected factory ID mismatch');
-    } catch (err: unknown) {
-      expect(err).toBeInstanceOf(ConfigurationError);
-      const configErr = err as ConfigurationError;
-      expect(configErr.code).toBe('REGISTRY_FACTORY_MISMATCH');
-    }
+    it('rejects factory version mismatch with REGISTRY_FACTORY_MISMATCH', () => {
+      const registry = new SourceRegistry();
+      registry.register({
+        id: 'version-check-src',
+        version: '1.0.0',
+        sdkVersion: ADAPTER_SDK_VERSION,
+        capabilities: createMockCapabilities(),
+        status: 'ENABLED',
+        factory: () =>
+          createMockAdapter({
+            id: 'version-check-src',
+            version: '2.0.0',
+          }),
+      });
+
+      try {
+        registry.createAdapter('version-check-src');
+        expect.unreachable('Should have thrown version mismatch');
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(ConfigurationError);
+        const configErr = err as ConfigurationError;
+        expect(configErr.code).toBe('REGISTRY_FACTORY_MISMATCH');
+        expect(configErr.path).toBe('registry.version-check-src.version');
+        expect(configErr.sourceId).toBe('version-check-src');
+      }
+    });
+
+    it('rejects factory sdkVersion mismatch with REGISTRY_FACTORY_MISMATCH', () => {
+      const registry = new SourceRegistry();
+      registry.register({
+        id: 'sdk-check-src',
+        version: '1.0.0',
+        sdkVersion: ADAPTER_SDK_VERSION,
+        capabilities: createMockCapabilities(),
+        status: 'ENABLED',
+        factory: () =>
+          createMockAdapter({
+            id: 'sdk-check-src',
+            sdkVersion: '99.0.0',
+          }),
+      });
+
+      try {
+        registry.createAdapter('sdk-check-src');
+        expect.unreachable('Should have thrown sdkVersion mismatch');
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(ConfigurationError);
+        const configErr = err as ConfigurationError;
+        expect(configErr.code).toBe('REGISTRY_FACTORY_MISMATCH');
+        expect(configErr.path).toBe('registry.sdk-check-src.sdkVersion');
+      }
+    });
+
+    it('rejects factory capability mismatch with REGISTRY_FACTORY_MISMATCH', () => {
+      const registry = new SourceRegistry();
+      registry.register({
+        id: 'cap-check-src',
+        version: '1.0.0',
+        sdkVersion: ADAPTER_SDK_VERSION,
+        capabilities: createMockCapabilities({ geographicSearch: true }),
+        status: 'ENABLED',
+        factory: () =>
+          createMockAdapter({
+            id: 'cap-check-src',
+            capabilities: createMockCapabilities({ geographicSearch: false }),
+          }),
+      });
+
+      try {
+        registry.createAdapter('cap-check-src');
+        expect.unreachable('Should have thrown capability mismatch');
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(ConfigurationError);
+        const configErr = err as ConfigurationError;
+        expect(configErr.code).toBe('REGISTRY_FACTORY_MISMATCH');
+        expect(configErr.path).toBe('registry.cap-check-src.capabilities.geographicSearch');
+      }
+    });
+
+    it('rejects factory method coherence mismatch with REGISTRY_FACTORY_MISMATCH', () => {
+      const registry = new SourceRegistry();
+      registry.register({
+        id: 'auth-check-src',
+        version: '1.0.0',
+        sdkVersion: ADAPTER_SDK_VERSION,
+        capabilities: createMockCapabilities({ authentication: true }),
+        status: 'ENABLED',
+        // Declares authentication: true but does not provide authenticate method
+        factory: () =>
+          createMockAdapter({
+            id: 'auth-check-src',
+            capabilities: createMockCapabilities({ authentication: true }),
+          }),
+      });
+
+      try {
+        registry.createAdapter('auth-check-src');
+        expect.unreachable('Should have thrown method coherence mismatch');
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(ConfigurationError);
+        const configErr = err as ConfigurationError;
+        expect(configErr.code).toBe('REGISTRY_FACTORY_MISMATCH');
+        expect(configErr.path).toBe('registry.auth-check-src.capabilities');
+      }
+    });
   });
 });
