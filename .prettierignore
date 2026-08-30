@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+pnpm-lock.yaml
+.turbo/
+.github/
+docs/
+**/AGENTS.md
+AGENTS.md
+CONTRIBUTING.md
+LICENSE
+THIRD_PARTY_NOTICES.md
+UPSTREAMS.lock.yml
