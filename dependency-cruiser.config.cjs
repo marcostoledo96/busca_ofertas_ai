@@ -8,7 +8,7 @@
 const PACKAGES_ROOT = 'packages';
 const R = PACKAGES_ROOT;
 const PACKAGE_INTERNALS = `^${R}/[^/]+/(src|dist)/.+`;
-const PACKAGE_ENTRYPOINTS = `^${R}/[^/]+/(src/index\\.(ts|js|d\\.ts)|dist/index\\.(ts|js|d\\.ts)|index\\.(ts|js))$`;
+const PACKAGE_ENTRYPOINTS = `^${R}/[^/]+/(src/(index|testing)\\.(ts|js|d\\.ts)|dist/(index|testing)\\.(ts|js|d\\.ts)|(index|testing)\\.(ts|js))$`;
 
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {

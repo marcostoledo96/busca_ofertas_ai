@@ -188,7 +188,7 @@ No debe decidir por sí solo que la publicación es `MATCH`.
 
 ## Contract tests obligatorios
 
-Todo adapter productivo debe pasar una suite compartida que compruebe:
+Todo adapter productivo debe pasar la suite compartida exportada por `@busca-ofertas-ai/adapter-sdk/testing` (`runSourceAdapterContract`), que comprueba:
 
 1. ID y versión no vacíos.
 2. capabilities coherentes con los métodos.
