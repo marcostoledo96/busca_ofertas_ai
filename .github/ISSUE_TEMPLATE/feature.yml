@@ -1,0 +1,64 @@
+name: Implementación o mejora
+description: Proponer una unidad de trabajo contractual
+title: "[E?][P?][BOAI-???] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Completá criterios verificables y citá la documentación normativa aplicable.
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objetivo
+      description: Resultado observable que debe alcanzar esta issue.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto y problema
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Alcance
+      description: Cambios incluidos.
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Fuera de alcance
+    validations:
+      required: true
+  - type: textarea
+    id: authority
+    attributes:
+      label: Fuentes de autoridad
+      description: Documentos, ADR y contratos aplicables.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Criterios de aceptación
+      description: Lista verificable, incluyendo tests.
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencias y bloqueos
+  - type: textarea
+    id: provenance
+    attributes:
+      label: Procedencia prevista
+      description: Upstream, SHA y licencia si se reutiliza código.
+  - type: textarea
+    id: risks
+    attributes:
+      label: Riesgos

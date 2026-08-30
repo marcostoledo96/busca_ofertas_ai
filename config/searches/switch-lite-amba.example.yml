@@ -1,0 +1,79 @@
+schemaVersion: 1
+id: switch-lite-amba
+name: Nintendo Switch Lite en AMBA
+enabled: true
+category: PRODUCT
+
+sources:
+  - id: facebook-marketplace
+    enabled: true
+    queries:
+      - Nintendo Switch Lite
+      - Switch Lite
+      - Nintendo Lite
+    options:
+      sort: NEWEST
+      maxPages: 3
+      maxItems: 200
+
+location:
+  mode: REGION
+  region: AMBA
+  radiusKm: 80
+
+price:
+  targetCurrency: ARS
+  maximum: 250000
+  minimumPlausible: null
+  foreignCurrency:
+    mode: MANUAL_RATE
+    onUnknown: REVIEW
+
+condition:
+  accepted:
+    - NEW
+    - LIKE_NEW
+    - GOOD
+
+product:
+  expectedModels:
+    - NINTENDO_SWITCH_LITE
+  requireFunctional: true
+  chargerRequired: false
+  boxRequired: false
+
+rules:
+  profile: switch-lite
+  include: []
+  exclude:
+    - funda
+    - estuche
+    - carcasa
+    - vidrio templado
+    - solo juegos
+    - repuesto
+    - para reparar
+
+evaluation:
+  matchThreshold: 80
+  reviewThreshold: 40
+  precisionProfile: MIXED
+
+ai:
+  enabled: false
+  evaluateOnlyReview: true
+  provider: deepseek
+  requireConfirmation: true
+  maxEvaluationsPerRun: 5
+
+retention:
+  rawArtifacts: ERRORS_AND_REVIEW
+  rawDataDays: 30
+
+report:
+  openAutomatically: true
+  includeRejected: COLLAPSED
+  exports:
+    - HTML
+    - JSON
+    - CSV
