@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Completá criterios verificables y citá la documentación normativa aplicable.
+        Completá criterios verificables y citá la documentación normativa aplicable. La issue es una unidad de trabajo; Gentle AI decidirá la ruta al comenzar.
   - type: textarea
     id: objective
     attributes:
@@ -38,14 +38,31 @@ body:
     id: authority
     attributes:
       label: Fuentes de autoridad
-      description: Documentos, ADR y contratos aplicables.
+      description: Documentos, ADR, CONTEXT.md y contratos aplicables.
     validations:
       required: true
+  - type: dropdown
+    id: route-hint
+    attributes:
+      label: Orientación inicial de routing
+      description: No es vinculante; Gentle AI reevalúa la acción real.
+      options:
+        - Directo inline probable
+        - Directo delegado probable
+        - Candidato a SDD con aceptación explícita
+        - A determinar al iniciar
+    validations:
+      required: true
+  - type: textarea
+    id: skills
+    attributes:
+      label: Skills locales probables
+      description: Paths `boai-*` relevantes; no reemplazan la autoridad contractual.
   - type: textarea
     id: acceptance
     attributes:
       label: Criterios de aceptación
-      description: Lista verificable, incluyendo tests.
+      description: Lista verificable, incluyendo tests y artifacts cuando apliquen.
       placeholder: "- [ ] ..."
     validations:
       required: true
@@ -57,8 +74,17 @@ body:
     id: provenance
     attributes:
       label: Procedencia prevista
-      description: Upstream, SHA y licencia si se reutiliza código.
+      description: Upstream, SHA, licencia y archivos si se reutiliza código, datos o skills.
   - type: textarea
     id: risks
     attributes:
       label: Riesgos
+  - type: checkboxes
+    id: workflow
+    attributes:
+      label: Workflow
+      options:
+        - label: La issue puede trabajarse de forma aislada sin avanzar el backlog siguiente.
+          required: true
+        - label: El alcance no presupone SDD; su uso requerirá propuesta y aceptación.
+          required: true
