@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  createSourceDiagnostics,
   DEFAULT_RETRYABLE_BY_CODE,
   isSourceAdapterError,
   isSourceErrorCode,
@@ -162,6 +163,45 @@ describe('Adapter SDK Error Model and Secret Sanitization (BOAI-003)', () => {
       expect(jsonOutput).toContain(REDACTED_PLACEHOLDER);
     });
 
+    it('redacts sentinel secret from artifactIds in SourceAdapterError', () => {
+      const error = new SourceAdapterError({
+        code: 'PARSER_FAILED',
+        message: 'Schema mismatch',
+        artifactIds: [`artifact-${SENTINEL_SECRET}`, SENTINEL_SECRET],
+      });
+
+      expect(error.artifactIds[0]).not.toContain(SENTINEL_SECRET);
+      expect(error.artifactIds[0]).toBe(`artifact-${REDACTED_PLACEHOLDER}`);
+      expect(error.artifactIds[1]).toBe(REDACTED_PLACEHOLDER);
+
+      const jsonOutput = JSON.stringify(error);
+      expect(jsonOutput).not.toContain(SENTINEL_SECRET);
+      expect(JSON.stringify(error.toJSON())).not.toContain(SENTINEL_SECRET);
+    });
+
+    it('redacts sentinel secret from createSourceDiagnostics boundary', () => {
+      const diagnostics = createSourceDiagnostics({
+        pagesRequested: 2,
+        pagesCompleted: 1,
+        rawItemsCount: 10,
+        parsedItemsCount: 8,
+        rejectedItemsCount: 2,
+        stopReason: 'ALL_PAGES_FETCHED',
+        sanitizedCursor: `cursor-${SENTINEL_SECRET}`,
+        warnings: [`warning with ${SENTINEL_SECRET}`, `Bearer ${SENTINEL_SECRET}`],
+        collectorId: `collector-${SENTINEL_SECRET}`,
+      });
+
+      expect(diagnostics.sanitizedCursor).toBe(`cursor-${REDACTED_PLACEHOLDER}`);
+      expect(diagnostics.warnings[0]).toBe(`warning with ${REDACTED_PLACEHOLDER}`);
+      expect(diagnostics.warnings[1]).toBe(`Bearer ${REDACTED_PLACEHOLDER}`);
+      expect(diagnostics.collectorId).toBe(`collector-${REDACTED_PLACEHOLDER}`);
+
+      const jsonOutput = JSON.stringify(diagnostics);
+      expect(jsonOutput).not.toContain(SENTINEL_SECRET);
+      expect(jsonOutput).not.toContain('SUPER_SECRET');
+    });
+
     it('redacts nested keys and string patterns in structured data', () => {
       const payload = {
         publicInfo: 'Nintendo Switch',
@@ -183,6 +223,27 @@ describe('Adapter SDK Error Model and Secret Sanitization (BOAI-003)', () => {
       expect(sanitized.nested.cookie).toBe(REDACTED_PLACEHOLDER);
       expect(sanitized.nested.details).toBe(`Contains ${REDACTED_PLACEHOLDER} inline`);
       expect(sanitized.publicInfo).toBe('Nintendo Switch');
+    });
+
+    it('sanitizes structured logger context and artifact metadata', () => {
+      const logContext = {
+        adapterId: 'facebook-graphql',
+        token: SENTINEL_SECRET,
+        headers: {
+          authorization: `Bearer ${SENTINEL_SECRET}`,
+          cookie: 'c_user=12345; xs=abc',
+        },
+      };
+      const sanitizedLogContext = sanitizeData(logContext);
+      expect(JSON.stringify(sanitizedLogContext)).not.toContain(SENTINEL_SECRET);
+      expect(JSON.stringify(sanitizedLogContext)).not.toContain('12345');
+
+      const artifactMetadata = {
+        sourceId: 'facebook',
+        sessionToken: SENTINEL_SECRET,
+      };
+      const sanitizedMetadata = sanitizeData(artifactMetadata);
+      expect(JSON.stringify(sanitizedMetadata)).not.toContain(SENTINEL_SECRET);
     });
 
     it('sanitizes strings and evidence arrays with utility functions', () => {

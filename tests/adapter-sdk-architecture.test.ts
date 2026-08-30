@@ -29,11 +29,13 @@ describe('Adapter SDK Architecture and Boundary Invariants (BOAI-003)', () => {
     expect(typeof AdapterSdkTesting.runSourceAdapterContract).toBe('function');
     expect(typeof AdapterSdkTesting.InMemoryConformanceAdapter).toBe('function');
     expect(typeof AdapterSdkTesting.createMockAdapterContext).toBe('function');
+    expect(typeof AdapterSdkTesting.validateContractSuiteOptions).toBe('function');
 
     // Assert that test runner is NOT leaked into the main production entrypoint
     const adapterSdkRecord = AdapterSdk as Record<string, unknown>;
     expect(adapterSdkRecord['runSourceAdapterContract']).toBeUndefined();
     expect(adapterSdkRecord['InMemoryConformanceAdapter']).toBeUndefined();
+    expect(adapterSdkRecord['validateContractSuiteOptions']).toBeUndefined();
   });
 
   it('contains zero third-party runtime dependencies in packages/adapter-sdk/package.json', () => {

@@ -84,31 +84,58 @@ describe('Adapter SDK Capabilities, Versioning and Lifecycle (BOAI-003)', () => 
   });
 
   describe('SDK Versioning and Compatibility', () => {
-    it('validates matching minor version under pre-1.0 semver', () => {
+    it('validates matching minor version and patch limits under pre-1.0 semver', () => {
+      // 0.1.0 adapter on 0.1.0 host
       const match = checkAdapterCompatibility('0.1.0', '0.1.0');
       expect(match.compatible).toBe(true);
 
-      const matchPatch = checkAdapterCompatibility('0.1.4', '0.1.0');
-      expect(matchPatch.compatible).toBe(true);
+      // 0.1.0 adapter on 0.1.4 host
+      const olderPatchAdapter = checkAdapterCompatibility('0.1.0', '0.1.4');
+      expect(olderPatchAdapter.compatible).toBe(true);
 
+      // 0.1.4 adapter on 0.1.0 host (requires future patch)
+      const newerPatchAdapter = checkAdapterCompatibility('0.1.4', '0.1.0');
+      expect(newerPatchAdapter.compatible).toBe(false);
+      expect(newerPatchAdapter.reason).toContain('Adapter requires newer patch version');
+
+      // 0.2.0 adapter on 0.1.0 host
       const mismatchMinor = checkAdapterCompatibility('0.2.0', '0.1.0');
       expect(mismatchMinor.compatible).toBe(false);
       expect(mismatchMinor.reason).toContain('Pre-1.0 SDK requires matching minor version');
     });
 
-    it('handles major version changes under post-1.0 semver', () => {
-      const matchMajor = checkAdapterCompatibility('1.2.0', '1.0.0');
+    it('handles major and minor version checks under post-1.0 semver', () => {
+      // 1.2.0 adapter on 1.3.0 host -> compatible
+      const matchMajor = checkAdapterCompatibility('1.2.0', '1.3.0');
       expect(matchMajor.compatible).toBe(true);
 
-      const mismatchMajor = checkAdapterCompatibility('2.0.0', '1.0.0');
+      // 1.3.0 adapter on 1.3.0 host -> compatible
+      const exactMatch = checkAdapterCompatibility('1.3.0', '1.3.0');
+      expect(exactMatch.compatible).toBe(true);
+
+      // 1.4.0 adapter on 1.3.0 host (requires future minor) -> incompatible
+      const newerMinor = checkAdapterCompatibility('1.4.0', '1.3.0');
+      expect(newerMinor.compatible).toBe(false);
+      expect(newerMinor.reason).toContain('Adapter requires newer SDK version');
+
+      // 2.0.0 adapter on 1.3.0 host -> incompatible
+      const mismatchMajor = checkAdapterCompatibility('2.0.0', '1.3.0');
       expect(mismatchMajor.compatible).toBe(false);
       expect(mismatchMajor.reason).toContain('Incompatible major version');
     });
 
-    it('rejects invalid or malformed semver strings', () => {
+    it('rejects missing or malformed semver strings', () => {
+      const missing = checkAdapterCompatibility('', '0.1.0');
+      expect(missing.compatible).toBe(false);
+      expect(missing.reason).toContain('Invalid adapter SDK version');
+
       const invalid = checkAdapterCompatibility('invalid-version', '0.1.0');
       expect(invalid.compatible).toBe(false);
       expect(invalid.reason).toContain('Invalid adapter SDK version');
+
+      const invalidTarget = checkAdapterCompatibility('0.1.0', 'invalid-target');
+      expect(invalidTarget.compatible).toBe(false);
+      expect(invalidTarget.reason).toContain('Invalid target SDK version');
     });
 
     it('exposes current ADAPTER_SDK_VERSION constant as 0.1.0', () => {
