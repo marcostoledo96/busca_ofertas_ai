@@ -23,6 +23,10 @@ describe('Adapter SDK Architecture and Boundary Invariants (BOAI-003)', () => {
     expect(typeof AdapterSdk.sanitizeEvidence).toBe('function');
     expect(typeof AdapterSdk.sanitizeData).toBe('function');
     expect(typeof AdapterSdk.isAbortedOrExpired).toBe('function');
+    expect(typeof AdapterSdk.createSanitizedLogger).toBe('function');
+    expect(typeof AdapterSdk.createSanitizedArtifactWriter).toBe('function');
+    expect(typeof AdapterSdk.createSanitizedAdapterContext).toBe('function');
+    expect(AdapterSdk.MAX_SANITIZATION_DEPTH).toBe(10);
   });
 
   it('exports testing suite and test doubles exclusively from /testing subpath entrypoint', () => {
