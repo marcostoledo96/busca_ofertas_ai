@@ -6,7 +6,9 @@ import {
   DatabaseOpenFailedError,
   InvalidDatabasePathError,
   PragmaConfigurationError,
+  TransactionAsyncCallbackUnsupportedError,
   TransactionFailedError,
+  TransactionScopeClosedError,
   isSqliteStorageError,
 } from '../errors/storage-errors.js';
 import { inspectSchemaMigrations, runMigrations } from '../migrations/runner.js';
@@ -25,17 +27,25 @@ import type {
   SqliteTransaction,
 } from './types.js';
 
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
 class SqlitePreparedStatementImpl<
   TResult = Record<string, unknown>,
   TParams extends unknown[] = unknown[],
 > implements SqlitePreparedStatement<TResult, TParams> {
   constructor(
     private readonly rawStatement: StatementSync,
-    private readonly checkOpen: () => void,
+    private readonly checkActive: () => void,
   ) {}
 
   run(...params: TParams): SqliteRunResult {
-    this.checkOpen();
+    this.checkActive();
     const result = this.rawStatement.run(
       ...(params as unknown[] as (string | number | bigint | null | Uint8Array)[]),
     );
@@ -46,7 +56,7 @@ class SqlitePreparedStatementImpl<
   }
 
   get(...params: TParams): TResult | undefined {
-    this.checkOpen();
+    this.checkActive();
     const result = this.rawStatement.get(
       ...(params as unknown[] as (string | number | bigint | null | Uint8Array)[]),
     );
@@ -54,7 +64,7 @@ class SqlitePreparedStatementImpl<
   }
 
   all(...params: TParams): readonly TResult[] {
-    this.checkOpen();
+    this.checkActive();
     const result = this.rawStatement.all(
       ...(params as unknown[] as (string | number | bigint | null | Uint8Array)[]),
     );
@@ -104,7 +114,9 @@ class SqliteDatabaseImpl implements SqliteDatabase {
   ): SqlitePreparedStatement<TResult, TParams> {
     const db = this.ensureOpen();
     const rawStatement = db.prepare(sql);
-    return new SqlitePreparedStatementImpl<TResult, TParams>(rawStatement, () => this.ensureOpen());
+    return new SqlitePreparedStatementImpl<TResult, TParams>(rawStatement, () => {
+      this.ensureOpen();
+    });
   }
 
   transaction<T>(fn: (tx: SqliteTransaction) => T): T {
@@ -116,27 +128,59 @@ class SqliteDatabaseImpl implements SqliteDatabase {
       );
     }
 
+    try {
+      db.exec('BEGIN');
+    } catch (err) {
+      this.inTransaction = false;
+      throw new TransactionFailedError(
+        `Failed to begin transaction: ${err instanceof Error ? err.message : String(err)}`,
+        'TRANSACTION_FAILED',
+        { cause: err },
+      );
+    }
+
     this.inTransaction = true;
-    db.exec('BEGIN');
+    let scopeActive = true;
+
+    const checkScope = (): void => {
+      this.ensureOpen();
+      if (!scopeActive) {
+        throw new TransactionScopeClosedError();
+      }
+    };
 
     const txProxy: SqliteTransaction = {
       exec: (sql: string) => {
-        this.ensureOpen();
+        checkScope();
         db.exec(sql);
       },
       prepare: <TResult = Record<string, unknown>, TParams extends unknown[] = unknown[]>(
         sql: string,
       ) => {
-        this.ensureOpen();
+        checkScope();
         const rawStatement = db.prepare(sql);
-        return new SqlitePreparedStatementImpl<TResult, TParams>(rawStatement, () =>
-          this.ensureOpen(),
-        );
+        return new SqlitePreparedStatementImpl<TResult, TParams>(rawStatement, checkScope);
       },
     };
 
     try {
       const result = fn(txProxy);
+
+      if (isThenable(result)) {
+        const promiseLike = result as unknown as {
+          catch?: (fn: () => void) => unknown;
+        };
+        if (typeof promiseLike.catch === 'function') {
+          promiseLike.catch(() => {});
+        }
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          // suppress secondary rollback failure
+        }
+        throw new TransactionAsyncCallbackUnsupportedError();
+      }
+
       db.exec('COMMIT');
       return result;
     } catch (error) {
@@ -154,6 +198,7 @@ class SqliteDatabaseImpl implements SqliteDatabase {
         { cause: error },
       );
     } finally {
+      scopeActive = false;
       this.inTransaction = false;
     }
   }
@@ -180,6 +225,7 @@ class SqliteDatabaseImpl implements SqliteDatabase {
     }
     const db = this.rawDb;
     this.rawDb = null;
+    this.inTransaction = false;
     try {
       db.close();
     } catch (error) {
@@ -242,6 +288,23 @@ export function openSqliteDatabase(options: OpenSqliteDatabaseOptions): SqliteDa
       `Failed to open SQLite database at '${databasePath}': ${err instanceof Error ? err.message : String(err)}`,
       { cause: err },
     );
+  }
+
+  // Enforce secure POSIX file permissions (0o600) on database file
+  if (databasePath !== ':memory:' && process.platform !== 'win32') {
+    try {
+      fs.chmodSync(databasePath, 0o600);
+    } catch (err) {
+      try {
+        rawDb.close();
+      } catch {
+        // ignore
+      }
+      throw new DatabaseOpenFailedError(
+        `Failed to enforce secure POSIX file permissions (0600) on database file '${databasePath}': ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
   }
 
   // Configure and verify PRAGMA foreign_keys = ON

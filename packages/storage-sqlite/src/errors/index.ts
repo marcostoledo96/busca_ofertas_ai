@@ -3,6 +3,7 @@ export {
   type SqliteStorageErrorOptions,
   type MigrationFailedErrorDetails,
   type SchemaVersionUnsupportedDetails,
+  type TransactionErrorCode,
   SqliteStorageError,
   DatabaseOpenFailedError,
   DatabaseClosedError,
@@ -11,6 +12,8 @@ export {
   MigrationManifestInvalidError,
   SchemaVersionUnsupportedError,
   TransactionFailedError,
+  TransactionAsyncCallbackUnsupportedError,
+  TransactionScopeClosedError,
   InvalidDatabasePathError,
   isSqliteStorageError,
 } from './storage-errors.js';

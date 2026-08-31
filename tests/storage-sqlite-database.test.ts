@@ -22,6 +22,43 @@ describe('SQLite Database Lifecycle & Configuration (BOAI-010)', () => {
     });
   });
 
+  it('enforces secure POSIX permissions (0600) on newly created database file', () => {
+    withTempDatabase((db, ctx) => {
+      expect(fs.existsSync(ctx.databasePath)).toBe(true);
+      if (process.platform !== 'win32') {
+        const stat = fs.statSync(ctx.databasePath);
+        // 0o600 in octal is 384 in decimal (rw-------)
+        expect(stat.mode & 0o777).toBe(0o600);
+      }
+    });
+  });
+
+  it('hardens pre-existing permissive database files to 0600 upon opening in POSIX', () => {
+    const ctx = createTempDatabaseContext();
+    try {
+      // Create a dummy file with overly permissive mode 0o644 (rw-r--r--)
+      fs.writeFileSync(ctx.databasePath, '');
+      if (process.platform !== 'win32') {
+        fs.chmodSync(ctx.databasePath, 0o644);
+        expect(fs.statSync(ctx.databasePath).mode & 0o777).toBe(0o644);
+      }
+
+      // Open database through storage package
+      const db = openSqliteDatabase({ databasePath: ctx.databasePath });
+      expect(db.isOpen).toBe(true);
+
+      // Verify file permission was hardened to 0o600
+      if (process.platform !== 'win32') {
+        const stat = fs.statSync(ctx.databasePath);
+        expect(stat.mode & 0o777).toBe(0o600);
+      }
+
+      db.close();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   it('rejects invalid or directory paths', () => {
     // Empty path
     expect(() => openSqliteDatabase({ databasePath: '' })).toThrow(InvalidDatabasePathError);
@@ -53,9 +90,12 @@ describe('SQLite Database Lifecycle & Configuration (BOAI-010)', () => {
 
       // Verify POSIX mode on Unix platforms
       if (process.platform !== 'win32') {
-        const stat = fs.statSync(parentDir);
+        const dirStat = fs.statSync(parentDir);
         // 0o700 in octal is 448 in decimal (rwx------)
-        expect(stat.mode & 0o777).toBe(0o700);
+        expect(dirStat.mode & 0o777).toBe(0o700);
+
+        const fileStat = fs.statSync(dbPath);
+        expect(fileStat.mode & 0o777).toBe(0o600);
       }
     } finally {
       db.close();

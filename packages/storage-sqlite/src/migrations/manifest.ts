@@ -3,7 +3,7 @@ import type { Migration, MigrationContext } from './types.js';
 
 export const SCHEMA_MIGRATIONS_TABLE_NAME = 'schema_migrations' as const;
 
-export const migration001: Migration = {
+const prodMigration001: Migration = Object.freeze({
   version: 1,
   name: '001_create_schema_migrations',
   up(context: MigrationContext): void {
@@ -15,9 +15,9 @@ export const migration001: Migration = {
       );
     `);
   },
-};
+});
 
-export const PRODUCTION_MIGRATIONS: readonly Migration[] = Object.freeze([migration001]);
+export const PRODUCTION_MIGRATIONS: readonly Migration[] = Object.freeze([prodMigration001]);
 
 export function validateMigrationManifest(migrations: readonly Migration[]): readonly Migration[] {
   const seenVersions = new Set<number>();

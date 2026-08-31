@@ -9,7 +9,6 @@ export {
 export {
   SCHEMA_MIGRATIONS_TABLE_NAME,
   PRODUCTION_MIGRATIONS,
-  migration001,
   validateMigrationManifest,
 } from './manifest.js';
 

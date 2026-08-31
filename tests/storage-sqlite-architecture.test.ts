@@ -6,6 +6,10 @@ import * as StorageTesting from '@busca-ofertas-ai/storage-sqlite/testing';
 
 interface PackageJsonShape {
   readonly name?: string;
+  readonly engines?: {
+    readonly node?: string;
+    readonly pnpm?: string;
+  };
   readonly dependencies?: Record<string, string>;
   readonly devDependencies?: Record<string, string>;
 }
@@ -28,6 +32,8 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010)', () => {
     expect(typeof StorageModule.MigrationManifestInvalidError).toBe('function');
     expect(typeof StorageModule.SchemaVersionUnsupportedError).toBe('function');
     expect(typeof StorageModule.TransactionFailedError).toBe('function');
+    expect(typeof StorageModule.TransactionAsyncCallbackUnsupportedError).toBe('function');
+    expect(typeof StorageModule.TransactionScopeClosedError).toBe('function');
     expect(typeof StorageModule.InvalidDatabasePathError).toBe('function');
 
     // Constants
@@ -37,6 +43,53 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010)', () => {
     expect(StorageModule.PRODUCTION_MIGRATIONS.length).toBe(1);
     expect(StorageModule.PRODUCTION_MIGRATIONS[0]!.version).toBe(1);
     expect(StorageModule.PRODUCTION_MIGRATIONS[0]!.name).toBe('001_create_schema_migrations');
+
+    // Implementation details like migration001 are hidden from public exports
+    expect((StorageModule as Record<string, unknown>)['migration001']).toBeUndefined();
+  });
+
+  it('guarantees runtime immutability of the production migration manifest', () => {
+    expect(Object.isFrozen(StorageModule.PRODUCTION_MIGRATIONS)).toBe(true);
+    expect(Object.isFrozen(StorageModule.PRODUCTION_MIGRATIONS[0])).toBe(true);
+
+    // Attempting to push to frozen array must throw in strict mode
+    expect(() => {
+      (StorageModule.PRODUCTION_MIGRATIONS as unknown as unknown[]).push({
+        version: 99,
+        name: 'mutated',
+        up: () => {},
+      });
+    }).toThrow();
+
+    // Attempting to mutate descriptor properties must throw in strict mode
+    expect(() => {
+      (
+        StorageModule.PRODUCTION_MIGRATIONS[0] as unknown as {
+          version: number;
+        }
+      ).version = 999;
+    }).toThrow();
+  });
+
+  it('declares Node.js >= 22.13.0 engine requirement for standard unflagged node:sqlite support', () => {
+    const rootPkgPath = path.resolve('package.json');
+    const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf-8')) as PackageJsonShape;
+
+    expect(rootPkg.engines?.node).toBeDefined();
+    const engineNode = rootPkg.engines!.node!;
+    expect(engineNode).toMatch(/>=\s*22\.13\.0/);
+
+    // Ensure engine cannot be accidentally downgraded below 22.13.0
+    const match = />=\s*(\d+)\.(\d+)\.(\d+)/.exec(engineNode);
+    expect(match).not.toBeNull();
+    const [, major, minor] = match!;
+    const majorNum = Number(major);
+    const minorNum = Number(minor);
+
+    expect(majorNum >= 22).toBe(true);
+    if (majorNum === 22) {
+      expect(minorNum >= 13).toBe(true);
+    }
   });
 
   it('exports test helper utilities from testing entrypoint', () => {

@@ -7,6 +7,8 @@ export type SqliteStorageErrorCode =
   | 'SCHEMA_VERSION_UNSUPPORTED'
   | 'TRANSACTION_FAILED'
   | 'TRANSACTION_ALREADY_ACTIVE'
+  | 'TRANSACTION_ASYNC_CALLBACK_UNSUPPORTED'
+  | 'TRANSACTION_SCOPE_CLOSED'
   | 'INVALID_DATABASE_PATH';
 
 export interface SqliteStorageErrorOptions {
@@ -105,14 +107,40 @@ export class SchemaVersionUnsupportedError extends SqliteStorageError {
   }
 }
 
+export type TransactionErrorCode =
+  | 'TRANSACTION_FAILED'
+  | 'TRANSACTION_ALREADY_ACTIVE'
+  | 'TRANSACTION_ASYNC_CALLBACK_UNSUPPORTED'
+  | 'TRANSACTION_SCOPE_CLOSED';
+
 export class TransactionFailedError extends SqliteStorageError {
   constructor(
     message: string,
-    code: 'TRANSACTION_FAILED' | 'TRANSACTION_ALREADY_ACTIVE' = 'TRANSACTION_FAILED',
+    code: TransactionErrorCode = 'TRANSACTION_FAILED',
     options?: SqliteStorageErrorOptions,
   ) {
     super(message, code, options);
     this.name = 'TransactionFailedError';
+  }
+}
+
+export class TransactionAsyncCallbackUnsupportedError extends SqliteStorageError {
+  constructor(
+    message = 'Async transaction callbacks are not supported: transaction callback returned a Promise or thenable.',
+    options?: SqliteStorageErrorOptions,
+  ) {
+    super(message, 'TRANSACTION_ASYNC_CALLBACK_UNSUPPORTED', options);
+    this.name = 'TransactionAsyncCallbackUnsupportedError';
+  }
+}
+
+export class TransactionScopeClosedError extends SqliteStorageError {
+  constructor(
+    message = 'Cannot perform operation: transaction scope has finished and is no longer active.',
+    options?: SqliteStorageErrorOptions,
+  ) {
+    super(message, 'TRANSACTION_SCOPE_CLOSED', options);
+    this.name = 'TransactionScopeClosedError';
   }
 }
 

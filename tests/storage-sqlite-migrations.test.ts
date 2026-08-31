@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   openSqliteDatabase,
+  MigrationFailedError,
   MigrationManifestInvalidError,
   SchemaVersionUnsupportedError,
   SCHEMA_MIGRATIONS_TABLE_NAME,
@@ -77,15 +78,68 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
         standardDb.migrate();
       } catch (err) {
         expect(err).toBeInstanceOf(SchemaVersionUnsupportedError);
-        const versionErr = err as SchemaVersionUnsupportedError;
-        expect(versionErr.code).toBe('SCHEMA_VERSION_UNSUPPORTED');
-        expect(versionErr.foundVersion).toBe(2);
-        expect(versionErr.maxSupportedVersion).toBe(1);
-        expect(versionErr.message).toContain('exceeds maximum version 1');
-        expect(versionErr.message).toContain('Please upgrade');
+        if (err instanceof SchemaVersionUnsupportedError) {
+          expect(err.code).toBe('SCHEMA_VERSION_UNSUPPORTED');
+          expect(err.foundVersion).toBe(2);
+          expect(err.maxSupportedVersion).toBe(1);
+          expect(err.message).toContain('exceeds maximum version 1');
+          expect(err.message).toContain('Please upgrade');
+        }
       }
 
       standardDb.close();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it('rejects async migration up callbacks and does not record them in schema_migrations', () => {
+    const ctx = createTempDatabaseContext();
+    try {
+      const asyncMigrations: readonly Migration[] = [
+        ...PRODUCTION_MIGRATIONS,
+        {
+          version: 2,
+          name: '002_async_invalid_migration',
+          up: (tx) => {
+            tx.exec('CREATE TABLE async_table_uncommitted (id INT PRIMARY KEY);');
+            return Promise.resolve() as unknown as void;
+          },
+        },
+      ];
+
+      const db = openSqliteDatabase({
+        databasePath: ctx.databasePath,
+        customMigrations: asyncMigrations,
+      });
+
+      expect(() => db.migrate()).toThrow(MigrationFailedError);
+      try {
+        db.migrate();
+      } catch (err) {
+        expect(err).toBeInstanceOf(MigrationFailedError);
+        if (err instanceof MigrationFailedError) {
+          expect(err.version).toBe(2);
+          expect(err.migrationName).toBe('002_async_invalid_migration');
+        }
+      }
+
+      // Assert DB state: version remains 1, schema_migrations has only 1 row, async_table not created
+      expect(db.getCurrentSchemaVersion()).toBe(1);
+      const applied = db.getAppliedMigrations();
+      expect(applied.map((a) => a.version)).toEqual([1]);
+
+      const tableCheck = db
+        .prepare<{ name: string }, [string]>(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        )
+        .get('async_table_uncommitted');
+      expect(tableCheck).toBeUndefined();
+
+      // DB remains open, usable and closable
+      expect(db.isOpen).toBe(true);
+      db.close();
+      expect(db.isOpen).toBe(false);
     } finally {
       ctx.cleanup();
     }

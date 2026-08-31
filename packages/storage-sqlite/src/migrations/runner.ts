@@ -21,6 +21,14 @@ interface MigrationRecordRow {
   readonly applied_at: string;
 }
 
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
 export function inspectSchemaMigrations(db: SqliteDatabase): readonly AppliedMigration[] {
   const tableCheck = db
     .prepare<TableCheckRow, [string]>(
@@ -111,7 +119,22 @@ export function runMigrations(
   for (const migration of pendingMigrations) {
     try {
       db.transaction((tx) => {
-        migration.up(tx);
+        const upResult = migration.up(tx) as unknown;
+        if (isThenable(upResult)) {
+          const promiseLike = upResult as unknown as {
+            catch?: (fn: () => void) => unknown;
+          };
+          if (typeof promiseLike.catch === 'function') {
+            promiseLike.catch(() => {});
+          }
+          throw new MigrationFailedError(
+            {
+              version: migration.version,
+              migrationName: migration.name,
+            },
+            `Migration ${migration.version} ('${migration.name}') returned a Promise/thenable. Migrations must be synchronous.`,
+          );
+        }
         const insertStmt = tx.prepare<Record<string, unknown>, [number, string, string]>(
           `INSERT INTO ${SCHEMA_MIGRATIONS_TABLE_NAME} (version, name, applied_at) VALUES (?, ?, ?)`,
         );
@@ -125,6 +148,9 @@ export function runMigrations(
       });
       newlyApplied++;
     } catch (error) {
+      if (error instanceof MigrationFailedError) {
+        throw error;
+      }
       throw new MigrationFailedError(
         {
           version: migration.version,

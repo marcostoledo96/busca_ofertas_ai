@@ -7,7 +7,7 @@ Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunid
 ## Requisitos
 
 - **Sistema operativo**: Linux / Ubuntu (para el launcher de escritorio y scripts de usuario)
-- **Node.js**: `22.5.0` o superior (`>=22.5.0`, soporte de `node:sqlite`)
+- **Node.js**: `22.13.0` o superior (`>=22.13.0`, soporte estándar de `node:sqlite` sin flags)
 - **pnpm**: `9.0.0` o superior (versión fijada del repositorio: `10.33.2`)
 
 ## Instalación y preparación
@@ -80,7 +80,7 @@ El menú principal contractual presenta 8 opciones:
 1. `1. Ejecutar una búsqueda`: Todavía no implementado (previsto para BOAI-011).
 2. `2. Crear una búsqueda`: **Disponible** — Wizard guiado (modo Simple y Avanzado) para crear búsquedas válidas en base a capacidades registradas.
 3. `3. Editar una búsqueda`: **Disponible** — Edición modular de secciones con preservación de campos no modificados y diff estructural antes de guardar.
-4. `4. Ver historial`: Todavía no implementado (previsto para BOAI-010).
+4. `4. Ver historial`: Todavía no implementado (previsto para BOAI-012).
 5. `5. Revisar publicaciones dudosas`: Todavía no implementado (previsto para BOAI-011).
 6. `6. Ver errores de fuentes`: Todavía no implementado (previsto para BOAI-011).
 7. `7. Configuración`: **Disponible** — Submenú para importar YAML, exportar búsquedas y eliminar configuraciones.
@@ -106,7 +106,7 @@ Busca Ofertas AI sigue estrictamente la especificación **XDG Base Directory**:
 
 - **Regla XDG estricta**: Si una variable de entorno XDG contiene una ruta relativa, se ignora por completo y se utiliza el fallback estándar bajo `$HOME`.
 - **Apertura de reportes**: La aplicación incluye el seam `ReportOpenerPort` que abre reportes locales mediante `xdg-open` sin invocar shells. Si el navegador no puede abrirse (ej. entorno sin display), la CLI presenta la ruta sanitizada del reporte sin marcar la ejecución como fallida.
-- **Persistencia en SQLite**: BOAI-010 implementará el almacenamiento SQLite e historial; BOAI-008 únicamente reserva y resuelve de forma determinista su ubicación en `dataRoot`.
+- **Persistencia en SQLite**: BOAI-010 inicializa el almacenamiento fundacional de SQLite y migraciones; la persistencia operativa e historial pertenecen a BOAI-011 y BOAI-012; BOAI-008 únicamente reserva y resuelve de forma determinista su ubicación en `dataRoot`.
 
 #### Tabla de Códigos de Salida (Exit Codes)
 
