@@ -6,6 +6,7 @@ import {
   NodeFileSystemSavedSearchConfigStore,
   NodeTextFileAdapter,
   isCliError,
+  EXIT_CODES,
 } from '@busca-ofertas-ai/cli';
 
 describe('CLI Storage and Transfer Seams (BOAI-007)', () => {
@@ -41,18 +42,30 @@ describe('CLI Storage and Transfer Seams (BOAI-007)', () => {
         .mockRejectedValueOnce(new Error('EACCES: permission denied'));
 
       try {
-        await expect(store.write('permission-fail', 'test')).rejects.toThrow();
-
+        let captured: unknown;
         try {
-          await store.write('permission-fail', 'test');
+          await store.write('permission-fail', 'schemaVersion: 1\nid: permission-fail\n');
         } catch (err) {
-          expect(isCliError(err)).toBe(true);
-          if (isCliError(err)) {
-            expect(err.code).toBe('DIRECTORY_PERMISSION_FAILED');
-            expect(err.userMessage).toContain(
-              'No se pudieron asegurar los permisos privados (0700)',
-            );
-          }
+          captured = err;
+        }
+
+        expect(isCliError(captured)).toBe(true);
+        if (isCliError(captured)) {
+          expect(captured.code).toBe('DIRECTORY_PERMISSION_FAILED');
+          expect(captured.exitCode).toBe(EXIT_CODES.INVALID_CONFIGURATION);
+          expect(captured.userMessage).toContain(
+            'No se pudieron asegurar los permisos privados (0700)',
+          );
+        }
+
+        // Verify target YAML was not created
+        expect(await store.exists('permission-fail')).toBe(false);
+        expect(fs.existsSync(store.resolvePath('permission-fail'))).toBe(false);
+
+        // Verify no temp file residue was left
+        if (fs.existsSync(store.storageRoot)) {
+          const files = await fs.promises.readdir(store.storageRoot);
+          expect(files.filter((f) => f.includes('permission-fail'))).toEqual([]);
         }
       } finally {
         chmodSpy.mockRestore();
