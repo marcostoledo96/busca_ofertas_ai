@@ -146,18 +146,24 @@ No se aceptan exclusiones de cobertura destinadas a esconder lógica compleja si
 
 ## CI
 
-El pipeline mínimo ejecutará:
+El pipeline contractual de GitHub Actions (`.github/workflows/ci.yml`) ejecuta de forma determinista y offline:
 
-1. instalación reproducible con lockfile;
-2. format check;
-3. lint;
-4. typecheck;
-5. unit tests;
-6. contract tests offline;
-7. integration tests SQLite;
-8. build;
-9. auditoría de dependencias;
-10. validación de archivos de procedencia.
+1. checkout con permisos mínimos (`contents: read`, `persist-credentials: false`);
+2. setup de pnpm 10 y Node.js 22 desde `.nvmrc` con caché derivado de `pnpm-lock.yaml`;
+3. rechazo de archivos generados de registry (`node scripts/ci/check-generated-files.mjs`);
+4. escaneo de secretos y credenciales trackeadas (`node scripts/ci/scan-secrets.mjs`);
+5. auditoría de dependencias (`pnpm audit --audit-level=high`);
+6. instalación reproducible congelada (`pnpm install --frozen-lockfile`);
+7. limpieza de builds anteriores (`pnpm clean`);
+8. verificación de formato (`pnpm format:check`);
+9. análisis estático estricto (`pnpm lint`);
+10. verificación de límites arquitectónicos (`pnpm lint:boundaries`);
+11. verificación de tipos (`pnpm typecheck`);
+12. ejecución de la suite completa de tests (`pnpm test`);
+13. compilación del workspace (`pnpm build`);
+14. validación semántica de procedencia cruzada y actions (`pnpm ci:provenance`);
+15. validación estructural de la política de CI (`pnpm ci:workflow`);
+16. verificación de inmutabilidad del árbol trackeado (`git diff --exit-code`).
 
 ## Regresiones
 

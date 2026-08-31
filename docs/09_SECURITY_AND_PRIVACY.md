@@ -129,14 +129,16 @@ Antes de enviar contenido a un proveedor:
 - no enviar cookies, identificadores privados ni archivos crudos completos;
 - validar respuesta como input no confiable.
 
-## Supply chain
+## Supply chain y seguridad en CI
 
-- lockfile obligatorio;
-- dependencias mínimas;
-- auditoría en CI;
-- revisión manual de updates que afecten browsers, parsers o SQLite;
-- acciones de GitHub fijadas a versiones estables y permisos mínimos;
-- procedencia obligatoria para código copiado.
+- **Mínimo privilegio**: Los workflows de GitHub Actions declaran explícitamente `permissions: contents: read` y `persist-credentials: false`.
+- **Triggers seguros**: Se utilizan exclusivamente `push` y `pull_request`. Se prohíbe el uso de `pull_request_target` para evitar ejecución de código no confiable con privilegios elevados.
+- **Pinning inmutable de Actions**: Todas las GitHub Actions externas se fijan por commit SHA completo de 40 caracteres (no por tags mutables como `@v7` o `@main`) y se registran en `UPSTREAMS.lock.yml` y `THIRD_PARTY_NOTICES.md`.
+- **Caché seguro y reproducible**: El caché de Node y pnpm en CI deriva exclusivamente de `pnpm-lock.yaml`. No se cachean `node_modules`, cookies, sesiones ni credenciales.
+- **Auditoría estricta de dependencias**: La auditoría (`pnpm audit --audit-level=high`) bloquea vulnerabilidades `HIGH` y `CRITICAL` en dependencias de producción y `devDependencies`. No se permite el uso de `--ignore-registry-errors` ni `--ignore-unfixable`, ni suppressions/overrides automáticos.
+- **Detección determinista de secretos**: Escaneo de archivos trackeados mediante `pnpm ci:secrets` que reporta alertas sin exponer valores sensibles en stdout/stderr.
+- **Límites entre validación y branch protection**: La validación de políticas dentro del workflow (`pnpm ci:workflow`) actúa como defensa en profundidad, pero no reemplaza la configuración server-side de GitHub (como required status checks y branch protection), la cual corresponde a la administración del repositorio y queda fuera del scope de la CI local.
+
 
 ## Respuesta ante incidente
 

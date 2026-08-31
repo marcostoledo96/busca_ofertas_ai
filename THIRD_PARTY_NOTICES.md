@@ -28,6 +28,36 @@ La skill `setup-ts-deep-modules` está marcada upstream como `in-progress`; la v
 - Estado: herramienta externa instalada por el usuario; no se vendorea ningún binario.
 - Contrato: `GENTLE_AI.lock.yml` y `docs/13_ANTIGRAVITY_GENTLE_AI_WORKFLOW.md`.
 
+## Acciones de GitHub CI fijadas
+
+### `actions/checkout`
+
+- Repositorio: `https://github.com/actions/checkout`
+- Release: `v7.0.1`
+- Commit SHA: `3d3c42e5aac5ba805825da76410c181273ba90b1`
+- Licencia: MIT
+- Uso: checkout del repositorio en GitHub Actions con `persist-credentials: false`.
+- Estado: herramienta externa de CI fijada por commit SHA completo en `.github/workflows/ci.yml`.
+
+### `actions/setup-node`
+
+- Repositorio: `https://github.com/actions/setup-node`
+- Release: `v7.0.0`
+- Commit SHA: `820762786026740c76f36085b0efc47a31fe5020`
+- Licencia: MIT
+- Uso: configuración del runtime Node.js 22 y caché de pnpm en GitHub Actions.
+- Estado: herramienta externa de CI fijada por commit SHA completo en `.github/workflows/ci.yml`.
+
+### `pnpm/action-setup`
+
+- Repositorio: `https://github.com/pnpm/action-setup`
+- Release: `v6.0.10`
+- Commit SHA: `0977fd99725f1db4007ccb2928dbb4e90d06cc86`
+- Licencia: MIT
+- Uso: instalación de pnpm 10 en GitHub Actions sin ejecución automática de install.
+- Estado: herramienta externa de CI fijada por commit SHA completo en `.github/workflows/ci.yml`.
+
+
 ## Código previsto para reutilización
 
 ### `jlsookiki/secondhand-mcp`

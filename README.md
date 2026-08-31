@@ -19,15 +19,35 @@ pnpm install --frozen-lockfile
 
 Todos los scripts se ejecutan desde la raíz del monorepo:
 
+### Desarrollo y compilación
+
 - `pnpm format:check`: verifica el formato del código mediante Prettier.
 - `pnpm format`: formatea automáticamente los archivos compatibles mediante Prettier.
 - `pnpm lint`: ejecuta ESLint con reglas TypeScript estrictas, límites de export maps y verificación de tipos.
 - `pnpm lint:boundaries`: valida las reglas arquitectónicas y límites de módulos con dependency-cruiser.
-- `pnpm typecheck`: verifica los tipos en todo el monorepo sin emitir archivos mediante TypeScript (`tsc -b --noEmit`).
+- `pnpm typecheck`: verifica los tipos en todo el monorepo sin emitir archivos mediante TypeScript (`tsc -b`).
 - `pnpm test`: compila los paquetes del workspace y ejecuta la suite de tests locales mediante Vitest.
 - `pnpm test:watch`: ejecuta Vitest en modo interactivo/watch.
 - `pnpm build`: compila los paquetes del workspace mediante TypeScript (`tsc -b`).
 - `pnpm clean`: limpia los artefactos de build y cachés de compilación.
+
+### Supply chain, seguridad y CI
+
+- `pnpm ci:generated`: verifica que los archivos generados de Gentle AI (`.atl/`) no estén versionados y que `.gitignore` tenga reglas exactas (sin ignores globales).
+- `pnpm ci:secrets`: escanea archivos trackeados en búsqueda de credenciales, tokens o archivos sensibles sin exponer sus valores.
+- `pnpm ci:provenance`: valida semánticamente la procedencia de upstreams, locks cruzados, skills, notices y el pinning de GitHub Actions.
+- `pnpm ci:workflow`: comprueba la política de seguridad del workflow de CI (permisos mínimos, pinning por SHA, triggers seguros y calidad).
+- `pnpm audit:dependencies`: ejecuta la auditoría de dependencias bloqueante para vulnerabilidades `HIGH` y `CRITICAL` en dev y prod.
+
+## Integración Continua (CI)
+
+El proyecto utiliza GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) para reproducir los quality gates locales en cada `push` y `pull_request`:
+
+1. **Permisos mínimos**: ejecución con `contents: read` y `persist-credentials: false`.
+2. **Pinning inmutable**: todas las Actions externas están fijadas por commit SHA completo de 40 caracteres y registradas en [`UPSTREAMS.lock.yml`](UPSTREAMS.lock.yml).
+3. **Instalación reproducible**: Node 22 (`.nvmrc`), pnpm 10.33.2 y caché de store derivado estrictamente de `pnpm-lock.yaml`.
+4. **Gates estrictos**: ejecución secuencial de format, lint, límites de arquitectura, typecheck, tests unitarios/contrato, build, escaneo de secretos, guard de `.atl/`, validación de procedencia y auditoría de seguridad.
+5. **Aislamiento**: la CI permanece 100 % offline respecto de fuentes de Marketplace, sin requerir secretos, credenciales ni Gentle AI en el runner.
 
 ## Objetivo
 

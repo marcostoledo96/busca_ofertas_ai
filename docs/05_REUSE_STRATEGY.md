@@ -136,6 +136,15 @@ Gentle AI se fija como herramienta externa, no vendoreada. Cambiar la versión r
 
 No copiar contenido administrado por una versión distinta ni mezclar proyecciones sin ejecutar `gentle-ai sync` después de la actualización aceptada.
 
+### Acciones de GitHub CI
+
+Las GitHub Actions externas utilizadas en los workflows (`actions/checkout`, `actions/setup-node`, `pnpm/action-setup`) son herramientas externas ejecutables de CI.
+- No constituyen código de runtime del producto ni se vendorean sus fuentes en el árbol de trabajo.
+- Se fijan inmutablemente por commit SHA completo de 40 caracteres en `.github/workflows/ci.yml`.
+- Se registran en `UPSTREAMS.lock.yml` (con rol `ci-action` y estado `pinned-ci-action`) y en `THIRD_PARTY_NOTICES.md`.
+- El validador `pnpm ci:provenance` exige consistencia cruzada automática entre las Actions utilizadas en los workflows y las registradas en `UPSTREAMS.lock.yml`.
+
+
 ## Procedimiento por PR
 
 Toda PR que reutilice código, datos o skills externos debe incluir:

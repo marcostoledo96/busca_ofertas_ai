@@ -91,19 +91,43 @@ Una issue no está terminada hasta que:
 - excluye archivos generados del registry;
 - deja el árbol de trabajo limpio.
 
-## Calidad
+## Calidad y Quality Gates obligatorios
 
-Las herramientas mínimas serán:
+Antes de abrir una Pull Request, el desarrollador debe ejecutar localmente y dejar en verde la totalidad de los quality gates:
 
-- TypeScript estricto;
-- formatter y linter;
-- límites de imports comprobables;
-- tests unitarios, de contrato e integración;
-- CI con instalación reproducible;
-- auditoría de dependencias;
-- fixtures sintéticos o sanitizados.
+```bash
+pnpm install --frozen-lockfile
+pnpm clean
+pnpm format:check
+pnpm lint
+pnpm lint:boundaries
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm ci:generated
+pnpm ci:secrets
+pnpm ci:provenance
+pnpm ci:workflow
+pnpm audit:dependencies
+```
 
-No se permiten tests unitarios que dependan de Facebook o de Internet en vivo.
+### Política de auditoría de dependencias (`pnpm audit:dependencies`)
+- **CRITICAL**: Bloqueante (falla CI).
+- **HIGH**: Bloqueante (falla CI).
+- **MODERATE**: No bloqueante para el MVP actual.
+- **LOW**: No bloqueante para el MVP actual.
+- **Alcance**: Se auditan tanto dependencias de producción como `devDependencies` (la superficie de CI y tooling ejecuta código dev).
+- **Sin flags permisivos**: Prohibido el uso de `--ignore-registry-errors` y `--ignore-unfixable`.
+- **Sin excepciones automáticas**: No inventar overrides, suppressions ni ignorar advisories sin una decisión explícita de arquitectura/producto.
+
+### Reglas de CI y Supply Chain
+- **Pinning estricto de Actions**: Toda GitHub Action externa en `.github/workflows/` debe fijarse por commit SHA completo de 40 caracteres y registrarse en `UPSTREAMS.lock.yml` y `THIRD_PARTY_NOTICES.md`.
+- **Permisos mínimos**: Workflows ejecutan con `permissions: contents: read` y `persist-credentials: false`. Prohibido `pull_request_target`.
+- **Guard de `.atl/`**: Los archivos generados `.atl/.skill-registry.cache.json` y `.atl/skill-registry.md` nunca deben versionarse en Git. `.gitignore` debe contener reglas exactas y no un ignore global `.atl/`.
+- **Detección de secretos**: Prohibido versionar archivos `.env`, claves privadas (`.pem`, `.key`), tokens o `storageState.json`. El escáner local alerta sin volcar valores sensibles a la salida.
+- **Validación de procedencia**: `UPSTREAMS.lock.yml`, `GENTLE_AI.lock.yml`, `.agents/skills.lock.yml` y `THIRD_PARTY_NOTICES.md` deben ser coherentes y consistentes entre sí.
+- **Offline en CI**: La suite de tests y la CI no realizan peticiones de red hacia fuentes de Marketplace ni ejecutan automatizaciones con navegador en vivo.
+
 
 ## Seguridad y ética de automatización
 
