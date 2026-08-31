@@ -7,7 +7,7 @@ import console from 'node:console';
 
 const GENERATED_FILES = ['.atl/.skill-registry.cache.json', '.atl/skill-registry.md'];
 
-const FORBIDDEN_GLOBAL_IGNORE_PATTERNS = [/^\/?\.atl\/?$/, /^\/?\.atl\/\*$/];
+const FORBIDDEN_GLOBAL_IGNORE_PATTERNS = [/^(?:\*\*\/?|\/)?\.atl(?:\/|\/\*+|\/\*\*|\*\*)?$/];
 
 export function checkGeneratedFiles(rootDir = process.cwd()) {
   const errors = [];

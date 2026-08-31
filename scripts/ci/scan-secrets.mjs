@@ -67,9 +67,9 @@ const CONTENT_RULES = [
   },
   {
     id: 'HIGH_CONFIDENCE_SECRET_ASSIGNMENT',
-    // Matches explicit assignment of long high-entropy credential strings, excluding common placeholders
+    // Matches explicit assignment of long high-entropy credential strings, including bare token and secret, excluding common placeholders
     regex:
-      /(?:api[_-]?key|auth[_-]?token|secret[_-]?key|private[_-]?key|password|access[_-]?token)\s*[:=]\s*['"](?!(?:placeholder|dummy|<[^>]+>|example|fake|test|TODO|xxx|changeme|your[_-]|none|null|undefined|false|true)\b)[A-Za-z0-9_\-.~+/=]{20,}['"]/i,
+      /\b(?:api[_-]?key|auth[_-]?token|secret[_-]?key|private[_-]?key|access[_-]?token|password|token|secret)\s*[:=]\s*['"](?!(?:placeholder|dummy|<[^>]+>|example|fake|test|TODO|xxx|changeme|your[_-]|none|null|undefined|false|true)\b)[A-Za-z0-9_\-.~+/=]{20,}['"]/i,
   },
 ];
 

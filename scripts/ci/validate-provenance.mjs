@@ -14,9 +14,11 @@ function safeParseYaml(filePath, errors) {
   }
   try {
     const content = readFileSync(filePath, 'utf-8');
-    return YAML.parse(content);
+    return YAML.parse(content, { prettyErrors: false });
   } catch (err) {
-    errors.push(`YAML_PARSE_ERROR: Failed to parse ${filePath}: ${err.message}`);
+    const errorType = err.code || err.name || 'YAMLParseError';
+    const lineInfo = err.linePos?.[0]?.line ? ` at line ${err.linePos[0].line}` : '';
+    errors.push(`YAML_PARSE_ERROR: Failed to parse ${filePath}: ${errorType}${lineInfo}`);
     return null;
   }
 }
@@ -35,9 +37,9 @@ export function validateProvenance(rootDir = process.cwd()) {
   const upstreamsById = new Map();
 
   if (upstreamsData) {
-    if (typeof upstreamsData.version !== 'number' || upstreamsData.version < 1) {
+    if (upstreamsData.version !== 2) {
       errors.push(
-        `UPSTREAMS_INVALID: 'version' must be a positive integer, got ${upstreamsData.version}`,
+        `UPSTREAMS_UNSUPPORTED_VERSION: Expected version 2, got ${upstreamsData.version}`,
       );
     }
     if (!Array.isArray(upstreamsData.upstreams)) {
@@ -138,6 +140,11 @@ export function validateProvenance(rootDir = process.cwd()) {
           `PROVENANCE_MISMATCH: gentle-ai commit SHA mismatch ('${gentleUpstream.sha}' vs '${gentleData.tool?.commit}')`,
         );
       }
+      if (gentleData.tool?.license && gentleUpstream.license !== gentleData.tool.license) {
+        errors.push(
+          `PROVENANCE_MISMATCH: gentle-ai license mismatch ('${gentleUpstream.license}' vs '${gentleData.tool?.license}')`,
+        );
+      }
       if (gentleUpstream.lock !== 'GENTLE_AI.lock.yml') {
         errors.push(
           `PROVENANCE_MISMATCH: gentle-ai lock path in UPSTREAMS must be 'GENTLE_AI.lock.yml'`,
@@ -178,6 +185,11 @@ export function validateProvenance(rootDir = process.cwd()) {
       if (skillsUpstream.sha !== skillsData.source?.sha) {
         errors.push(
           `PROVENANCE_MISMATCH: mattpocock-skills commit SHA mismatch ('${skillsUpstream.sha}' vs '${skillsData.source?.sha}')`,
+        );
+      }
+      if (skillsData.source?.license && skillsUpstream.license !== skillsData.source.license) {
+        errors.push(
+          `PROVENANCE_MISMATCH: mattpocock-skills license mismatch ('${skillsUpstream.license}' vs '${skillsData.source?.license}')`,
         );
       }
       if (skillsUpstream.lock !== '.agents/skills.lock.yml') {
@@ -265,15 +277,20 @@ export function validateProvenance(rootDir = process.cwd()) {
           `NOTICES_MISSING_ENTRY: upstream '${upstreamId}' repository '${repoShort}' not found in THIRD_PARTY_NOTICES.md`,
         );
       }
-      if (sha && !noticesContent.includes(sha) && (!release || !noticesContent.includes(release))) {
+      if (sha && !noticesContent.includes(sha)) {
         errors.push(
           `NOTICES_MISSING_SHA: upstream '${upstreamId}' sha '${sha}' not referenced in THIRD_PARTY_NOTICES.md`,
+        );
+      }
+      if (release && !noticesContent.includes(release)) {
+        errors.push(
+          `NOTICES_MISSING_RELEASE: upstream '${upstreamId}' release '${release}' not referenced in THIRD_PARTY_NOTICES.md`,
         );
       }
     }
   }
 
-  // 5. Validate CI Action Pinning against UPSTREAMS.lock.yml
+  // 5. Validate CI Action & Reusable Workflow Pinning against UPSTREAMS.lock.yml
   const workflowsDir = join(root, '.github/workflows');
   if (existsSync(workflowsDir)) {
     const workflowFiles = readdirSync(workflowsDir).filter(
@@ -284,20 +301,35 @@ export function validateProvenance(rootDir = process.cwd()) {
       const wfData = safeParseYaml(wfPath, errors);
       if (!wfData || !wfData.jobs) continue;
 
-      for (const job of Object.values(wfData.jobs)) {
-        if (!job || !Array.isArray(job.steps)) continue;
-        for (const step of job.steps) {
-          if (!step || !step.uses) continue;
-          const uses = step.uses.trim();
+      for (const [jobId, job] of Object.entries(wfData.jobs)) {
+        if (!job || typeof job !== 'object') continue;
+
+        const usesEntries = [];
+        if (job.uses && typeof job.uses === 'string') {
+          usesEntries.push({ uses: job.uses.trim(), source: `job '${jobId}'` });
+        }
+        if (Array.isArray(job.steps)) {
+          for (const step of job.steps) {
+            if (step && step.uses && typeof step.uses === 'string') {
+              usesEntries.push({
+                uses: step.uses.trim(),
+                source: `step '${step.name || step.uses}'`,
+              });
+            }
+          }
+        }
+
+        for (const entry of usesEntries) {
+          const uses = entry.uses;
           if (uses.startsWith('./')) {
-            // Local action is fine
+            // Local action or local reusable workflow is fine
             continue;
           }
 
           const atIndex = uses.indexOf('@');
           if (atIndex === -1) {
             errors.push(
-              `UNPINNED_ACTION: Workflow '${wfFile}' step '${step.name || uses}' uses unpinned action '${uses}'`,
+              `UNPINNED_ACTION: Workflow '${wfFile}' ${entry.source} uses unpinned action '${uses}'`,
             );
             continue;
           }
@@ -312,12 +344,17 @@ export function validateProvenance(rootDir = process.cwd()) {
             continue;
           }
 
+          // Extract repo path for reusable workflows (e.g. owner/repo/.github/workflows/foo.yml -> owner/repo)
+          const repoTarget = actionTarget.includes('/.github/workflows/')
+            ? actionTarget.substring(0, actionTarget.indexOf('/.github/workflows/'))
+            : actionTarget;
+
           // Match with UPSTREAMS.lock.yml
           const matchingUpstream = Array.from(upstreamsById.values()).find((u) => {
             const normalizedUpstreamRepo = u.repository.replace(/^https:\/\/github\.com\//, '');
             return (
-              normalizedUpstreamRepo === actionTarget ||
-              normalizedUpstreamRepo.toLowerCase() === actionTarget.toLowerCase()
+              normalizedUpstreamRepo === repoTarget ||
+              normalizedUpstreamRepo.toLowerCase() === repoTarget.toLowerCase()
             );
           });
 

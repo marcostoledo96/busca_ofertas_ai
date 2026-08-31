@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, cpSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, cpSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -66,12 +66,29 @@ describe('validate-provenance', () => {
       expect(res.stdout).toContain('OK: Provenance and action locks validated successfully.');
     });
 
-    it('fails when UPSTREAMS.lock.yml contains invalid YAML', () => {
-      writeFileSync(join(testRepoDir, 'UPSTREAMS.lock.yml'), 'invalid: yaml: [unclosed');
+    it('fails when UPSTREAMS.lock.yml has unsupported version (e.g. version: 999)', () => {
+      const content = readFileSync(join(testRepoDir, 'UPSTREAMS.lock.yml'), 'utf-8').replace(
+        'version: 2',
+        'version: 999',
+      );
+      writeFileSync(join(testRepoDir, 'UPSTREAMS.lock.yml'), content);
+
+      const res = runValidate(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.errors.some((e) => e.includes('UPSTREAMS_UNSUPPORTED_VERSION'))).toBe(true);
+    });
+
+    it('fails on invalid YAML and NEVER leaks source excerpts or secrets in error output', () => {
+      const syntheticSecret = ['my_secret_', '1234567890abcdefghijklmnopqrstuvwxyz'].join('');
+      writeFileSync(
+        join(testRepoDir, 'UPSTREAMS.lock.yml'),
+        `invalid: yaml: [unclosed: "${syntheticSecret}"`,
+      );
 
       const res = runValidate(testRepoDir);
       expect(res.status).toBe(1);
       expect(res.errors.some((e) => e.includes('YAML_PARSE_ERROR'))).toBe(true);
+      expect(res.output).not.toContain(syntheticSecret);
     });
 
     it('fails when UPSTREAMS.lock.yml has duplicate upstream IDs', () => {
@@ -136,6 +153,27 @@ describe('validate-provenance', () => {
       expect(res.errors.some((e) => e.includes('gentle-ai commit SHA mismatch'))).toBe(true);
     });
 
+    it('fails when Gentle AI license in UPSTREAMS does not match GENTLE_AI.lock.yml', () => {
+      const gentleLock = [
+        'schemaVersion: 1',
+        'tool:',
+        '  name: gentle-ai',
+        '  repository: https://github.com/Gentleman-Programming/gentle-ai',
+        '  release: v2.5.0-rc.3',
+        '  commit: 8e5c79b08c14b5ecded4a449e7d21cd526f52e94',
+        '  license: AGPL-3.0',
+        '  runtime: antigravity',
+        '  vendoredBinary: false',
+        'policy:',
+        '  automaticUpgrade: false',
+      ].join('\n');
+      writeFileSync(join(testRepoDir, 'GENTLE_AI.lock.yml'), gentleLock);
+
+      const res = runValidate(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.errors.some((e) => e.includes('gentle-ai license mismatch'))).toBe(true);
+    });
+
     it('fails when skills source SHA in UPSTREAMS does not match .agents/skills.lock.yml', () => {
       const skillsLock = [
         'schemaVersion: 1',
@@ -155,24 +193,21 @@ describe('validate-provenance', () => {
       );
     });
 
-    it('fails when a skill localPath attempts directory traversal (../)', () => {
+    it('fails when skills license in UPSTREAMS does not match .agents/skills.lock.yml', () => {
       const skillsLock = [
         'schemaVersion: 1',
         'installRoot: .agents/skills',
         'source:',
         '  repository: https://github.com/mattpocock/skills',
         '  sha: 6654f6b60cd9d5be8b54c6fafe44346dabeb3b76',
-        '  license: MIT',
-        'skills:',
-        '  - id: malicious-skill',
-        '    localPath: .agents/skills/../../etc',
-        '    status: active',
+        '  license: GPL-3.0',
+        'skills: []',
       ].join('\n');
       writeFileSync(join(testRepoDir, '.agents/skills.lock.yml'), skillsLock);
 
       const res = runValidate(testRepoDir);
       expect(res.status).toBe(1);
-      expect(res.errors.some((e) => e.includes('SKILLS_LOCK_INVALID_PATH'))).toBe(true);
+      expect(res.errors.some((e) => e.includes('mattpocock-skills license mismatch'))).toBe(true);
     });
 
     it('fails when an active skill SKILL.md file is missing', () => {
@@ -206,58 +241,68 @@ describe('validate-provenance', () => {
       ).toBe(true);
     });
 
-    it('fails when a CI workflow uses a remote action not registered in UPSTREAMS.lock.yml', () => {
-      const workflowWithUnknownAction = [
+    it('fails when THIRD_PARTY_NOTICES.md has a stale or missing SHA for an upstream', () => {
+      const notices = readFileSync(join(testRepoDir, 'THIRD_PARTY_NOTICES.md'), 'utf-8');
+      const staleNotices = notices.replace(
+        '3d3c42e5aac5ba805825da76410c181273ba90b1',
+        'stale00000000000000000000000000000000000',
+      );
+      writeFileSync(join(testRepoDir, 'THIRD_PARTY_NOTICES.md'), staleNotices);
+
+      const res = runValidate(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.errors.some((e) => e.includes('NOTICES_MISSING_SHA'))).toBe(true);
+    });
+
+    it('fails when a remote reusable workflow uses a mutable tag (@main) instead of 40-char SHA', () => {
+      const workflowWithReusableWorkflow = [
         'name: CI',
         'on: [push]',
-        'permissions: { contents: read }',
+        'permissions:',
+        '  contents: read',
         'jobs:',
-        '  test:',
-        '    runs-on: ubuntu-latest',
-        '    steps:',
-        '      - uses: unknown-org/unknown-action@1111111111111111111111111111111111111111',
+        '  reuse:',
+        '    uses: evil/example/.github/workflows/test.yml@main',
       ].join('\n');
-      writeFileSync(join(testRepoDir, '.github/workflows/ci.yml'), workflowWithUnknownAction);
+      writeFileSync(join(testRepoDir, '.github/workflows/ci.yml'), workflowWithReusableWorkflow);
+
+      const res = runValidate(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.errors.some((e) => e.includes('MUTABLE_ACTION_REF'))).toBe(true);
+    });
+
+    it('fails when a remote reusable workflow uses a 40-char SHA not registered in UPSTREAMS.lock.yml', () => {
+      const workflowWithReusableWorkflow = [
+        'name: CI',
+        'on: [push]',
+        'permissions:',
+        '  contents: read',
+        'jobs:',
+        '  reuse:',
+        '    uses: evil/example/.github/workflows/test.yml@1111111111111111111111111111111111111111',
+      ].join('\n');
+      writeFileSync(join(testRepoDir, '.github/workflows/ci.yml'), workflowWithReusableWorkflow);
 
       const res = runValidate(testRepoDir);
       expect(res.status).toBe(1);
       expect(res.errors.some((e) => e.includes('ACTION_NOT_IN_UPSTREAMS'))).toBe(true);
     });
 
-    it('fails when a CI workflow uses a SHA different from the pinned SHA in UPSTREAMS.lock.yml', () => {
-      const workflowWithDifferentSha = [
+    it('fails when a remote reusable workflow SHA differs from UPSTREAMS.lock.yml', () => {
+      const workflowWithReusableWorkflow = [
         'name: CI',
         'on: [push]',
-        'permissions: { contents: read }',
+        'permissions:',
+        '  contents: read',
         'jobs:',
-        '  test:',
-        '    runs-on: ubuntu-latest',
-        '    steps:',
-        '      - uses: actions/checkout@1111111111111111111111111111111111111111',
+        '  reuse:',
+        '    uses: actions/checkout/.github/workflows/check.yml@2222222222222222222222222222222222222222',
       ].join('\n');
-      writeFileSync(join(testRepoDir, '.github/workflows/ci.yml'), workflowWithDifferentSha);
+      writeFileSync(join(testRepoDir, '.github/workflows/ci.yml'), workflowWithReusableWorkflow);
 
       const res = runValidate(testRepoDir);
       expect(res.status).toBe(1);
       expect(res.errors.some((e) => e.includes('ACTION_SHA_MISMATCH'))).toBe(true);
-    });
-
-    it('fails when a CI workflow action ref is a mutable tag (@v7) rather than a 40-char SHA', () => {
-      const workflowWithMutableTag = [
-        'name: CI',
-        'on: [push]',
-        'permissions: { contents: read }',
-        'jobs:',
-        '  test:',
-        '    runs-on: ubuntu-latest',
-        '    steps:',
-        '      - uses: actions/checkout@v7.0.1',
-      ].join('\n');
-      writeFileSync(join(testRepoDir, '.github/workflows/ci.yml'), workflowWithMutableTag);
-
-      const res = runValidate(testRepoDir);
-      expect(res.status).toBe(1);
-      expect(res.errors.some((e) => e.includes('MUTABLE_ACTION_REF'))).toBe(true);
     });
   });
 });

@@ -131,6 +131,28 @@ describe('scan-secrets', () => {
       expect(res.output).not.toContain(syntheticAwsKey);
     });
 
+    it('fails when bare token assignment has synthetic credential and redacts the value', () => {
+      const syntheticSecretValue = ['sec_val_', 'abcdefghijklmnopqrstuvwxyz0123456789'].join('');
+      writeFileSync(join(testRepoDir, 'auth.js'), `const token = "${syntheticSecretValue}";\n`);
+      execFileSync('git', ['add', 'auth.js'], { cwd: testRepoDir });
+
+      const res = runScan(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.output).toContain('SECRET_DETECTED HIGH_CONFIDENCE_SECRET_ASSIGNMENT auth.js:1');
+      expect(res.output).not.toContain(syntheticSecretValue);
+    });
+
+    it('fails when bare secret assignment has synthetic credential and redacts the value', () => {
+      const syntheticSecretValue = ['key_val_', '9876543210zyxwvutsrqponmlkjihgfedcba'].join('');
+      writeFileSync(join(testRepoDir, 'auth.js'), `const secret = "${syntheticSecretValue}";\n`);
+      execFileSync('git', ['add', 'auth.js'], { cwd: testRepoDir });
+
+      const res = runScan(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.output).toContain('SECRET_DETECTED HIGH_CONFIDENCE_SECRET_ASSIGNMENT auth.js:1');
+      expect(res.output).not.toContain(syntheticSecretValue);
+    });
+
     it('does not produce false positives for safe placeholder assignments', () => {
       writeFileSync(
         join(testRepoDir, 'placeholders.ts'),
@@ -139,6 +161,8 @@ describe('scan-secrets', () => {
           "export const token = 'TODO';",
           "export const secret = 'example';",
           "export const auth = 'placeholder';",
+          "export const tokenPlaceholder = '<token>';",
+          "export const secretPlaceholder = '<secret>';",
           '',
         ].join('\n'),
       );

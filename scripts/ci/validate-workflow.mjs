@@ -24,6 +24,20 @@ const REQUIRED_STEPS_COMMANDS = [
   'git diff --exit-code',
 ];
 
+function isNeutralizedCommand(cmdLine) {
+  // Check if command is an echo, has || true, ; true, || exit 0, ; exit 0, etc.
+  if (/^\s*echo\s+/i.test(cmdLine)) {
+    return true;
+  }
+  if (/\|\|\s*true\b/i.test(cmdLine) || /;\s*true\b/i.test(cmdLine)) {
+    return true;
+  }
+  if (/\|\|\s*exit\s*0\b/i.test(cmdLine) || /;\s*exit\s*0\b/i.test(cmdLine)) {
+    return true;
+  }
+  return false;
+}
+
 export function validateWorkflow(rootDir = process.cwd()) {
   const errors = [];
   const root = resolve(rootDir);
@@ -38,9 +52,13 @@ export function validateWorkflow(rootDir = process.cwd()) {
   let doc;
   try {
     workflowContent = readFileSync(workflowPath, 'utf-8');
-    doc = YAML.parse(workflowContent);
+    doc = YAML.parse(workflowContent, { prettyErrors: false });
   } catch (err) {
-    errors.push(`WORKFLOW_PARSE_ERROR: Failed to parse .github/workflows/ci.yml: ${err.message}`);
+    const errorType = err.code || err.name || 'YAMLParseError';
+    const lineInfo = err.linePos?.[0]?.line ? ` at line ${err.linePos[0].line}` : '';
+    errors.push(
+      `WORKFLOW_PARSE_ERROR: Failed to parse .github/workflows/ci.yml: ${errorType}${lineInfo}`,
+    );
     return errors;
   }
 
@@ -85,11 +103,9 @@ export function validateWorkflow(rootDir = process.cwd()) {
   if (!permissions) {
     errors.push('MISSING_PERMISSIONS: Workflow must explicitly specify top-level permissions');
   } else if (typeof permissions === 'string') {
-    if (permissions !== 'read-all') {
-      errors.push(
-        `INVALID_PERMISSIONS: Unexpected permissions string '${permissions}', expected explicit 'contents: read'`,
-      );
-    }
+    errors.push(
+      `INVALID_PERMISSIONS: String permissions '${permissions}' prohibited; expected explicit 'contents: read'`,
+    );
   } else if (typeof permissions === 'object') {
     if (permissions.contents !== 'read') {
       errors.push(
@@ -97,8 +113,8 @@ export function validateWorkflow(rootDir = process.cwd()) {
       );
     }
     for (const [permKey, permVal] of Object.entries(permissions)) {
-      if (permVal === 'write') {
-        errors.push(`FORBIDDEN_PERMISSIONS: 'write' permission on '${permKey}' is prohibited`);
+      if (permVal === 'write' || permVal === 'write-all') {
+        errors.push(`FORBIDDEN_PERMISSIONS: '${permVal}' permission on '${permKey}' is prohibited`);
       }
     }
   }
@@ -114,15 +130,52 @@ export function validateWorkflow(rootDir = process.cwd()) {
   for (const [jobId, job] of Object.entries(jobs)) {
     if (!job || typeof job !== 'object') continue;
 
-    // Check job-level permissions for any write
-    if (job.permissions && typeof job.permissions === 'object') {
-      for (const [permKey, permVal] of Object.entries(job.permissions)) {
-        if (permVal === 'write') {
-          errors.push(
-            `FORBIDDEN_PERMISSIONS: Job '${jobId}' defines forbidden 'write' permission on '${permKey}'`,
-          );
+    // Check job-level permissions: no write, write-all, read-all, or elevating permissions
+    if (job.permissions !== undefined) {
+      if (typeof job.permissions === 'string') {
+        errors.push(
+          `FORBIDDEN_JOB_PERMISSIONS: Job '${jobId}' defines forbidden string permissions '${job.permissions}'`,
+        );
+      } else if (typeof job.permissions === 'object' && job.permissions !== null) {
+        for (const [permKey, permVal] of Object.entries(job.permissions)) {
+          if (
+            permVal === 'write' ||
+            permVal === 'write-all' ||
+            (permKey === 'contents' && permVal !== 'read')
+          ) {
+            errors.push(
+              `FORBIDDEN_JOB_PERMISSIONS: Job '${jobId}' defines forbidden permission '${permVal}' on '${permKey}'`,
+            );
+          }
         }
       }
+    }
+
+    // Check job-level reusable workflow uses
+    if (job.uses && typeof job.uses === 'string') {
+      const jobUses = job.uses.trim();
+      if (!jobUses.startsWith('./')) {
+        const atIndex = jobUses.indexOf('@');
+        if (atIndex === -1) {
+          errors.push(
+            `UNPINNED_ACTION: Job '${jobId}' uses unpinned reusable workflow '${jobUses}'`,
+          );
+        } else {
+          const actionRef = jobUses.substring(atIndex + 1);
+          if (!SHA40_REGEX.test(actionRef)) {
+            errors.push(
+              `MUTABLE_ACTION_REF: Job '${jobId}' reusable workflow '${jobUses}' is pinned to mutable tag/branch '${actionRef}' instead of 40-char SHA`,
+            );
+          }
+        }
+      }
+    }
+
+    // Check job-level secrets
+    if (job.secrets === 'inherit' || (typeof job.secrets === 'object' && job.secrets !== null)) {
+      errors.push(
+        `FORBIDDEN_SECRET_REFERENCE: Job '${jobId}' passes secrets or uses 'secrets: inherit'`,
+      );
     }
 
     if (Array.isArray(job.steps)) {
@@ -198,18 +251,45 @@ export function validateWorkflow(rootDir = process.cwd()) {
   if (!hasPnpmSetup) errors.push("MISSING_STEP: 'pnpm/action-setup' step not found");
 
   // 5. Secret references
+  if (/\bsecrets\s*:\s*inherit\b/i.test(workflowContent)) {
+    errors.push("FORBIDDEN_SECRET_REFERENCE: 'secrets: inherit' is strictly prohibited");
+  }
   const forbiddenSecretPattern = /\$\{\{\s*secrets\./i;
   if (forbiddenSecretPattern.test(workflowContent)) {
     errors.push('FORBIDDEN_SECRET_REFERENCE: Workflow contains reference to secrets context');
   }
 
   // 6. Quality Gates / Required Commands
-  const runCommands = allSteps.filter((s) => s && s.run).map((s) => s.run.trim());
-
   for (const reqCmd of REQUIRED_STEPS_COMMANDS) {
-    const isIncluded = runCommands.some((cmd) => cmd === reqCmd || cmd.includes(reqCmd));
-    if (!isIncluded) {
-      errors.push(`MISSING_QUALITY_GATE: Required command '${reqCmd}' not found in workflow steps`);
+    let foundValidBlockingStep = false;
+
+    for (const step of allSteps) {
+      if (!step || typeof step.run !== 'string') continue;
+      const lines = step.run
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      const executesCommand = lines.some((line) => {
+        if (isNeutralizedCommand(line)) return false;
+        return line === reqCmd;
+      });
+
+      if (executesCommand) {
+        if (step['continue-on-error'] === true || step['continue-on-error'] === 'true') {
+          errors.push(
+            `QUALITY_GATE_CONTINUE_ON_ERROR: Step running '${reqCmd}' must not have continue-on-error: true`,
+          );
+        } else {
+          foundValidBlockingStep = true;
+        }
+      }
+    }
+
+    if (!foundValidBlockingStep) {
+      errors.push(
+        `MISSING_QUALITY_GATE: Required command '${reqCmd}' not found or neutralized in workflow steps`,
+      );
     }
   }
 

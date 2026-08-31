@@ -93,12 +93,23 @@ describe('check-generated-files', () => {
       expect(res.status).toBe(0);
     });
 
-    it('fails when .gitignore contains a global .atl/ ignore', () => {
+    it.each([
+      '.atl/',
+      '.atl',
+      '/.atl',
+      '/.atl/',
+      '.atl/*',
+      '/.atl/*',
+      '.atl/**',
+      '/.atl/**',
+      '**/.atl/',
+      '**/.atl/**',
+    ])('fails when .gitignore contains global ignore variant %s', (pattern) => {
       writeFileSync(
         join(testRepoDir, '.gitignore'),
         [
           'node_modules/',
-          '.atl/',
+          pattern,
           '.atl/.skill-registry.cache.json',
           '.atl/skill-registry.md',
         ].join('\n'),
@@ -106,7 +117,7 @@ describe('check-generated-files', () => {
 
       const res = runCheck(testRepoDir);
       expect(res.status).toBe(1);
-      expect(res.errors.some((e) => e.includes("forbidden global ignore '.atl/'"))).toBe(true);
+      expect(res.errors.some((e) => e.includes('forbidden global ignore'))).toBe(true);
     });
 
     it('fails when .gitignore is missing explicit entries for generated files', () => {
