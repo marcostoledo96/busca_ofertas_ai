@@ -1,12 +1,16 @@
 {
-  "name": "@busca-ofertas-ai/cli",
+  "name": "@busca-ofertas-ai/adapter-synthetic",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "busca-ofertas": "./dist/bin.js"
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
     "dist"
@@ -17,7 +21,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
-    "@busca-ofertas-ai/adapter-synthetic": "workspace:*",
-    "@busca-ofertas-ai/configuration": "workspace:*"
+    "@busca-ofertas-ai/adapter-sdk": "workspace:*",
+    "@busca-ofertas-ai/core": "workspace:*"
   }
 }

@@ -10,6 +10,7 @@
     { "path": "../packages/core" },
     { "path": "../packages/adapter-sdk" },
     { "path": "../packages/configuration" },
+    { "path": "../adapters/synthetic" },
     { "path": "../apps/cli" }
   ]
 }

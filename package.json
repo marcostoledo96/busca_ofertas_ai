@@ -23,10 +23,12 @@
     "ci:secrets": "node scripts/ci/scan-secrets.mjs",
     "ci:provenance": "node scripts/ci/validate-provenance.mjs",
     "ci:workflow": "node scripts/ci/validate-workflow.mjs",
-    "audit:dependencies": "pnpm audit --audit-level=high"
+    "audit:dependencies": "pnpm audit --audit-level=high",
+    "demo:synthetic": "node scripts/demo/run-synthetic-demo.mjs"
   },
   "devDependencies": {
     "@busca-ofertas-ai/adapter-sdk": "workspace:*",
+    "@busca-ofertas-ai/adapter-synthetic": "workspace:*",
     "@busca-ofertas-ai/cli": "workspace:*",
     "@busca-ofertas-ai/configuration": "workspace:*",
     "@busca-ofertas-ai/core": "workspace:*",

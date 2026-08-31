@@ -96,8 +96,8 @@ describe('CLI Menu and Navigation (BOAI-006)', () => {
   });
 
   it('routes to functional wizards on options 2, 3, and 7 without crash', async () => {
-    // Option 2: Crear una búsqueda (informs empty registry in default CLI and returns to main menu)
-    const term2 = new FakeTerminal(['2', '8']);
+    // Option 2: Crear una búsqueda -> 3. Cancelar -> 8. Salir
+    const term2 = new FakeTerminal(['2', '3', '8']);
     const app2 = createCliApplication({ terminal: term2, formatter });
     const exit2 = await app2.run();
     expect(exit2).toBe(EXIT_CODES.SUCCESS);

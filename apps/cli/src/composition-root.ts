@@ -1,5 +1,12 @@
 import * as path from 'node:path';
 import { SourceRegistry } from '@busca-ofertas-ai/configuration';
+import {
+  SyntheticAdapter,
+  SYNTHETIC_ADAPTER_ID,
+  SYNTHETIC_ADAPTER_VERSION,
+  SYNTHETIC_ADAPTER_SDK_VERSION,
+  SYNTHETIC_ADAPTER_CAPABILITIES,
+} from '@busca-ofertas-ai/adapter-synthetic';
 import { resolveXdgAppPaths } from './platform/xdg-paths.js';
 import type { ExitCode } from './runtime/exit-codes.js';
 import { TerminalPort, NodeTerminalAdapter } from './runtime/terminal.js';
@@ -62,6 +69,23 @@ export function resolveDefaultSearchConfigDirectory(explicitDir?: string): strin
 }
 
 /**
+ * Creates the default SourceRegistry pre-configured with available source adapters.
+ * In MVP Stage 1, registers the offline SyntheticAdapter.
+ */
+export function createDefaultSourceRegistry(): SourceRegistry {
+  const registry = new SourceRegistry();
+  registry.register({
+    id: SYNTHETIC_ADAPTER_ID,
+    version: SYNTHETIC_ADAPTER_VERSION,
+    sdkVersion: SYNTHETIC_ADAPTER_SDK_VERSION,
+    capabilities: SYNTHETIC_ADAPTER_CAPABILITIES,
+    status: 'ENABLED',
+    factory: () => new SyntheticAdapter(),
+  });
+  return registry;
+}
+
+/**
  * Creates default menu action handlers for the 8 contractual options.
  */
 export function createDefaultMenuActions(
@@ -79,8 +103,8 @@ export function createDefaultMenuActions(
   const fmt = param instanceof MenuFormatter ? param : (param?.formatter ?? new MenuFormatter());
   const reg =
     param instanceof MenuFormatter
-      ? new SourceRegistry()
-      : (param?.sourceRegistry ?? new SourceRegistry());
+      ? createDefaultSourceRegistry()
+      : (param?.sourceRegistry ?? createDefaultSourceRegistry());
   const defaultDir = resolveDefaultSearchConfigDirectory(
     param instanceof MenuFormatter ? undefined : param?.searchConfigDirectory,
   );
@@ -151,7 +175,7 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
   const errorPresenter = options?.errorPresenter ?? new ErrorPresenter(terminal);
   const formatter = options?.formatter ?? new MenuFormatter();
 
-  const sourceRegistry = options?.sourceRegistry ?? new SourceRegistry();
+  const sourceRegistry = options?.sourceRegistry ?? createDefaultSourceRegistry();
   const defaultStorageDir = resolveDefaultSearchConfigDirectory(options?.searchConfigDirectory);
   const configStore =
     options?.configStore ?? new NodeFileSystemSavedSearchConfigStore(defaultStorageDir);
