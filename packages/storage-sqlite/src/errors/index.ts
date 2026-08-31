@@ -1,0 +1,16 @@
+export {
+  type SqliteStorageErrorCode,
+  type SqliteStorageErrorOptions,
+  type MigrationFailedErrorDetails,
+  type SchemaVersionUnsupportedDetails,
+  SqliteStorageError,
+  DatabaseOpenFailedError,
+  DatabaseClosedError,
+  PragmaConfigurationError,
+  MigrationFailedError,
+  MigrationManifestInvalidError,
+  SchemaVersionUnsupportedError,
+  TransactionFailedError,
+  InvalidDatabasePathError,
+  isSqliteStorageError,
+} from './storage-errors.js';

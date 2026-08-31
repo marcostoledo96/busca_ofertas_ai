@@ -7,7 +7,7 @@ Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunid
 ## Requisitos
 
 - **Sistema operativo**: Linux / Ubuntu (para el launcher de escritorio y scripts de usuario)
-- **Node.js**: `22.0.0` o superior (`>=22.0.0`)
+- **Node.js**: `22.5.0` o superior (`>=22.5.0`, soporte de `node:sqlite`)
 - **pnpm**: `9.0.0` o superior (versión fijada del repositorio: `10.33.2`)
 
 ## Instalación y preparación
@@ -92,17 +92,17 @@ Seleccionar una opción no disponible informa al usuario que aún no está imple
 
 Busca Ofertas AI sigue estrictamente la especificación **XDG Base Directory**:
 
-| Directorio      | Variable XDG                                           | Fallback por defecto                                   | Propósito / Contenido                          | Permisos                 |
-| :-------------- | :----------------------------------------------------- | :----------------------------------------------------- | :--------------------------------------------- | :----------------------- |
-| **Config Root** | `$XDG_CONFIG_HOME`                                     | `~/.config/busca-ofertas-ai`                           | Directorio raíz de configuración               | `0700`                   |
-| **Searches**    | `$XDG_CONFIG_HOME/busca-ofertas-ai/searches`           | `~/.config/busca-ofertas-ai/searches`                  | Búsquedas guardadas (`*.yml`)                  | `0700` (archivos `0600`) |
-| **Data Root**   | `$XDG_DATA_HOME`                                       | `~/.local/share/busca-ofertas-ai`                      | Datos persistentes de la aplicación            | `0700`                   |
-| **Reports**     | `$XDG_DATA_HOME/busca-ofertas-ai/reports`              | `~/.local/share/busca-ofertas-ai/reports`              | Reportes generados (`report.html`, CSV, JSON)  | `0700`                   |
-| **Database**    | `$XDG_DATA_HOME/busca-ofertas-ai/busca-ofertas.sqlite` | `~/.local/share/busca-ofertas-ai/busca-ofertas.sqlite` | Base de datos SQLite (reservada para BOAI-010) | `0600`                   |
-| **State Root**  | `$XDG_STATE_HOME`                                      | `~/.local/state/busca-ofertas-ai`                      | Estado y sesiones persistentes                 | `0700`                   |
-| **Sessions**    | `$XDG_STATE_HOME/busca-ofertas-ai/sessions`            | `~/.local/state/busca-ofertas-ai/sessions`             | Sesiones y autenticación local                 | `0700`                   |
-| **Logs**        | `$XDG_STATE_HOME/busca-ofertas-ai/logs`                | `~/.local/state/busca-ofertas-ai/logs`                 | Diagnósticos y logs redactados                 | `0700`                   |
-| **Cache Root**  | `$XDG_CACHE_HOME`                                      | `~/.cache/busca-ofertas-ai`                            | Archivos temporales no esenciales              | `0700`                   |
+| Directorio      | Variable XDG                                           | Fallback por defecto                                   | Propósito / Contenido                           | Permisos                 |
+| :-------------- | :----------------------------------------------------- | :----------------------------------------------------- | :---------------------------------------------- | :----------------------- |
+| **Config Root** | `$XDG_CONFIG_HOME`                                     | `~/.config/busca-ofertas-ai`                           | Directorio raíz de configuración                | `0700`                   |
+| **Searches**    | `$XDG_CONFIG_HOME/busca-ofertas-ai/searches`           | `~/.config/busca-ofertas-ai/searches`                  | Búsquedas guardadas (`*.yml`)                   | `0700` (archivos `0600`) |
+| **Data Root**   | `$XDG_DATA_HOME`                                       | `~/.local/share/busca-ofertas-ai`                      | Datos persistentes de la aplicación             | `0700`                   |
+| **Reports**     | `$XDG_DATA_HOME/busca-ofertas-ai/reports`              | `~/.local/share/busca-ofertas-ai/reports`              | Reportes generados (`report.html`, CSV, JSON)   | `0700`                   |
+| **Database**    | `$XDG_DATA_HOME/busca-ofertas-ai/busca-ofertas.sqlite` | `~/.local/share/busca-ofertas-ai/busca-ofertas.sqlite` | Base de datos SQLite (inicializada en BOAI-010) | `0600`                   |
+| **State Root**  | `$XDG_STATE_HOME`                                      | `~/.local/state/busca-ofertas-ai`                      | Estado y sesiones persistentes                  | `0700`                   |
+| **Sessions**    | `$XDG_STATE_HOME/busca-ofertas-ai/sessions`            | `~/.local/state/busca-ofertas-ai/sessions`             | Sesiones y autenticación local                  | `0700`                   |
+| **Logs**        | `$XDG_STATE_HOME/busca-ofertas-ai/logs`                | `~/.local/state/busca-ofertas-ai/logs`                 | Diagnósticos y logs redactados                  | `0700`                   |
+| **Cache Root**  | `$XDG_CACHE_HOME`                                      | `~/.cache/busca-ofertas-ai`                            | Archivos temporales no esenciales               | `0700`                   |
 
 - **Regla XDG estricta**: Si una variable de entorno XDG contiene una ruta relativa, se ignora por completo y se utiliza el fallback estándar bajo `$HOME`.
 - **Apertura de reportes**: La aplicación incluye el seam `ReportOpenerPort` que abre reportes locales mediante `xdg-open` sin invocar shells. Si el navegador no puede abrirse (ej. entorno sin display), la CLI presenta la ruta sanitizada del reporte sin marcar la ejecución como fallida.
