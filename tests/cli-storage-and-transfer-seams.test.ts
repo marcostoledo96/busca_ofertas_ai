@@ -28,13 +28,28 @@ describe('CLI Storage and Transfer Seams (BOAI-007)', () => {
   });
 
   describe('NodeFileSystemSavedSearchConfigStore', () => {
-    it('writes and reads a saved search YAML file atomically', async () => {
+    it('uses XDG searchesDir by default when constructed without explicit directory', () => {
+      const defaultStore = new NodeFileSystemSavedSearchConfigStore();
+      expect(defaultStore.storageRoot.endsWith(path.join('busca-ofertas-ai', 'searches'))).toBe(
+        true,
+      );
+    });
+
+    it('writes and reads a saved search YAML file atomically with 0600 file and 0700 dir permissions', async () => {
       const sampleYaml = 'schemaVersion: 1\nid: test-search\nname: Test\n';
       await store.write('test-search', sampleYaml);
 
       expect(await store.exists('test-search')).toBe(true);
       const readContent = await store.read('test-search');
       expect(readContent).toBe(sampleYaml);
+
+      if (process.platform !== 'win32') {
+        const fileStat = await fs.promises.stat(store.resolvePath('test-search'));
+        expect(fileStat.mode & 0o777).toBe(0o600);
+
+        const dirStat = await fs.promises.stat(store.storageRoot);
+        expect(dirStat.mode & 0o777).toBe(0o700);
+      }
 
       const list = await store.list();
       expect(list).toEqual(['test-search']);

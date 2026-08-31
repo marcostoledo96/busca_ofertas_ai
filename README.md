@@ -2,18 +2,45 @@
 
 Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunidades provenientes de múltiples fuentes. El primer caso de uso será encontrar **Nintendo Switch Lite en Facebook Marketplace dentro de AMBA**, pero el núcleo se diseña para admitir otros productos, precios, monedas, sitios, inmuebles y vehículos sin modificar la lógica central.
 
-> Estado actual: **wizard interactivo de configuración implementado (`BOAI-007`); shell CLI (`BOAI-006`), lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
+> Estado actual: **launcher de Ubuntu y directorios XDG (`BOAI-008`); wizard interactivo de configuración (`BOAI-007`); shell CLI (`BOAI-006`), lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
 
 ## Requisitos
 
+- **Sistema operativo**: Linux / Ubuntu (para el launcher de escritorio y scripts de usuario)
 - **Node.js**: `22.0.0` o superior (`>=22.0.0`)
 - **pnpm**: `9.0.0` o superior (versión fijada del repositorio: `10.33.2`)
 
-## Instalación
+## Instalación y preparación
 
 ```bash
+# 1. Instalar dependencias
 pnpm install --frozen-lockfile
+
+# 2. Compilar el monorepo y la CLI
+pnpm build
+
+# 3. Instalar el comando local y el launcher de Ubuntu (nivel usuario, sin sudo)
+./scripts/install-ubuntu.sh
 ```
+
+El script de instalación:
+
+- Crea el comando ejecutable `busca-ofertas` en `~/.local/bin/busca-ofertas`.
+- Instala el launcher de escritorio `busca-ofertas-ai.desktop` en `$XDG_DATA_HOME/applications/` (o `~/.local/share/applications/`) para que aparezca en el menú de aplicaciones de Ubuntu con `Terminal=true`.
+- Crea y asegura los directorios privados de la aplicación con permisos restrictivos `0700`.
+- Comprueba que `$HOME/.local/bin` esté en `$PATH` y provee instrucciones claras si falta configurar.
+
+> **Nota sobre el launcher local**: El launcher ejecuta directamente el build local del repositorio. Si movés o eliminás el repositorio de su ubicación actual, deberás volver a ejecutar `./scripts/install-ubuntu.sh`.
+
+### Desinstalación del launcher
+
+Para remover el comando y el launcher de escritorio:
+
+```bash
+./scripts/uninstall-ubuntu.sh
+```
+
+> **Preservación de datos**: La desinstalación del launcher **NO** elimina tus búsquedas, reportes, configuraciones, sesiones ni logs. Todos tus datos permanecen intactos en los directorios XDG de tu usuario.
 
 ## Comandos disponibles
 
@@ -33,17 +60,19 @@ Todos los scripts se ejecutan desde la raíz del monorepo:
 
 ### Ejecución de la CLI local
 
-Para construir y ejecutar la shell interactiva de `busca-ofertas`:
+Para iniciar la aplicación interactiva:
 
 ```bash
-# Compilar el monorepo y la aplicación CLI
-pnpm build
+# Opción 1: Mediante el comando instalado a nivel usuario (desde cualquier directorio)
+busca-ofertas
 
-# Iniciar la CLI interactiva
+# Opción 2: Desde el menú de aplicaciones de Ubuntu (ícono "Busca Ofertas AI")
+
+# Opción 3: Directamente con Node desde el repositorio
 node apps/cli/dist/bin.js
 ```
 
-#### Estado de opciones del menú (BOAI-007)
+#### Estado de opciones del menú (BOAI-008)
 
 El menú principal contractual presenta 8 opciones:
 
@@ -58,11 +87,25 @@ El menú principal contractual presenta 8 opciones:
 
 Seleccionar una opción no disponible informa al usuario que aún no está implementada y regresa de forma segura al menú interactivo.
 
-### Gestión de búsquedas y almacenamiento (BOAI-007)
+### Jerarquía de Directorios XDG y Permisos (BOAI-008)
 
-- **Directorio provisional pre-XDG**: Las búsquedas se persisten como archivos `${id}.yml` en `config/searches/`. _Nota: BOAI-008 reemplazará esta resolución por directorios XDG del sistema operativo mediante el seam de almacenamiento `SavedSearchConfigStore` sin modificar la lógica del wizard._
-- **Defaults del Wizard v1**: Solo los bloques contractuales obligatorios (`evaluation`, `ai`, `retention`) y `enabled=true` poseen valores predeterminados (visibles y editables). Opciones específicas como moneda, modelo, filtros de producto o proveedor de IA no están predefinidas globalmente.
-- **Fuentes y capacidades**: Las preguntas se adaptan dinámicamente según el `SourceRegistry`. En el runtime productivo inicial sin adaptadores cargados, la CLI muestra un mensaje accionable y regresa al menú de forma segura. En tests, se comprueban los flujos completos con adaptadores sintéticos fake.
+Busca Ofertas AI sigue estrictamente la especificación **XDG Base Directory**:
+
+| Directorio      | Variable XDG                                           | Fallback por defecto                                   | Propósito / Contenido                          | Permisos                 |
+| :-------------- | :----------------------------------------------------- | :----------------------------------------------------- | :--------------------------------------------- | :----------------------- |
+| **Config Root** | `$XDG_CONFIG_HOME`                                     | `~/.config/busca-ofertas-ai`                           | Directorio raíz de configuración               | `0700`                   |
+| **Searches**    | `$XDG_CONFIG_HOME/busca-ofertas-ai/searches`           | `~/.config/busca-ofertas-ai/searches`                  | Búsquedas guardadas (`*.yml`)                  | `0700` (archivos `0600`) |
+| **Data Root**   | `$XDG_DATA_HOME`                                       | `~/.local/share/busca-ofertas-ai`                      | Datos persistentes de la aplicación            | `0700`                   |
+| **Reports**     | `$XDG_DATA_HOME/busca-ofertas-ai/reports`              | `~/.local/share/busca-ofertas-ai/reports`              | Reportes generados (`report.html`, CSV, JSON)  | `0700`                   |
+| **Database**    | `$XDG_DATA_HOME/busca-ofertas-ai/busca-ofertas.sqlite` | `~/.local/share/busca-ofertas-ai/busca-ofertas.sqlite` | Base de datos SQLite (reservada para BOAI-010) | `0600`                   |
+| **State Root**  | `$XDG_STATE_HOME`                                      | `~/.local/state/busca-ofertas-ai`                      | Estado y sesiones persistentes                 | `0700`                   |
+| **Sessions**    | `$XDG_STATE_HOME/busca-ofertas-ai/sessions`            | `~/.local/state/busca-ofertas-ai/sessions`             | Sesiones y autenticación local                 | `0700`                   |
+| **Logs**        | `$XDG_STATE_HOME/busca-ofertas-ai/logs`                | `~/.local/state/busca-ofertas-ai/logs`                 | Diagnósticos y logs redactados                 | `0700`                   |
+| **Cache Root**  | `$XDG_CACHE_HOME`                                      | `~/.cache/busca-ofertas-ai`                            | Archivos temporales no esenciales              | `0700`                   |
+
+- **Regla XDG estricta**: Si una variable de entorno XDG contiene una ruta relativa, se ignora por completo y se utiliza el fallback estándar bajo `$HOME`.
+- **Apertura de reportes**: La aplicación incluye el seam `ReportOpenerPort` que abre reportes locales mediante `xdg-open` sin invocar shells. Si el navegador no puede abrirse (ej. entorno sin display), la CLI presenta la ruta sanitizada del reporte sin marcar la ejecución como fallida.
+- **Persistencia en SQLite**: BOAI-010 implementará el almacenamiento SQLite e historial; BOAI-008 únicamente reserva y resuelve de forma determinista su ubicación en `dataRoot`.
 
 #### Tabla de Códigos de Salida (Exit Codes)
 
