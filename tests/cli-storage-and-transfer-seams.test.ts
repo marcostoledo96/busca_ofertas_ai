@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -6,6 +6,7 @@ import {
   NodeFileSystemSavedSearchConfigStore,
   NodeTextFileAdapter,
   isCliError,
+  EXIT_CODES,
 } from '@busca-ofertas-ai/cli';
 
 describe('CLI Storage and Transfer Seams (BOAI-007)', () => {
@@ -28,13 +29,64 @@ describe('CLI Storage and Transfer Seams (BOAI-007)', () => {
   });
 
   describe('NodeFileSystemSavedSearchConfigStore', () => {
-    it('writes and reads a saved search YAML file atomically', async () => {
+    it('uses XDG searchesDir by default when constructed without explicit directory', () => {
+      const defaultStore = new NodeFileSystemSavedSearchConfigStore();
+      expect(defaultStore.storageRoot.endsWith(path.join('busca-ofertas-ai', 'searches'))).toBe(
+        true,
+      );
+    });
+
+    it('FINDING 1: throws DIRECTORY_PERMISSION_FAILED on POSIX chmod failure and does not continue silently', async () => {
+      const chmodSpy = vi
+        .spyOn(fs.promises, 'chmod')
+        .mockRejectedValueOnce(new Error('EACCES: permission denied'));
+
+      try {
+        let captured: unknown;
+        try {
+          await store.write('permission-fail', 'schemaVersion: 1\nid: permission-fail\n');
+        } catch (err) {
+          captured = err;
+        }
+
+        expect(isCliError(captured)).toBe(true);
+        if (isCliError(captured)) {
+          expect(captured.code).toBe('DIRECTORY_PERMISSION_FAILED');
+          expect(captured.exitCode).toBe(EXIT_CODES.INVALID_CONFIGURATION);
+          expect(captured.userMessage).toContain(
+            'No se pudieron asegurar los permisos privados (0700)',
+          );
+        }
+
+        // Verify target YAML was not created
+        expect(await store.exists('permission-fail')).toBe(false);
+        expect(fs.existsSync(store.resolvePath('permission-fail'))).toBe(false);
+
+        // Verify no temp file residue was left
+        if (fs.existsSync(store.storageRoot)) {
+          const files = await fs.promises.readdir(store.storageRoot);
+          expect(files.filter((f) => f.includes('permission-fail'))).toEqual([]);
+        }
+      } finally {
+        chmodSpy.mockRestore();
+      }
+    });
+
+    it('writes and reads a saved search YAML file atomically with 0600 file and 0700 dir permissions', async () => {
       const sampleYaml = 'schemaVersion: 1\nid: test-search\nname: Test\n';
       await store.write('test-search', sampleYaml);
 
       expect(await store.exists('test-search')).toBe(true);
       const readContent = await store.read('test-search');
       expect(readContent).toBe(sampleYaml);
+
+      if (process.platform !== 'win32') {
+        const fileStat = await fs.promises.stat(store.resolvePath('test-search'));
+        expect(fileStat.mode & 0o777).toBe(0o600);
+
+        const dirStat = await fs.promises.stat(store.storageRoot);
+        expect(dirStat.mode & 0o777).toBe(0o700);
+      }
 
       const list = await store.list();
       expect(list).toEqual(['test-search']);

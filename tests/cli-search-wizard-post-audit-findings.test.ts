@@ -527,8 +527,8 @@ retention:
     });
   });
 
-  describe('Finding 6 (MEDIUM — Pre-XDG Storage Root CWD-Independence)', () => {
-    it('resolves default pre-XDG storage root deterministically regardless of process.cwd()', () => {
+  describe('Finding 6 (MEDIUM — Storage Root CWD-Independence)', () => {
+    it('resolves default storage root deterministically regardless of process.cwd()', () => {
       const originalCwd = process.cwd();
       const tmpDir = os.tmpdir();
 
@@ -537,7 +537,7 @@ retention:
 
         const resolvedDir = resolveDefaultSearchConfigDirectory();
         expect(resolvedDir).not.toContain(tmpDir);
-        expect(resolvedDir.endsWith(path.join('config', 'searches'))).toBe(true);
+        expect(resolvedDir.endsWith(path.join('busca-ofertas-ai', 'searches'))).toBe(true);
 
         // Verify explicit directory is respected if provided
         const customDir = resolveDefaultSearchConfigDirectory('/custom/searches');

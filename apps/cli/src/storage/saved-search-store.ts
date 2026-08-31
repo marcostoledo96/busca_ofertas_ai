@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { CliError } from '../runtime/errors.js';
 import { EXIT_CODES } from '../runtime/exit-codes.js';
+import { resolveXdgAppPaths } from '../platform/xdg-paths.js';
 
 export const KEBAB_CASE_ID_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -57,8 +58,8 @@ export function validateSearchId(id: string): void {
 export class NodeFileSystemSavedSearchConfigStore implements SavedSearchConfigStore {
   public readonly storageRoot: string;
 
-  constructor(storageRoot: string) {
-    this.storageRoot = path.resolve(storageRoot);
+  constructor(storageRoot?: string) {
+    this.storageRoot = path.resolve(storageRoot ?? resolveXdgAppPaths().searchesDir);
   }
 
   public resolvePath(id: string): string {
@@ -81,7 +82,35 @@ export class NodeFileSystemSavedSearchConfigStore implements SavedSearchConfigSt
   }
 
   private async ensureStorageRoot(): Promise<void> {
-    await fs.promises.mkdir(this.storageRoot, { recursive: true });
+    try {
+      await fs.promises.mkdir(this.storageRoot, { recursive: true, mode: 0o700 });
+      try {
+        await fs.promises.chmod(this.storageRoot, 0o700);
+      } catch (chmodErr) {
+        if (
+          chmodErr instanceof Error &&
+          'code' in chmodErr &&
+          (chmodErr as { code: string }).code === 'EPERM' &&
+          process.platform === 'win32'
+        ) {
+          // Ignore Windows permission limitation
+        } else {
+          throw chmodErr;
+        }
+      }
+    } catch (err) {
+      if (err instanceof CliError) {
+        throw err;
+      }
+      throw new CliError({
+        code: 'DIRECTORY_PERMISSION_FAILED',
+        userMessage: `No se pudieron asegurar los permisos privados (0700) del directorio de almacenamiento: ${this.storageRoot}`,
+        suggestedAction:
+          'Verificá que tu usuario sea propietario del directorio y tenga permisos suficientes de lectura y escritura.',
+        exitCode: EXIT_CODES.INVALID_CONFIGURATION,
+        cause: err,
+      });
+    }
   }
 
   public async list(): Promise<readonly string[]> {

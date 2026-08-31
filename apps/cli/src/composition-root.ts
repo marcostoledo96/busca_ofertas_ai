@@ -1,7 +1,6 @@
 import * as path from 'node:path';
-import * as fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { SourceRegistry } from '@busca-ofertas-ai/configuration';
+import { resolveXdgAppPaths } from './platform/xdg-paths.js';
 import type { ExitCode } from './runtime/exit-codes.js';
 import { TerminalPort, NodeTerminalAdapter } from './runtime/terminal.js';
 import { SignalManagerPort, ProcessSignalManager } from './runtime/signals.js';
@@ -52,28 +51,14 @@ export interface CliApplication {
 }
 
 /**
- * Resolves the default pre-XDG storage directory for saved searches.
- * Deterministic and independent of process.cwd() when unconfigured.
+ * Resolves the default storage directory for saved searches according to XDG specification.
+ * Falls back to $HOME/.config/busca-ofertas-ai/searches when unconfigured.
  */
 export function resolveDefaultSearchConfigDirectory(explicitDir?: string): string {
   if (explicitDir) {
     return path.resolve(explicitDir);
   }
-
-  // Walk up from current module location to locate workspace root containing pnpm-workspace.yaml
-  let currentDir = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 6; i++) {
-    const candidateWorkspace = path.join(currentDir, 'pnpm-workspace.yaml');
-    if (fs.existsSync(candidateWorkspace)) {
-      return path.join(currentDir, 'config/searches');
-    }
-    const parent = path.dirname(currentDir);
-    if (parent === currentDir) break;
-    currentDir = parent;
-  }
-
-  // Fallback: 3 levels up from apps/cli/src or apps/cli/dist
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../config/searches');
+  return resolveXdgAppPaths().searchesDir;
 }
 
 /**

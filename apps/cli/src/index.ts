@@ -149,3 +149,23 @@ export {
   createCliApplication,
   runCli,
 } from './composition-root.js';
+
+// Platform & Linux Integration (XDG, Permissions, Launcher, Report Opener)
+export {
+  DEFAULT_APP_NAMESPACE,
+  DEFAULT_DATABASE_FILENAME,
+  type XdgEnvironment,
+  type AppPaths,
+  type ResolveXdgAppPathsOptions,
+  resolveXdgAppPaths,
+  PRIVATE_DIRECTORY_MODE,
+  ensureAppDirectories,
+  type ReportOpenResult,
+  type ReportOpenerOptions,
+  type ReportOpenerPort,
+  type SpawnFunction,
+  type NodeXdgReportOpenerOptions,
+  NodeXdgReportOpener,
+  type FakeReportOpenerOptions,
+  FakeReportOpener,
+} from './platform/index.js';
