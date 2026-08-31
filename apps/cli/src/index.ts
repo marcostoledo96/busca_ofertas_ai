@@ -75,11 +75,70 @@ export {
   type ActionExecutionContext,
   type ActionResult,
   type MenuAction,
+  CreateSearchActionHandler,
+  EditSearchActionHandler,
+  ConfigurationActionHandler,
   NotImplementedActionHandler,
   ExitActionHandler,
 } from './shell/menu-actions.js';
 
 export { type CliShellOptions, CliShell } from './shell/cli-shell.js';
+
+// Storage & Transfer Seams
+export {
+  type WriteSearchOptions,
+  type RemoveSearchOptions,
+  type SavedSearchConfigStore,
+  KEBAB_CASE_ID_REGEX,
+  validateSearchId,
+  NodeFileSystemSavedSearchConfigStore,
+  InMemorySavedSearchConfigStore,
+} from './storage/saved-search-store.js';
+
+export {
+  type ReadTextFileOptions,
+  type WriteTextFileOptions,
+  type TextFilePort,
+  NodeTextFileAdapter,
+  InMemoryTextFileAdapter,
+} from './storage/text-file-port.js';
+
+// Wizard Infrastructure & Helpers
+export {
+  WIZARD_DEFAULT_ENABLED,
+  WIZARD_DEFAULT_EVALUATION,
+  WIZARD_DEFAULT_AI,
+  WIZARD_DEFAULT_RETENTION,
+  WIZARD_DEFAULT_REPORT,
+} from './wizard/wizard-defaults.js';
+
+export {
+  type DiffChange,
+  calculateStructuralDiff,
+  formatStructuralDiff,
+} from './wizard/structural-diff.js';
+
+export { formatSearchSummary } from './wizard/summary-formatter.js';
+
+export {
+  type PromptTextOptions,
+  type PromptNumberOptions,
+  type ChoiceItem,
+  type MultiChoiceOptions,
+  WizardPrompter,
+} from './wizard/wizard-prompter.js';
+
+export {
+  type CreateSearchWizardOptions,
+  CreateSearchWizard,
+} from './wizard/create-search-wizard.js';
+
+export { type EditSearchWizardOptions, EditSearchWizard } from './wizard/edit-search-wizard.js';
+
+export {
+  type ConfigurationSubmenuOptions,
+  ConfigurationSubmenu,
+} from './wizard/configuration-submenu.js';
 
 // Composition Root
 export {

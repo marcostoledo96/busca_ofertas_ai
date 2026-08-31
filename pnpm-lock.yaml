@@ -51,7 +51,11 @@ importers:
         specifier: ^2.7.0
         version: 2.9.0
 
-  apps/cli: {}
+  apps/cli:
+    dependencies:
+      '@busca-ofertas-ai/configuration':
+        specifier: workspace:*
+        version: link:../../packages/configuration
 
   packages/adapter-sdk:
     dependencies:
