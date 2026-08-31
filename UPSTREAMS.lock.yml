@@ -84,3 +84,33 @@ upstreams:
       - skill-registry
     status: pinned-not-vendored
     lock: GENTLE_AI.lock.yml
+
+  - id: actions-checkout
+    repository: https://github.com/actions/checkout
+    release: v7.0.1
+    sha: 3d3c42e5aac5ba805825da76410c181273ba90b1
+    license: MIT
+    role: ci-action
+    allowedUses:
+      - ci-checkout
+    status: pinned-ci-action
+
+  - id: actions-setup-node
+    repository: https://github.com/actions/setup-node
+    release: v7.0.0
+    sha: 820762786026740c76f36085b0efc47a31fe5020
+    license: MIT
+    role: ci-action
+    allowedUses:
+      - ci-node-setup
+    status: pinned-ci-action
+
+  - id: pnpm-action-setup
+    repository: https://github.com/pnpm/action-setup
+    release: v6.0.10
+    sha: 0977fd99725f1db4007ccb2928dbb4e90d06cc86
+    license: MIT
+    role: ci-action
+    allowedUses:
+      - ci-pnpm-setup
+    status: pinned-ci-action

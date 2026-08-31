@@ -18,7 +18,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "tsc -b",
-    "clean": "tsc -b --clean && rm -rf packages/*/dist tests/tsconfig.tsbuildinfo"
+    "clean": "tsc -b --clean && rm -rf packages/*/dist tests/tsconfig.tsbuildinfo",
+    "ci:generated": "node scripts/ci/check-generated-files.mjs",
+    "ci:secrets": "node scripts/ci/scan-secrets.mjs",
+    "ci:provenance": "node scripts/ci/validate-provenance.mjs",
+    "ci:workflow": "node scripts/ci/validate-workflow.mjs",
+    "audit:dependencies": "pnpm audit --audit-level=high"
   },
   "devDependencies": {
     "@busca-ofertas-ai/adapter-sdk": "workspace:*",
@@ -32,6 +37,7 @@
     "prettier": "^3.5.2",
     "typescript": "~5.8.2",
     "typescript-eslint": "^8.25.0",
-    "vitest": "^3.0.7"
+    "vitest": "^3.0.7",
+    "yaml": "^2.7.0"
   }
 }

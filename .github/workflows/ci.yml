@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Quality & supply-chain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+          cache-dependency-path: 'pnpm-lock.yaml'
+
+      - name: Reject generated Gentle AI registry files
+        run: node scripts/ci/check-generated-files.mjs
+
+      - name: Scan tracked repository for secrets
+        run: node scripts/ci/scan-secrets.mjs
+
+      - name: Dependency audit
+        run: pnpm audit --audit-level=high
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Clean
+        run: pnpm clean
+
+      - name: Format
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Architecture boundaries
+        run: pnpm lint:boundaries
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Validate provenance and locks
+        run: pnpm ci:provenance
+
+      - name: Validate CI policy
+        run: pnpm ci:workflow
+
+      - name: Verify no tracked mutation
+        run: git diff --exit-code
