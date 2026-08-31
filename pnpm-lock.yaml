@@ -11,6 +11,9 @@ importers:
       '@busca-ofertas-ai/adapter-sdk':
         specifier: workspace:*
         version: link:packages/adapter-sdk
+      '@busca-ofertas-ai/cli':
+        specifier: workspace:*
+        version: link:apps/cli
       '@busca-ofertas-ai/configuration':
         specifier: workspace:*
         version: link:packages/configuration
@@ -47,6 +50,8 @@ importers:
       yaml:
         specifier: ^2.7.0
         version: 2.9.0
+
+  apps/cli: {}
 
   packages/adapter-sdk:
     dependencies:

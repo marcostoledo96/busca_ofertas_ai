@@ -2,7 +2,7 @@
 
 Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunidades provenientes de múltiples fuentes. El primer caso de uso será encontrar **Nintendo Switch Lite en Facebook Marketplace dentro de AMBA**, pero el núcleo se diseña para admitir otros productos, precios, monedas, sitios, inmuebles y vehículos sin modificar la lógica central.
 
-> Estado actual: **workspace TypeScript inicializado con quality gates locales (`BOAI-001`); la lógica de dominio, adaptadores, persistencia y CLI se implementarán en las siguientes etapas del roadmap**.
+> Estado actual: **shell interactiva y composition root implementados (`BOAI-006`); la lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
 
 ## Requisitos
 
@@ -28,8 +28,47 @@ Todos los scripts se ejecutan desde la raíz del monorepo:
 - `pnpm typecheck`: verifica los tipos en todo el monorepo sin emitir archivos mediante TypeScript (`tsc -b`).
 - `pnpm test`: compila los paquetes del workspace y ejecuta la suite de tests locales mediante Vitest.
 - `pnpm test:watch`: ejecuta Vitest en modo interactivo/watch.
-- `pnpm build`: compila los paquetes del workspace mediante TypeScript (`tsc -b`).
+- `pnpm build`: compila los paquetes del workspace y la CLI mediante TypeScript (`tsc -b`).
 - `pnpm clean`: limpia los artefactos de build y cachés de compilación.
+
+### Ejecución de la CLI local
+
+Para construir y ejecutar la shell interactiva de `busca-ofertas`:
+
+```bash
+# Compilar el monorepo y la aplicación CLI
+pnpm build
+
+# Iniciar la CLI interactiva
+node apps/cli/dist/bin.js
+```
+
+#### Estado de opciones del menú (BOAI-006)
+
+El menú principal contractual presenta 8 opciones:
+
+1. `1. Ejecutar una búsqueda`: Todavía no implementado (previsto para BOAI-011).
+2. `2. Crear una búsqueda`: Todavía no implementado (previsto para BOAI-007).
+3. `3. Editar una búsqueda`: Todavía no implementado (previsto para BOAI-007).
+4. `4. Ver historial`: Todavía no implementado (previsto para BOAI-010).
+5. `5. Revisar publicaciones dudosas`: Todavía no implementado (previsto para BOAI-011).
+6. `6. Ver errores de fuentes`: Todavía no implementado (previsto para BOAI-011).
+7. `7. Configuración`: Todavía no implementado (previsto para BOAI-007).
+8. `8. Salir`: **Disponible** — Finaliza la aplicación limpiamente con código de salida `0`.
+
+Seleccionar una opción no disponible informa al usuario que aún no está implementada y regresa de forma segura al menú interactivo.
+
+#### Tabla de Códigos de Salida (Exit Codes)
+
+| Código | Identificador                  | Significado                                                                                   |
+| :----- | :----------------------------- | :-------------------------------------------------------------------------------------------- |
+| `0`    | `SUCCESS`                      | Finalización exitosa (ej. salida voluntaria mediante opción 8).                               |
+| `10`   | `PARTIAL_SUCCESS`              | Al menos una fuente o etapa completó y otra falló.                                            |
+| `20`   | `INVALID_CONFIGURATION`        | La configuración de la búsqueda contiene errores de validación.                               |
+| `30`   | `TOTAL_SOURCE_FAILURE`         | Todas las fuentes consultadas fallaron.                                                       |
+| `40`   | `MANUAL_INTERVENTION_REQUIRED` | Se requiere intervención humana (ej. checkpoint, reautenticación).                            |
+| `70`   | `INTERNAL_ERROR`               | Error interno inesperado no manejado por el dominio.                                          |
+| `130`  | `CANCELLED`                    | Ejecución interrumpida cooperativamente por el usuario (`SIGINT` / `Ctrl+C` / `AbortSignal`). |
 
 ### Supply chain, seguridad y CI
 
