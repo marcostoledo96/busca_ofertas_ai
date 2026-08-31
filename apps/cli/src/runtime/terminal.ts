@@ -63,7 +63,7 @@ export class NodeTerminalAdapter implements TerminalPort {
     };
   }
 
-  private notifyInterrupt(reason?: unknown): void {
+  public notifyInterrupt(reason?: unknown): void {
     const handlers = [...this.interruptHandlers];
     for (const handler of handlers) {
       try {
@@ -74,7 +74,7 @@ export class NodeTerminalAdapter implements TerminalPort {
     }
   }
 
-  private getReadline(): readline.Interface {
+  public getReadline(): readline.Interface {
     if (this.isClosed) {
       throw new Error('NodeTerminalAdapter is closed.');
     }
@@ -154,6 +154,10 @@ export class FakeTerminal implements TerminalPort {
         this.interruptHandlers.splice(idx, 1);
       }
     };
+  }
+
+  public getInterruptHandlerCount(): number {
+    return this.interruptHandlers.length;
   }
 
   public triggerInterrupt(reason?: unknown): void {

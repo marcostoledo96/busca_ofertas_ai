@@ -102,17 +102,13 @@ describe('CLI Cancellation and Signal Lifecycle (BOAI-006)', () => {
     expect(sharedSignalAbortedObserved).toBe(false);
   });
 
-  it('Finding 1: NodeTerminalAdapter with streams triggers onInterrupt and central AbortController on SIGINT', async () => {
+  it('Readline bridge regression test: NodeTerminalAdapter notifyInterrupt routes to central SignalManager and terminates with CANCELLED (130)', async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
 
-    let interruptCalled = false;
     const nodeTerminal = new NodeTerminalAdapter({
       stdin,
       stdout,
-      onInterrupt: () => {
-        interruptCalled = true;
-      },
     });
 
     const sigMgr = new TestSignalManager();
@@ -126,13 +122,12 @@ describe('CLI Cancellation and Signal Lifecycle (BOAI-006)', () => {
     // Start running app in background
     const runPromise = app.run();
 
-    // Abort signal manager
-    sigMgr.abort('User interrupt');
+    // Trigger interrupt on nodeTerminal directly
+    nodeTerminal.notifyInterrupt(new Error('SIGINT'));
 
     const code = await runPromise;
     expect(code).toBe(EXIT_CODES.CANCELLED);
     expect(sigMgr.signal.aborted).toBe(true);
-    expect(interruptCalled).toBe(true);
 
     stdin.end();
     stdout.end();
@@ -180,6 +175,48 @@ describe('CLI Cancellation and Signal Lifecycle (BOAI-006)', () => {
     expect(actionStarted).toBe(true);
     expect(actionAborted).toBe(true);
     expect(signalManager.signal.aborted).toBe(true);
+  });
+
+  it('Cleanup Low: removes interrupt subscription upon success, failure, and cancellation lifecycles', async () => {
+    // 1. Success lifecycle
+    const termSuccess = new FakeTerminal(['8']);
+    const appSuccess = createCliApplication({ terminal: termSuccess });
+    expect(termSuccess.getInterruptHandlerCount()).toBe(1);
+    await appSuccess.run();
+    expect(termSuccess.getInterruptHandlerCount()).toBe(0);
+
+    // 2. Failure lifecycle
+    const termFail = new FakeTerminal(['1']);
+    const failAction: MenuAction = {
+      id: 'fail',
+      optionNumber: 1,
+      title: 'Fail',
+      execute: () => {
+        throw new Error('Unexpected crash');
+      },
+    };
+    const appFail = createCliApplication({
+      terminal: termFail,
+      actions: [
+        failAction,
+        ...createDefaultMenuActions().filter((a: MenuAction) => a.optionNumber !== 1),
+      ],
+    });
+    expect(termFail.getInterruptHandlerCount()).toBe(1);
+    await appFail.run();
+    expect(termFail.getInterruptHandlerCount()).toBe(0);
+
+    // 3. Cancellation lifecycle
+    const termCancel = new FakeTerminal();
+    const sigMgr = new TestSignalManager();
+    sigMgr.abort('Cancelled');
+    const appCancel = createCliApplication({
+      terminal: termCancel,
+      signalManager: sigMgr,
+    });
+    expect(termCancel.getInterruptHandlerCount()).toBe(1);
+    await appCancel.run();
+    expect(termCancel.getInterruptHandlerCount()).toBe(0);
   });
 
   it('runs registered cleanups idempotently upon disposal', async () => {

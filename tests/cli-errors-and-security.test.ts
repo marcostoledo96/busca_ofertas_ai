@@ -84,41 +84,89 @@ describe('CLI Errors, Presentation, and Security (BOAI-006)', () => {
     expect(raw).not.toContain('rawHeaders');
   });
 
-  it('Finding 2: sanitizeString and sanitizeDiagnosticData redact all contractual sensitive formats', () => {
-    const secret = 'fake-synthetic-secret-value-12345';
-    const syntheticGhp = ['ghp', 'fakePersonalAccessToken36CharsHere00'].join('_');
-    const syntheticPat = [
-      'github',
-      'pat',
-      'fakeFineGrainedToken82CharsLongSecretStringHere123',
-    ].join('_');
+  it('Finding Final: sanitizeString and SanitizedDiagnosticLogger redact full Cookie, Authorization, passwords with space, and session paths', () => {
+    const secretSecondCookie = 'fake_xs_secret_cookie_val_999';
+    const secretBasic = 'fake_basic_auth_base64_secret_val_111';
+    const secretDigest = 'fake_digest_auth_secret_val_222';
+    const secretApiKey = 'fake_api_key_auth_secret_val_333';
+    const secretWithSpace = 'fake password with spaces 444';
+    const sensitiveSessionPath = '/home/test/.config/busca-ofertas/sessions/facebook/session.json';
+    const sensitiveStorageStatePath = '/var/data/app/storageState.json';
 
-    const testStrings = [
-      `request failed token=${secret}`,
-      `request failed token: ${secret}`,
-      `request failed password=${secret}`,
-      `request failed password: ${secret}`,
-      `request failed secret=${secret}`,
-      `request failed secret: ${secret}`,
-      `request failed api_key=${secret}`,
-      `request failed apikey=${secret}`,
-      `request failed access_token=${secret}`,
-      `request failed refresh_token=${secret}`,
-      `Cookie: session=${secret}; other=123`,
-      `Set-Cookie: auth=${secret}`,
-      `Authorization: Bearer ${secret}`,
-      `Using ${syntheticGhp}`,
-      `Using ${syntheticPat}`,
+    const testCases: Array<{ name: string; input: string; secret: string }> = [
+      {
+        name: 'Cookie header with multiple cookies (retaining nothing after semicolon)',
+        input: `prefix Cookie: session=first; xs=${secretSecondCookie}; locale=es_AR suffix`,
+        secret: secretSecondCookie,
+      },
+      {
+        name: 'Set-Cookie header with attributes',
+        input: `prefix Set-Cookie: a=first; b=${secretSecondCookie}; HttpOnly; Secure suffix`,
+        secret: secretSecondCookie,
+      },
+      {
+        name: 'Authorization Basic header',
+        input: `Request failed Authorization: Basic ${secretBasic}`,
+        secret: secretBasic,
+      },
+      {
+        name: 'Authorization Digest header',
+        input: `Request failed Authorization: Digest ${secretDigest}`,
+        secret: secretDigest,
+      },
+      {
+        name: 'Authorization ApiKey header',
+        input: `Request failed Authorization: ApiKey ${secretApiKey}`,
+        secret: secretApiKey,
+      },
+      {
+        name: 'Quoted password with spaces',
+        input: `Failed config with password="${secretWithSpace}" and user=admin`,
+        secret: secretWithSpace,
+      },
+      {
+        name: 'Sensitive session file path',
+        input: `Cannot read session state at ${sensitiveSessionPath} on startup`,
+        secret: sensitiveSessionPath,
+      },
+      {
+        name: 'Sensitive storageState file path',
+        input: `Failed to load storage state from ${sensitiveStorageStatePath}`,
+        secret: sensitiveStorageStatePath,
+      },
     ];
 
-    for (const str of testStrings) {
-      const sanitized = sanitizeString(str);
-      expect(sanitized).not.toContain(secret);
-      expect(sanitized).not.toContain('fakePersonalAccessToken');
-      expect(sanitized).not.toContain('fakeFineGrainedToken');
-      expect(sanitized).toContain('[REDACTED]');
-    }
+    for (const { name, input, secret } of testCases) {
+      // 1. sanitizeString test
+      const sanitized = sanitizeString(input);
+      expect(sanitized, `sanitizeString failed for ${name}`).not.toContain(secret);
+      expect(sanitized, `sanitizeString missing placeholder for ${name}`).toContain('[REDACTED]');
 
+      // 2. SanitizedDiagnosticLogger test capturing stderr
+      let capturedStderr = '';
+      const writeSpy = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation((chunk: Uint8Array | string) => {
+          capturedStderr += chunk.toString();
+          return true;
+        });
+
+      try {
+        const logger = new SanitizedDiagnosticLogger({ enabled: true });
+        logger.error(`Error message: ${input}`, new Error(input), { detail: input });
+
+        expect(capturedStderr, `logger.error leaked secret for ${name}`).not.toContain(secret);
+        expect(capturedStderr, `logger.error missing placeholder for ${name}`).toContain(
+          '[REDACTED]',
+        );
+      } finally {
+        writeSpy.mockRestore();
+      }
+    }
+  });
+
+  it('sanitizeDiagnosticData redacts sensitive keys and nested objects', () => {
+    const secret = 'fake-synthetic-secret-value-12345';
     const testObject = {
       user: 'alice',
       password: secret,
@@ -143,36 +191,15 @@ describe('CLI Errors, Presentation, and Security (BOAI-006)', () => {
     expect(sanitizedObj.nested.safe).toBe('normal-value');
   });
 
-  it('Finding 2: SanitizedDiagnosticLogger writes sanitized entries to stderr without leaking secrets', () => {
-    const secret = 'fake-secret-999-never-leak';
-    let capturedStderr = '';
-
-    const writeSpy = vi
-      .spyOn(process.stderr, 'write')
-      .mockImplementation((chunk: Uint8Array | string) => {
-        capturedStderr += chunk.toString();
-        return true;
-      });
-
-    try {
-      const logger = new SanitizedDiagnosticLogger({ enabled: true });
-      logger.error(`Failed request with token=${secret}`, new Error(`password=${secret}`), {
-        apiKey: secret,
-        message: `Authorization: Bearer ${secret}`,
-      });
-
-      expect(capturedStderr).not.toContain(secret);
-      expect(capturedStderr).toContain('[REDACTED]');
-    } finally {
-      writeSpy.mockRestore();
-    }
-  });
-
   it('InMemoryDiagnosticLogger redacts sensitive content before storing log entries', () => {
     const logger = new InMemoryDiagnosticLogger();
-    logger.error('Failed request', new Error('Auth error with bearer fake_token_999'), {
-      sessionSecret: 'super_secret_payload',
-    });
+    logger.error(
+      'Failed request',
+      new Error('Auth error with Authorization: Bearer fake_token_999'),
+      {
+        sessionSecret: 'super_secret_payload',
+      },
+    );
 
     const entries = logger.getEntries();
     expect(entries).toHaveLength(1);

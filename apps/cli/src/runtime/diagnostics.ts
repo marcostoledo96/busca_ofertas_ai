@@ -42,17 +42,30 @@ const SENSITIVE_KEY_PATTERNS: readonly RegExp[] = [
   /jwt/i,
 ] as const;
 
+/**
+ * Ordered list of sanitization patterns.
+ * Full headers and paths are evaluated before substring assignments to prevent prefix destruction.
+ */
 const KNOWN_SENSITIVE_STRING_PATTERNS: readonly RegExp[] = [
-  /Bearer\s+[A-Za-z0-9_\-.~+/=]+/gi,
-  /(?:password|token|secret|api_?key|access_?token|credential|authorization)\s*[:=]\s*["']?[^"'\s,;]+["']?/gi,
-  /(?:Set-Cookie|Cookie):\s*[^;\r\n]+/gi,
-  /(?:token|access_token|refresh_token|api_key|apikey|secret|password)=[^&\s]+/gi,
+  // 1. Full header redactions
+  /(?:Set-Cookie|Cookie):\s*[^\r\n]+/gi,
+  /Authorization:\s*[^\r\n]+/gi,
+
+  // 2. Sensitive session / authentication storage filepaths
+  /(?:[A-Za-z]:[\\/]|[\\/]|(?:\.{1,2}[\\/]))(?:[^\s"':;\r\n]*[\\/])*(?:sessions?|storage-?state|cookies)(?:[\\/][^\s"':;\r\n]*)?/gi,
+
+  // 3. Sensitive key-value assignments (quoted or unquoted, with or without spaces)
+  /(?:password|token|secret|api_?key|access_?token|refresh_token|credential)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi,
+  /(?:token|access_token|refresh_token|api_key|apikey|secret|password)=(?:"[^"]*"|'[^']*'|[^&\s]+)/gi,
+
+  // 4. Token schemes and vendor formats
+  /Bearer\s+[^\s,;]+/gi,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]+\b/gi,
   /\bgithub_pat_[A-Za-z0-9_]+\b/gi,
 ] as const;
 
 /**
- * Redacts sensitive tokens, passwords, cookies, and headers from a single string.
+ * Redacts sensitive tokens, passwords, cookies, authorization headers, and session paths from a string.
  */
 export function sanitizeString(input: string): string {
   if (typeof input !== 'string') {
