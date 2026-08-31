@@ -6,9 +6,7 @@ runCli()
   .then((exitCode) => {
     process.exitCode = exitCode;
   })
-  .catch((err) => {
-    process.stderr.write(
-      `\n[INTERNAL_ERROR] Fatal error: ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+  .catch(() => {
+    process.stderr.write('\n[INTERNAL_ERROR] Ocurrió un error interno no esperado.\n');
     process.exitCode = EXIT_CODES.INTERNAL_ERROR;
   });

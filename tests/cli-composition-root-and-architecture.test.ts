@@ -11,6 +11,8 @@ import {
   EXIT_CODES,
   CliError,
   type MenuAction,
+  type ActionResult,
+  type ExitCode,
 } from '@busca-ofertas-ai/cli';
 
 interface PackageManifest {
@@ -44,10 +46,55 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
 
     const exitCode = await app.run();
     expect(exitCode).toBe(EXIT_CODES.SUCCESS);
-    expect(terminal.isClosed()).toBe(true);
+    expect(terminal.closeCount).toBe(1);
   });
 
-  it('ensures resources are safely disposed when an action throws a fatal error', async () => {
+  it('Finding 3: propagates contractual exit codes from terminal action outcomes', async () => {
+    const testCases: Array<{ name: string; exitCode: ExitCode; expectedCode: number }> = [
+      { name: 'PARTIAL_SUCCESS', exitCode: EXIT_CODES.PARTIAL_SUCCESS, expectedCode: 10 },
+      {
+        name: 'INVALID_CONFIGURATION',
+        exitCode: EXIT_CODES.INVALID_CONFIGURATION,
+        expectedCode: 20,
+      },
+      { name: 'TOTAL_SOURCE_FAILURE', exitCode: EXIT_CODES.TOTAL_SOURCE_FAILURE, expectedCode: 30 },
+      {
+        name: 'MANUAL_INTERVENTION_REQUIRED',
+        exitCode: EXIT_CODES.MANUAL_INTERVENTION_REQUIRED,
+        expectedCode: 40,
+      },
+      { name: 'INTERNAL_ERROR', exitCode: EXIT_CODES.INTERNAL_ERROR, expectedCode: 70 },
+    ];
+
+    for (const { exitCode, expectedCode } of testCases) {
+      const terminal = new FakeTerminal(['1']);
+      const signalManager = new TestSignalManager();
+
+      const terminalAction: MenuAction = {
+        id: 'terminal-action',
+        optionNumber: 1,
+        title: 'Terminal Action',
+        execute: (): Promise<ActionResult> => {
+          return Promise.resolve({ kind: 'finish', exitCode });
+        },
+      };
+
+      const app = createCliApplication({
+        terminal,
+        signalManager,
+        actions: [
+          terminalAction,
+          ...createDefaultMenuActions().filter((a: MenuAction) => a.optionNumber !== 1),
+        ],
+      });
+
+      const result = await app.run();
+      expect(result).toBe(expectedCode);
+      expect(terminal.closeCount).toBe(1);
+    }
+  });
+
+  it('Finding 3: uncaught CliError in action terminates application with error.exitCode', async () => {
     const terminal = new FakeTerminal(['1']);
     const signalManager = new TestSignalManager();
 
@@ -64,9 +111,6 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
       },
     };
 
-    // After action fails, user inputs 8 to exit cleanly
-    terminal.enqueueInput('8');
-
     const defaultActions = createDefaultMenuActions();
     const app = createCliApplication({
       terminal,
@@ -75,11 +119,50 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
     });
 
     const exitCode = await app.run();
-    expect(exitCode).toBe(EXIT_CODES.SUCCESS);
+    expect(exitCode).toBe(EXIT_CODES.TOTAL_SOURCE_FAILURE);
 
     const raw = terminal.getRawOutput();
     expect(raw).toContain('[TOTAL_SOURCE_FAILURE] Todas las fuentes configuradas fallaron.');
-    expect(terminal.isClosed()).toBe(true);
+    expect(terminal.closeCount).toBe(1);
+  });
+
+  it('Finding 4: terminal close is called exactly once in success, failure, and cancellation lifecycles', async () => {
+    // 1. Success case
+    const termSuccess = new FakeTerminal(['8']);
+    const appSuccess = createCliApplication({ terminal: termSuccess });
+    await appSuccess.run();
+    expect(termSuccess.closeCount).toBe(1);
+
+    // 2. Failure case
+    const termFail = new FakeTerminal(['1']);
+    const failAction: MenuAction = {
+      id: 'fail',
+      optionNumber: 1,
+      title: 'Fail',
+      execute: () => {
+        throw new Error('Unexpected crash');
+      },
+    };
+    const appFail = createCliApplication({
+      terminal: termFail,
+      actions: [
+        failAction,
+        ...createDefaultMenuActions().filter((a: MenuAction) => a.optionNumber !== 1),
+      ],
+    });
+    await appFail.run();
+    expect(termFail.closeCount).toBe(1);
+
+    // 3. Cancellation case
+    const termCancel = new FakeTerminal();
+    const sigMgr = new TestSignalManager();
+    sigMgr.abort('Cancelled');
+    const appCancel = createCliApplication({
+      terminal: termCancel,
+      signalManager: sigMgr,
+    });
+    await appCancel.run();
+    expect(termCancel.closeCount).toBe(1);
   });
 
   it('ARCHITECTURAL NEGATIVE PROOF: apps/cli package manifest contains no forbidden dependencies', () => {
@@ -93,6 +176,7 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
     };
 
     const forbiddenPackages = [
+      '@busca-ofertas-ai/core',
       '@busca-ofertas-ai/storage-sqlite',
       'playwright',
       'puppeteer',
@@ -110,7 +194,6 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
       expect(allDeps[forbidden]).toBeUndefined();
     }
 
-    // Must only depend on core
-    expect(Object.keys(pkgContent.dependencies ?? {})).toEqual(['@busca-ofertas-ai/core']);
+    expect(Object.keys(pkgContent.dependencies ?? {})).toEqual([]);
   });
 });

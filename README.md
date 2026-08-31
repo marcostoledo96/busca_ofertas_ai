@@ -2,7 +2,7 @@
 
 Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunidades provenientes de múltiples fuentes. El primer caso de uso será encontrar **Nintendo Switch Lite en Facebook Marketplace dentro de AMBA**, pero el núcleo se diseña para admitir otros productos, precios, monedas, sitios, inmuebles y vehículos sin modificar la lógica central.
 
-> Estado actual: **workspace TypeScript inicializado con quality gates locales (`BOAI-001`); la lógica de dominio, adaptadores, persistencia y CLI se implementarán en las siguientes etapas del roadmap**.
+> Estado actual: **shell interactiva y composition root implementados (`BOAI-006`); la lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
 
 ## Requisitos
 

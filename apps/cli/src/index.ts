@@ -24,7 +24,9 @@ export { EXIT_CODES, type ExitCodeName, type ExitCode, isExitCode } from './runt
 // Terminal Port & Adapters
 export {
   type PromptOptions,
+  type InterruptCallback,
   type TerminalPort,
+  type NodeTerminalAdapterOptions,
   NodeTerminalAdapter,
   FakeTerminal,
 } from './runtime/terminal.js';
@@ -50,6 +52,9 @@ export {
   type LogLevel,
   type DiagnosticEntry,
   type DiagnosticLogger,
+  REDACTED_PLACEHOLDER,
+  MAX_SANITIZATION_DEPTH,
+  sanitizeString,
   sanitizeDiagnosticData,
   SanitizedDiagnosticLogger,
   InMemoryDiagnosticLogger,
@@ -68,6 +73,7 @@ export {
 // Shell & Actions
 export {
   type ActionExecutionContext,
+  type ActionResult,
   type MenuAction,
   NotImplementedActionHandler,
   ExitActionHandler,

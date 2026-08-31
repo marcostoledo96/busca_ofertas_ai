@@ -15,8 +15,5 @@
     "build": "tsc -b",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc -b --noEmit"
-  },
-  "dependencies": {
-    "@busca-ofertas-ai/core": "workspace:*"
   }
 }

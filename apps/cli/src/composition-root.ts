@@ -79,6 +79,13 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
   const formatter = options?.formatter ?? new MenuFormatter();
   const actions = options?.actions ?? createDefaultMenuActions(formatter);
 
+  // Finding 1: Connect terminal interrupt (Ctrl+C during readline) to central SignalManager
+  if (terminal.onInterrupt) {
+    terminal.onInterrupt((reason) => {
+      signalManager.abort(reason);
+    });
+  }
+
   const shell = new CliShell({
     terminal,
     actions,
@@ -97,6 +104,7 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
     errorPresenter,
     run: async (): Promise<ExitCode> => {
       try {
+        // Finding 4: Single ownership of terminal closing through signalManager cleanup
         signalManager.registerCleanup(async () => {
           await terminal.close();
         });
@@ -108,7 +116,6 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
         return errorPresenter.resolveExitCode(fatalError);
       } finally {
         await signalManager.dispose();
-        await terminal.close();
       }
     },
   };

@@ -2,7 +2,7 @@ import { EXIT_CODES, type ExitCode } from '../runtime/exit-codes.js';
 import type { TerminalPort } from '../runtime/terminal.js';
 import type { ProgressReporter } from '../runtime/progress.js';
 import type { DiagnosticLogger } from '../runtime/diagnostics.js';
-import type { ErrorPresenter } from '../runtime/errors.js';
+import { isCliError, type ErrorPresenter } from '../runtime/errors.js';
 import { MenuFormatter, type MenuOptionItem } from '../presentation/menu-formatter.js';
 import type { MenuAction, ActionExecutionContext } from './menu-actions.js';
 
@@ -52,7 +52,7 @@ export class CliShell {
   }
 
   /**
-   * Runs the interactive menu loop until the user exits, an abort signal triggers, or a fatal error occurs.
+   * Runs the interactive menu loop until the user exits, an abort signal triggers, or a terminal action completes.
    */
   public async run(signal: AbortSignal): Promise<ExitCode> {
     this.diagnostics.info('Starting CLI interactive shell loop.');
@@ -84,19 +84,7 @@ export class CliShell {
 
         const selectedAction = this.actionsByNumber.get(selectedNumber)!;
 
-        // 4. Handle exit action directly
-        if (selectedNumber === 8 || selectedAction.id === 'exit') {
-          const context: ActionExecutionContext = {
-            signal,
-            terminal: this.terminal,
-            progress: this.progress,
-            diagnostics: this.diagnostics,
-          };
-          await selectedAction.execute(context);
-          return EXIT_CODES.SUCCESS;
-        }
-
-        // 5. Execute action
+        // 4. Execute action
         const context: ActionExecutionContext = {
           signal,
           terminal: this.terminal,
@@ -105,8 +93,17 @@ export class CliShell {
         };
 
         try {
-          await selectedAction.execute(context);
-          this.terminal.writeLine(''); // Separator line after action execution
+          const actionResult = await selectedAction.execute(context);
+
+          if (signal.aborted) {
+            return EXIT_CODES.CANCELLED;
+          }
+
+          if (actionResult.kind === 'finish') {
+            return actionResult.exitCode;
+          }
+
+          this.terminal.writeLine(''); // Separator line after action execution before next menu loop
         } catch (actionError) {
           if (
             signal.aborted ||
@@ -120,7 +117,12 @@ export class CliShell {
             actionId: selectedAction.id,
           });
           this.errorPresenter.present(actionError);
-          this.terminal.writeLine('');
+
+          // Unhandled action errors terminate execution with their specific exit code
+          if (isCliError(actionError)) {
+            return actionError.exitCode;
+          }
+          return EXIT_CODES.INTERNAL_ERROR;
         }
       } catch (promptError) {
         if (signal.aborted || (promptError instanceof Error && promptError.name === 'AbortError')) {

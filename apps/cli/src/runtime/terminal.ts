@@ -10,6 +10,11 @@ export interface PromptOptions {
 }
 
 /**
+ * Interrupt callback type.
+ */
+export type InterruptCallback = (reason?: unknown) => void;
+
+/**
  * TerminalPort represents an abstract interface for terminal user I/O.
  * Decouples the CLI presentation and navigation from direct Node.js process streams.
  */
@@ -18,6 +23,16 @@ export interface TerminalPort {
   write(text: string): void;
   prompt(question: string, options?: PromptOptions): Promise<string>;
   close(): Promise<void> | void;
+  onInterrupt?(handler: InterruptCallback): () => void;
+}
+
+/**
+ * Options for NodeTerminalAdapter.
+ */
+export interface NodeTerminalAdapterOptions {
+  readonly stdin?: Readable;
+  readonly stdout?: Writable;
+  readonly onInterrupt?: InterruptCallback;
 }
 
 /**
@@ -28,10 +43,35 @@ export class NodeTerminalAdapter implements TerminalPort {
   private readonly stdin: Readable;
   private readonly stdout: Writable;
   private isClosed = false;
+  private readonly interruptHandlers: InterruptCallback[] = [];
 
-  constructor(options?: { stdin?: Readable; stdout?: Writable }) {
+  constructor(options?: NodeTerminalAdapterOptions) {
     this.stdin = options?.stdin ?? defaultStdin;
     this.stdout = options?.stdout ?? defaultStdout;
+    if (options?.onInterrupt) {
+      this.interruptHandlers.push(options.onInterrupt);
+    }
+  }
+
+  public onInterrupt(handler: InterruptCallback): () => void {
+    this.interruptHandlers.push(handler);
+    return () => {
+      const idx = this.interruptHandlers.indexOf(handler);
+      if (idx !== -1) {
+        this.interruptHandlers.splice(idx, 1);
+      }
+    };
+  }
+
+  private notifyInterrupt(reason?: unknown): void {
+    const handlers = [...this.interruptHandlers];
+    for (const handler of handlers) {
+      try {
+        handler(reason);
+      } catch {
+        // Suppress errors during interrupt notification
+      }
+    }
   }
 
   private getReadline(): readline.Interface {
@@ -42,6 +82,11 @@ export class NodeTerminalAdapter implements TerminalPort {
       this.rl = readline.createInterface({
         input: this.stdin,
         output: this.stdout,
+      });
+
+      // Bridge readline's SIGINT event directly to interrupt handlers
+      this.rl.on('SIGINT', () => {
+        this.notifyInterrupt(new Error('Terminal SIGINT received'));
       });
     }
     return this.rl;
@@ -63,7 +108,15 @@ export class NodeTerminalAdapter implements TerminalPort {
     }
 
     const rl = this.getReadline();
-    return await rl.question(question, { signal: options?.signal });
+
+    try {
+      return await rl.question(question, { signal: options?.signal });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        this.notifyInterrupt(err);
+      }
+      throw err;
+    }
   }
 
   public close(): void {
@@ -86,9 +139,28 @@ export class FakeTerminal implements TerminalPort {
   private outputLines: string[] = [];
   private rawOutputChunks: string[] = [];
   private closed = false;
+  public closeCount = 0;
+  private readonly interruptHandlers: InterruptCallback[] = [];
 
   constructor(initialInputs: string[] = []) {
     this.inputQueue = [...initialInputs];
+  }
+
+  public onInterrupt(handler: InterruptCallback): () => void {
+    this.interruptHandlers.push(handler);
+    return () => {
+      const idx = this.interruptHandlers.indexOf(handler);
+      if (idx !== -1) {
+        this.interruptHandlers.splice(idx, 1);
+      }
+    };
+  }
+
+  public triggerInterrupt(reason?: unknown): void {
+    const handlers = [...this.interruptHandlers];
+    for (const handler of handlers) {
+      handler(reason);
+    }
   }
 
   public enqueueInput(...inputs: string[]): void {
@@ -102,7 +174,6 @@ export class FakeTerminal implements TerminalPort {
 
   public write(text: string): void {
     this.rawOutputChunks.push(text);
-    // If text contains newlines, also split and push to outputLines
     const parts = text.split('\n');
     for (let i = 0; i < parts.length - 1; i++) {
       const part = parts[i];
@@ -112,13 +183,13 @@ export class FakeTerminal implements TerminalPort {
     }
   }
 
-  public async prompt(question: string, options?: PromptOptions): Promise<string> {
+  public prompt(question: string, options?: PromptOptions): Promise<string> {
     this.write(question);
 
     if (options?.signal?.aborted) {
       const abortError = new Error('This operation was aborted');
       abortError.name = 'AbortError';
-      throw abortError;
+      return Promise.reject(abortError);
     }
 
     if (options?.signal) {
@@ -141,11 +212,12 @@ export class FakeTerminal implements TerminalPort {
     }
 
     const nextInput = this.inputQueue.shift();
-    return nextInput ?? '';
+    return Promise.resolve(nextInput ?? '');
   }
 
   public close(): void {
     this.closed = true;
+    this.closeCount++;
   }
 
   public isClosed(): boolean {
