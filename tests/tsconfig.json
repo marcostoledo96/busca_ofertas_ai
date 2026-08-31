@@ -9,6 +9,7 @@
   "references": [
     { "path": "../packages/core" },
     { "path": "../packages/adapter-sdk" },
-    { "path": "../packages/configuration" }
+    { "path": "../packages/configuration" },
+    { "path": "../apps/cli" }
   ]
 }

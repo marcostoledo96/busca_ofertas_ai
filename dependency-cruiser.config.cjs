@@ -66,6 +66,23 @@ module.exports = {
       to: { path: `(^|/)tests?/` },
     },
     {
+      name: 'cli-forbidden-dependencies',
+      comment: 'apps/cli no debe depender de storage-sqlite, adapters, playwright ni módulos HTTP.',
+      severity: 'error',
+      from: { path: '^apps/cli/' },
+      to: {
+        path: [
+          `^${R}/storage-sqlite`,
+          '^adapters/',
+          'playwright',
+          '^node:http$',
+          '^node:https$',
+          '^http$',
+          '^https$',
+        ],
+      },
+    },
+    {
       name: 'no-circular',
       comment: 'No se permiten ciclos de dependencias.',
       severity: 'error',
