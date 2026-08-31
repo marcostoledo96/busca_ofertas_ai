@@ -103,11 +103,13 @@ describe('CLI Search Wizard — Cancellation, Input Validation & Security (BOAI-
         '1',
         'Query',
         '',
-        'n',
-        '1',
-        '',
-        '1',
-        's',
+        'n', // location
+        's', // wants price
+        '1', // ARS
+        '', // no max price
+        's', // wants condition
+        '1', // NEW
+        's', // save confirm
       );
 
       const wizard = new CreateSearchWizard({
@@ -138,17 +140,21 @@ describe('CLI Search Wizard — Cancellation, Input Validation & Security (BOAI-
         '-5', // Invalid page < 1
         '3', // Valid page
         'n', // Location
+        's', // Wants price
         '1', // Currency ARS
         'abc', // Invalid price
         '250000', // Valid max price
         '300000', // Invalid min plausible > max price!
         '150000', // Valid min plausible
         'n', // Foreign
+        's', // Wants condition
         '1', // Condition
+        's', // Wants product filters
         '', // Expected models (empty to omit)
         's', // Require functional
         'n', // Charger required
         'n', // Box required
+        's', // Wants rules
         'test-rules', // Rules profile
         '', // Include (empty)
         '', // Exclude (empty)
@@ -159,6 +165,7 @@ describe('CLI Search Wizard — Cancellation, Input Validation & Security (BOAI-
         'n', // AI
         '0', // Invalid raw data days < 1
         '30', // Valid days
+        's', // Wants report
         's', // Open auto
         's', // Save
       );

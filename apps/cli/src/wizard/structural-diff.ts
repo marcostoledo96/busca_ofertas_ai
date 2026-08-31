@@ -1,3 +1,5 @@
+import { sanitizeString, sanitizeDiagnosticData } from '../runtime/diagnostics.js';
+
 /**
  * Represents a single structural diff change.
  */
@@ -15,12 +17,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function formatValue(value: unknown): string {
   if (value === undefined) return 'undefined';
   if (value === null) return 'null';
-  if (typeof value === 'string') return `"${value}"`;
+  if (typeof value === 'string') return `"${sanitizeString(value)}"`;
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
     return String(value);
   }
-  if (Array.isArray(value)) return `[${value.map(formatValue).join(', ')}]`;
-  return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    const sanitizedArray = sanitizeDiagnosticData(value) as unknown[];
+    return `[${sanitizedArray.map(formatValue).join(', ')}]`;
+  }
+  const sanitizedObj = sanitizeDiagnosticData(value);
+  return JSON.stringify(sanitizedObj);
 }
 
 /**
@@ -108,17 +114,18 @@ export function formatStructuralDiff(changes: readonly DiffChange[]): string {
 
   const lines: string[] = [];
   for (const change of changes) {
+    const safePath = sanitizeString(change.path);
     switch (change.kind) {
       case 'modified':
         lines.push(
-          `  ~ ${change.path}: ${formatValue(change.oldValue)} → ${formatValue(change.newValue)}`,
+          `  ~ ${safePath}: ${formatValue(change.oldValue)} → ${formatValue(change.newValue)}`,
         );
         break;
       case 'added':
-        lines.push(`  + ${change.path}: ${formatValue(change.newValue)}`);
+        lines.push(`  + ${safePath}: ${formatValue(change.newValue)}`);
         break;
       case 'removed':
-        lines.push(`  - ${change.path}: ${formatValue(change.oldValue)}`);
+        lines.push(`  - ${safePath}: ${formatValue(change.oldValue)}`);
         break;
     }
   }

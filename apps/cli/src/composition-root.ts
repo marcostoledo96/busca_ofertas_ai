@@ -1,4 +1,6 @@
 import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { SourceRegistry } from '@busca-ofertas-ai/configuration';
 import type { ExitCode } from './runtime/exit-codes.js';
 import { TerminalPort, NodeTerminalAdapter } from './runtime/terminal.js';
@@ -50,16 +52,42 @@ export interface CliApplication {
 }
 
 /**
+ * Resolves the default pre-XDG storage directory for saved searches.
+ * Deterministic and independent of process.cwd() when unconfigured.
+ */
+export function resolveDefaultSearchConfigDirectory(explicitDir?: string): string {
+  if (explicitDir) {
+    return path.resolve(explicitDir);
+  }
+
+  // Walk up from current module location to locate workspace root containing pnpm-workspace.yaml
+  let currentDir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    const candidateWorkspace = path.join(currentDir, 'pnpm-workspace.yaml');
+    if (fs.existsSync(candidateWorkspace)) {
+      return path.join(currentDir, 'config/searches');
+    }
+    const parent = path.dirname(currentDir);
+    if (parent === currentDir) break;
+    currentDir = parent;
+  }
+
+  // Fallback: 3 levels up from apps/cli/src or apps/cli/dist
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../config/searches');
+}
+
+/**
  * Creates default menu action handlers for the 8 contractual options.
  */
 export function createDefaultMenuActions(
   param?:
     | MenuFormatter
     | {
-        formatter?: MenuFormatter;
-        sourceRegistry?: SourceRegistry;
-        configStore?: SavedSearchConfigStore;
-        textFilePort?: TextFilePort;
+        formatter?: MenuFormatter | undefined;
+        sourceRegistry?: SourceRegistry | undefined;
+        configStore?: SavedSearchConfigStore | undefined;
+        textFilePort?: TextFilePort | undefined;
+        searchConfigDirectory?: string | undefined;
       },
 ): MenuAction[] {
   const actions: MenuAction[] = [];
@@ -68,7 +96,9 @@ export function createDefaultMenuActions(
     param instanceof MenuFormatter
       ? new SourceRegistry()
       : (param?.sourceRegistry ?? new SourceRegistry());
-  const defaultDir = path.resolve(process.cwd(), 'config/searches');
+  const defaultDir = resolveDefaultSearchConfigDirectory(
+    param instanceof MenuFormatter ? undefined : param?.searchConfigDirectory,
+  );
   const store =
     param instanceof MenuFormatter
       ? new NodeFileSystemSavedSearchConfigStore(defaultDir)
@@ -137,8 +167,7 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
   const formatter = options?.formatter ?? new MenuFormatter();
 
   const sourceRegistry = options?.sourceRegistry ?? new SourceRegistry();
-  const defaultStorageDir =
-    options?.searchConfigDirectory ?? path.resolve(process.cwd(), 'config/searches');
+  const defaultStorageDir = resolveDefaultSearchConfigDirectory(options?.searchConfigDirectory);
   const configStore =
     options?.configStore ?? new NodeFileSystemSavedSearchConfigStore(defaultStorageDir);
   const textFilePort = options?.textFilePort ?? new NodeTextFileAdapter();
@@ -150,6 +179,7 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
       sourceRegistry,
       configStore,
       textFilePort,
+      searchConfigDirectory: options?.searchConfigDirectory,
     });
 
   // Connect terminal interrupt to central SignalManager and capture unsubscription

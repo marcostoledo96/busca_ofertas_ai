@@ -144,6 +144,7 @@ export {
 export {
   type CliApplicationOptions,
   type CliApplication,
+  resolveDefaultSearchConfigDirectory,
   createDefaultMenuActions,
   createCliApplication,
   runCli,

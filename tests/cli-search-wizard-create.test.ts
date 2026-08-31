@@ -113,8 +113,10 @@ describe('CLI Search Wizard — Create Search (BOAI-007)', () => {
       '', // Finish queries
       's', // Wants location
       'AMBA', // Region
+      's', // Wants price limits
       '1', // Currency ARS
       '250000', // Max Price
+      's', // Wants condition filter
       '1, 2, 3', // Conditions
       's', // Confirm save
     );
@@ -148,6 +150,11 @@ describe('CLI Search Wizard — Create Search (BOAI-007)', () => {
     expect(config.price?.maximum).toBe(250000);
     expect(config.condition?.accepted).toEqual(['NEW', 'LIKE_NEW', 'GOOD']);
 
+    // Finding 2 verification: product, rules, and report must be undefined in simple mode
+    expect(config.product).toBeUndefined();
+    expect(config.rules).toBeUndefined();
+    expect(config.report).toBeUndefined();
+
     // Verify two-layer validation succeeds
     expect(() => validateSearchCapabilities(config, registry)).not.toThrow();
 
@@ -179,18 +186,22 @@ describe('CLI Search Wizard — Create Search (BOAI-007)', () => {
       '1', // REGION
       'CABA', // Region
       '30', // RadiusKm
+      's', // Wants price
       '1', // Currency ARS
       '350000', // Max Price
       '200000', // Min Plausible Price
       's', // Foreign policy
       '1', // MANUAL_RATE
       '1', // REVIEW
+      's', // Wants condition
       '1, 2', // Conditions: NEW, LIKE_NEW
+      's', // Wants product filters
       'OLED-MODEL', // Expected Model
       '', // End models
       's', // Require functional
       's', // Charger required
       'n', // Box required
+      's', // Wants rules
       'custom-rules', // Rules profile
       'consola', // Include rule
       '', // End includes
@@ -205,6 +216,7 @@ describe('CLI Search Wizard — Create Search (BOAI-007)', () => {
       's', // Require confirmation
       '10', // Max evals
       '60', // Raw data days
+      's', // Wants report
       's', // Open automatically
       's', // Confirm save
     );
@@ -260,8 +272,10 @@ describe('CLI Search Wizard — Create Search (BOAI-007)', () => {
       '1', // Source feed-source
       // Notice: NO queries prompted because textSearch is false!
       'n', // No location
+      's', // Wants price
       '1', // ARS
       '', // No max price
+      's', // Wants condition
       '1', // NEW
       's', // Save
     );
@@ -330,8 +344,10 @@ describe('CLI Search Wizard — Create Search (BOAI-007)', () => {
       'Switch',
       '',
       'n',
+      's', // Wants price
       '1',
       '',
+      's', // Wants condition
       '1',
       's',
     );
@@ -375,8 +391,10 @@ describe('CLI Search Wizard — Create Search (BOAI-007)', () => {
       'Query',
       '',
       'n',
+      's', // Wants price
       '1',
       '',
+      's', // Wants condition
       '1',
       's', // Save confirm
       'n', // Overwrite confirm -> NO

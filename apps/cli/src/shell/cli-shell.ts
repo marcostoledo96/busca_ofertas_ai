@@ -2,7 +2,7 @@ import { EXIT_CODES, type ExitCode } from '../runtime/exit-codes.js';
 import type { TerminalPort } from '../runtime/terminal.js';
 import type { ProgressReporter } from '../runtime/progress.js';
 import type { DiagnosticLogger } from '../runtime/diagnostics.js';
-import { isCliError, type ErrorPresenter } from '../runtime/errors.js';
+import type { ErrorPresenter } from '../runtime/errors.js';
 import { MenuFormatter, type MenuOptionItem } from '../presentation/menu-formatter.js';
 import type { MenuAction, ActionExecutionContext } from './menu-actions.js';
 
@@ -118,11 +118,8 @@ export class CliShell {
           });
           this.errorPresenter.present(actionError);
 
-          // Unhandled action errors terminate execution with their specific exit code
-          if (isCliError(actionError)) {
-            return actionError.exitCode;
-          }
-          return EXIT_CODES.INTERNAL_ERROR;
+          // Unhandled action errors terminate execution with their mapped exit code
+          return this.errorPresenter.resolveExitCode(actionError);
         }
       } catch (promptError) {
         if (signal.aborted || (promptError instanceof Error && promptError.name === 'AbortError')) {

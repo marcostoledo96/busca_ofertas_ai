@@ -147,18 +147,20 @@ report:
     // Sequence:
     // 1. Select search: 1 (switch-lite-full)
     // 2. Select section: 4 (Precios y monedas)
-    // 3. Keep Currency ARS (Enter)
-    // 4. Set Price Maximum: 290000
-    // 5. Keep Minimum Plausible: Enter (100000)
-    // 6. Select section: 12 (Guardar cambios y volver)
-    // 7. Confirm save: s
+    // 3. Confirm price editing: s
+    // 4. Keep Currency ARS (Enter)
+    // 5. Set Price Maximum: 290000
+    // 6. Keep Minimum Plausible: Enter (100000)
+    // 7. Select section: 13 (Guardar cambios y volver)
+    // 8. Confirm save: s
     terminal.enqueueInput(
       '1', // Select search
       '4', // Section Precios
+      's', // Wants price
       '', // Keep ARS
       '290000', // New max price
       '', // Keep min plausible
-      '12', // Save cambios
+      '13', // Save cambios
       's', // Confirm save
     );
 
@@ -233,7 +235,7 @@ report:
 
     terminal.enqueueInput(
       '1', // Select search
-      '12', // Save immediately without changes
+      '13', // Save immediately without changes
     );
 
     const wizard = new EditSearchWizard({
@@ -254,10 +256,11 @@ report:
     terminal.enqueueInput(
       '1', // Select search
       '4', // Price section
+      's', // Wants price
       '', // Currency
       '999999', // Change max price
       '', // Min plausible
-      '13', // Cancel section
+      '14', // Cancel section
     );
 
     const wizard = new EditSearchWizard({

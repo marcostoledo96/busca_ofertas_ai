@@ -109,7 +109,8 @@ export class EditSearchWizard {
         { label: 'Reglas deterministas (Include / Exclude)', value: 'rules' },
         { label: 'Evaluación y umbrales (Match / Review)', value: 'evaluation' },
         { label: 'Inteligencia Artificial', value: 'ai' },
-        { label: 'Retención y reportes', value: 'retention-report' },
+        { label: 'Retención de datos crudos', value: 'retention' },
+        { label: 'Opciones de reporte (opcional)', value: 'report' },
         { label: 'Revisar resumen actual', value: 'summary' },
         { label: 'Guardar cambios y volver', value: 'save' },
         { label: 'Cancelar edición (descartar cambios)', value: 'cancel' },
@@ -161,7 +162,17 @@ export class EditSearchWizard {
 
             const regEntry = this.sourceRegistry.get(src.id);
             let queries = src.queries ? [...src.queries] : [];
-            if (!regEntry || regEntry.capabilities.textSearch) {
+            if (!regEntry) {
+              this.terminal.writeLine(
+                `  [!] Fuente "${src.id}" no encontrada en el SourceRegistry local.`,
+              );
+            } else if (regEntry.status === 'DISABLED') {
+              this.terminal.writeLine(
+                `  [!] Fuente "${src.id}" deshabilitada: ${regEntry.reason ?? 'Sin motivo'}`,
+              );
+            }
+
+            if (regEntry && regEntry.status === 'ENABLED' && regEntry.capabilities.textSearch) {
               queries = await this.prompter.promptStringList(
                 `Queries de búsqueda para ${src.id}:`,
                 {
@@ -169,6 +180,12 @@ export class EditSearchWizard {
                   defaultItems: queries,
                 },
               );
+            } else if (
+              regEntry &&
+              regEntry.status === 'ENABLED' &&
+              !regEntry.capabilities.textSearch
+            ) {
+              this.terminal.writeLine(`  (La fuente "${src.id}" no utiliza búsqueda textual).`);
             }
 
             // Preserve all custom options and untouched keys
@@ -205,6 +222,50 @@ export class EditSearchWizard {
         }
 
         case 'location': {
+          // Inspect all enabled sources in draft
+          const enabledDraftSources = draft.sources.filter((s) => s.enabled);
+          const incompatibleSources: string[] = [];
+
+          for (const src of enabledDraftSources) {
+            const regEntry = this.sourceRegistry.get(src.id);
+            if (
+              !regEntry ||
+              regEntry.status !== 'ENABLED' ||
+              !regEntry.capabilities.geographicSearch
+            ) {
+              const reason = !regEntry
+                ? 'No registrada en SourceRegistry'
+                : regEntry.status !== 'ENABLED'
+                  ? `Deshabilitada (${regEntry.reason ?? 'sin motivo'})`
+                  : 'No admite búsqueda geográfica';
+              incompatibleSources.push(`[${src.id}] ${reason}`);
+            }
+          }
+
+          if (incompatibleSources.length > 0) {
+            this.terminal.writeLine(
+              '\n[!] No es posible configurar filtros de ubicación geográfica para las fuentes habilitadas:',
+            );
+            for (const item of incompatibleSources) {
+              this.terminal.writeLine(`  - ${item}`);
+            }
+
+            const geoChoices: Array<ChoiceItem<'keep' | 'remove'>> = [
+              { label: 'Volver al menú sin modificar ubicación', value: 'keep' },
+              { label: 'Eliminar ubicación geográfica del draft', value: 'remove' },
+            ];
+            const action = await this.prompter.promptChoice(
+              'Seleccioná una acción:',
+              geoChoices,
+              0,
+            );
+            if (action === 'remove') {
+              draft = { ...draft, location: undefined };
+              this.terminal.writeLine('\n✓ Ubicación geográfica eliminada del draft.');
+            }
+            break;
+          }
+
           const hasLocation = Boolean(draft.location);
           const wantsLocation = await this.prompter.promptBoolean(
             '¿Configurar filtro de ubicación geográfica?',
@@ -287,6 +348,16 @@ export class EditSearchWizard {
         }
 
         case 'price': {
+          const hasPrice = Boolean(draft.price);
+          const wantsPrice = await this.prompter.promptBoolean(
+            '¿Configurar límites de precio y moneda?',
+            hasPrice,
+          );
+          if (!wantsPrice) {
+            draft = { ...draft, price: undefined };
+            break;
+          }
+
           const currChoices: Array<ChoiceItem<PriceCurrencyV1>> = [
             { label: 'ARS', value: 'ARS' },
             { label: 'USD', value: 'USD' },
@@ -324,6 +395,16 @@ export class EditSearchWizard {
         }
 
         case 'condition': {
+          const hasCondition = Boolean(draft.condition);
+          const wantsCondition = await this.prompter.promptBoolean(
+            '¿Filtrar por condición del artículo?',
+            hasCondition,
+          );
+          if (!wantsCondition) {
+            draft = { ...draft, condition: undefined };
+            break;
+          }
+
           const condChoices: Array<ChoiceItem<ListingConditionV1>> = [
             { label: 'NEW', value: 'NEW' },
             { label: 'LIKE_NEW', value: 'LIKE_NEW' },
@@ -347,6 +428,16 @@ export class EditSearchWizard {
         }
 
         case 'product': {
+          const hasProduct = Boolean(draft.product);
+          const wantsProduct = await this.prompter.promptBoolean(
+            '¿Configurar filtros de producto?',
+            hasProduct,
+          );
+          if (!wantsProduct) {
+            draft = { ...draft, product: undefined };
+            break;
+          }
+
           const currentExpected = draft.product?.expectedModels ?? [];
           const expectedModels = await this.prompter.promptStringList('Modelos esperados:', {
             defaultItems: currentExpected,
@@ -377,6 +468,16 @@ export class EditSearchWizard {
         }
 
         case 'rules': {
+          const hasRules = Boolean(draft.rules);
+          const wantsRules = await this.prompter.promptBoolean(
+            '¿Configurar reglas deterministas de inclusión/exclusión?',
+            hasRules,
+          );
+          if (!wantsRules) {
+            draft = { ...draft, rules: undefined };
+            break;
+          }
+
           const profile = await this.prompter.promptText('Perfil de reglas:', {
             defaultValue: draft.rules?.profile ?? draft.id,
           });
@@ -391,8 +492,8 @@ export class EditSearchWizard {
             ...draft,
             rules: {
               profile,
-              include,
-              exclude,
+              ...(include.length > 0 ? { include } : {}),
+              ...(exclude.length > 0 ? { exclude } : {}),
             },
           };
           break;
@@ -433,7 +534,8 @@ export class EditSearchWizard {
           const enabled = await this.prompter.promptBoolean('¿Habilitar IA?', draft.ai.enabled);
           if (enabled) {
             const provider = await this.prompter.promptText('Proveedor IA:', {
-              defaultValue: draft.ai.provider ?? 'deepseek',
+              defaultValue: draft.ai.provider,
+              allowEmpty: false,
             });
             const evaluateOnlyReview = await this.prompter.promptBoolean(
               '¿Evaluar solo casos REVIEW?',
@@ -464,19 +566,19 @@ export class EditSearchWizard {
               },
             };
           } else {
+            // Finding 4: Preserve existing draft.ai.provider intact when AI is disabled!
             draft = {
               ...draft,
               ai: {
                 ...draft.ai,
                 enabled: false,
-                provider: undefined,
               },
             };
           }
           break;
         }
 
-        case 'retention-report': {
+        case 'retention': {
           const rawDataDays = await this.prompter.promptNumber(
             'Días de retención de datos crudos:',
             {
@@ -484,10 +586,6 @@ export class EditSearchWizard {
               min: 1,
               integerOnly: true,
             },
-          );
-          const openAutomatically = await this.prompter.promptBoolean(
-            '¿Abrir reporte HTML automáticamente?',
-            draft.report?.openAutomatically ?? true,
           );
 
           draft = {
@@ -497,11 +595,32 @@ export class EditSearchWizard {
               rawDataDays:
                 typeof rawDataDays === 'number' ? rawDataDays : draft.retention.rawDataDays,
             },
-            report: {
-              ...draft.report,
-              openAutomatically,
-            },
           };
+          break;
+        }
+
+        case 'report': {
+          const hasReport = Boolean(draft.report);
+          const wantsReport = await this.prompter.promptBoolean(
+            '¿Configurar opciones de reporte?',
+            hasReport,
+          );
+          if (!wantsReport) {
+            draft = { ...draft, report: undefined };
+          } else {
+            const openAutomatically = await this.prompter.promptBoolean(
+              '¿Abrir reporte HTML automáticamente?',
+              draft.report?.openAutomatically ?? true,
+            );
+            draft = {
+              ...draft,
+              report: {
+                openAutomatically,
+                includeRejected: draft.report?.includeRejected ?? 'COLLAPSED',
+                exports: draft.report?.exports ?? ['HTML', 'JSON', 'CSV'],
+              },
+            };
+          }
           break;
         }
 

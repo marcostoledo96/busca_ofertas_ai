@@ -132,13 +132,13 @@ export class ConfigurationSubmenu {
     this.terminal.writeLine(formatSearchSummary(parsedConfig));
 
     const targetDestination = this.configStore.resolvePath(parsedConfig.id);
-    this.terminal.writeLine(`Destino gestionado: ${targetDestination}\n`);
+    this.terminal.writeLine(`Destino gestionado: ${sanitizeString(targetDestination)}\n`);
 
     const alreadyExists = await this.configStore.exists(parsedConfig.id);
     let overwrite = false;
     if (alreadyExists) {
       const confirmOverwrite = await this.prompter.promptBoolean(
-        `Ya existe una búsqueda con ID "${parsedConfig.id}". ¿Deseás sobrescribirla?`,
+        `Ya existe una búsqueda con ID "${sanitizeString(parsedConfig.id)}". ¿Deseás sobrescribirla?`,
         false,
       );
       if (!confirmOverwrite) {
@@ -166,7 +166,7 @@ export class ConfigurationSubmenu {
     });
 
     this.terminal.writeLine(
-      `\n✓ ¡Búsqueda "${parsedConfig.id}" importada y guardada exitosamente!`,
+      `\n✓ ¡Búsqueda "${sanitizeString(parsedConfig.id)}" importada y guardada exitosamente!`,
     );
   }
 
@@ -178,7 +178,7 @@ export class ConfigurationSubmenu {
       return;
     }
 
-    const choices = searchIds.map((id) => ({ label: id, value: id }));
+    const choices = searchIds.map((id) => ({ label: sanitizeString(id), value: id }));
     const selectedId = await this.prompter.promptChoice(
       'Seleccioná la búsqueda a exportar:',
       choices,
@@ -187,7 +187,7 @@ export class ConfigurationSubmenu {
 
     const rawYaml = await this.configStore.read(selectedId);
     if (!rawYaml) {
-      this.terminal.writeLine(`\n[!] No se pudo leer la búsqueda "${selectedId}".`);
+      this.terminal.writeLine(`\n[!] No se pudo leer la búsqueda "${sanitizeString(selectedId)}".`);
       return;
     }
 
@@ -209,7 +209,7 @@ export class ConfigurationSubmenu {
     let overwrite = false;
     if (fileExists) {
       const confirmOverwrite = await this.prompter.promptBoolean(
-        `El archivo de destino "${destinationPath}" ya existe. ¿Deseás sobrescribirlo?`,
+        `El archivo de destino "${sanitizeString(destinationPath)}" ya existe. ¿Deseás sobrescribirlo?`,
         false,
       );
       if (!confirmOverwrite) {
@@ -226,7 +226,7 @@ export class ConfigurationSubmenu {
         signal: this.signal,
       });
       this.terminal.writeLine(
-        `\n✓ Búsqueda "${selectedId}" exportada exitosamente a "${destinationPath}".`,
+        `\n✓ Búsqueda "${sanitizeString(selectedId)}" exportada exitosamente a "${sanitizeString(destinationPath)}".`,
       );
     } catch (writeErr) {
       if (isCliError(writeErr)) {
@@ -247,7 +247,7 @@ export class ConfigurationSubmenu {
       return;
     }
 
-    const choices = searchIds.map((id) => ({ label: id, value: id }));
+    const choices = searchIds.map((id) => ({ label: sanitizeString(id), value: id }));
     const selectedId = await this.prompter.promptChoice(
       'Seleccioná la búsqueda a eliminar:',
       choices,
@@ -267,12 +267,12 @@ export class ConfigurationSubmenu {
 
     const logicalPath = this.configStore.resolvePath(selectedId);
     this.terminal.writeLine('\nDetalles de la configuración a eliminar:');
-    this.terminal.writeLine(`  ID:     ${selectedId}`);
-    this.terminal.writeLine(`  Nombre: ${searchName}`);
-    this.terminal.writeLine(`  Ruta:   ${logicalPath}\n`);
+    this.terminal.writeLine(`  ID:     ${sanitizeString(selectedId)}`);
+    this.terminal.writeLine(`  Nombre: ${sanitizeString(searchName)}`);
+    this.terminal.writeLine(`  Ruta:   ${sanitizeString(logicalPath)}\n`);
 
     const confirmDelete = await this.prompter.promptBoolean(
-      `¿Estás seguro de que deseás ELIMINAR definitivamente la búsqueda "${selectedId}"?`,
+      `¿Estás seguro de que deseás ELIMINAR definitivamente la búsqueda "${sanitizeString(selectedId)}"?`,
       false,
     );
 
@@ -282,6 +282,6 @@ export class ConfigurationSubmenu {
     }
 
     await this.configStore.remove(selectedId, { signal: this.signal });
-    this.terminal.writeLine(`\n✓ Búsqueda "${selectedId}" eliminada exitosamente.`);
+    this.terminal.writeLine(`\n✓ Búsqueda "${sanitizeString(selectedId)}" eliminada exitosamente.`);
   }
 }
