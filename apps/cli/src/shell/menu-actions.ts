@@ -1,8 +1,14 @@
+import type { SourceRegistry } from '@busca-ofertas-ai/configuration';
 import { EXIT_CODES, type ExitCode } from '../runtime/exit-codes.js';
 import type { TerminalPort } from '../runtime/terminal.js';
 import type { ProgressReporter } from '../runtime/progress.js';
 import type { DiagnosticLogger } from '../runtime/diagnostics.js';
 import { MenuFormatter } from '../presentation/menu-formatter.js';
+import type { SavedSearchConfigStore } from '../storage/saved-search-store.js';
+import type { TextFilePort } from '../storage/text-file-port.js';
+import { CreateSearchWizard } from '../wizard/create-search-wizard.js';
+import { EditSearchWizard } from '../wizard/edit-search-wizard.js';
+import { ConfigurationSubmenu } from '../wizard/configuration-submenu.js';
 
 /**
  * Execution context passed to menu action handlers.
@@ -30,6 +36,100 @@ export interface MenuAction {
   readonly optionNumber: number;
   readonly title: string;
   execute(context: ActionExecutionContext): Promise<ActionResult>;
+}
+
+/**
+ * Handler for menu option 2: Crear una búsqueda.
+ */
+export class CreateSearchActionHandler implements MenuAction {
+  public readonly id = 'create-search';
+  public readonly optionNumber = 2;
+  public readonly title = 'Crear una búsqueda';
+  private readonly sourceRegistry: SourceRegistry;
+  private readonly configStore: SavedSearchConfigStore;
+
+  constructor(params: { sourceRegistry: SourceRegistry; configStore: SavedSearchConfigStore }) {
+    this.sourceRegistry = params.sourceRegistry;
+    this.configStore = params.configStore;
+  }
+
+  public async execute(context: ActionExecutionContext): Promise<ActionResult> {
+    context.diagnostics.info('User started search creation wizard.');
+    const wizard = new CreateSearchWizard({
+      terminal: context.terminal,
+      signal: context.signal,
+      sourceRegistry: this.sourceRegistry,
+      configStore: this.configStore,
+    });
+
+    await wizard.run();
+    return { kind: 'continue' };
+  }
+}
+
+/**
+ * Handler for menu option 3: Editar una búsqueda.
+ */
+export class EditSearchActionHandler implements MenuAction {
+  public readonly id = 'edit-search';
+  public readonly optionNumber = 3;
+  public readonly title = 'Editar una búsqueda';
+  private readonly sourceRegistry: SourceRegistry;
+  private readonly configStore: SavedSearchConfigStore;
+
+  constructor(params: { sourceRegistry: SourceRegistry; configStore: SavedSearchConfigStore }) {
+    this.sourceRegistry = params.sourceRegistry;
+    this.configStore = params.configStore;
+  }
+
+  public async execute(context: ActionExecutionContext): Promise<ActionResult> {
+    context.diagnostics.info('User started search edit wizard.');
+    const wizard = new EditSearchWizard({
+      terminal: context.terminal,
+      signal: context.signal,
+      sourceRegistry: this.sourceRegistry,
+      configStore: this.configStore,
+    });
+
+    await wizard.run();
+    return { kind: 'continue' };
+  }
+}
+
+/**
+ * Handler for menu option 7: Configuración.
+ */
+export class ConfigurationActionHandler implements MenuAction {
+  public readonly id = 'configuration';
+  public readonly optionNumber = 7;
+  public readonly title = 'Configuración';
+  private readonly sourceRegistry: SourceRegistry;
+  private readonly configStore: SavedSearchConfigStore;
+  private readonly textFilePort: TextFilePort;
+
+  constructor(params: {
+    sourceRegistry: SourceRegistry;
+    configStore: SavedSearchConfigStore;
+    textFilePort: TextFilePort;
+  }) {
+    this.sourceRegistry = params.sourceRegistry;
+    this.configStore = params.configStore;
+    this.textFilePort = params.textFilePort;
+  }
+
+  public async execute(context: ActionExecutionContext): Promise<ActionResult> {
+    context.diagnostics.info('User entered configuration submenu.');
+    const submenu = new ConfigurationSubmenu({
+      terminal: context.terminal,
+      signal: context.signal,
+      sourceRegistry: this.sourceRegistry,
+      configStore: this.configStore,
+      textFilePort: this.textFilePort,
+    });
+
+    await submenu.run();
+    return { kind: 'continue' };
+  }
 }
 
 /**

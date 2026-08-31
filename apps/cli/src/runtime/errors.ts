@@ -1,5 +1,7 @@
+import { isConfigurationError } from '@busca-ofertas-ai/configuration';
 import { EXIT_CODES, type ExitCode } from './exit-codes.js';
 import type { TerminalPort } from './terminal.js';
+import { sanitizeString } from './diagnostics.js';
 
 export interface CliErrorParams {
   readonly code: string;
@@ -53,9 +55,31 @@ export class ErrorPresenter {
    */
   public present(error: unknown): void {
     if (isCliError(error)) {
-      this.terminal.writeLine(`\n[${error.code}] ${error.userMessage}`);
+      this.terminal.writeLine(
+        `\n[${sanitizeString(error.code)}] ${sanitizeString(error.userMessage)}`,
+      );
       if (error.suggestedAction) {
-        this.terminal.writeLine(`Acción sugerida: ${error.suggestedAction}`);
+        this.terminal.writeLine(`Acción sugerida: ${sanitizeString(error.suggestedAction)}`);
+      }
+      return;
+    }
+
+    if (isConfigurationError(error)) {
+      const pathPrefix = error.path ? `${error.path}: ` : '';
+      this.terminal.writeLine(
+        `\n[${sanitizeString(error.code)}] ${sanitizeString(pathPrefix + error.message)}`,
+      );
+      if (error.suggestion) {
+        this.terminal.writeLine(`Acción sugerida: ${sanitizeString(error.suggestion)}`);
+      }
+      for (const issue of error.issues) {
+        const issuePrefix = issue.path ? `${issue.path}: ` : '';
+        this.terminal.writeLine(
+          `  - [${sanitizeString(issue.code)}] ${sanitizeString(issuePrefix + issue.message)}`,
+        );
+        if (issue.suggestion) {
+          this.terminal.writeLine(`    (Sugerencia: ${sanitizeString(issue.suggestion)})`);
+        }
       }
       return;
     }
@@ -71,6 +95,9 @@ export class ErrorPresenter {
   public resolveExitCode(error: unknown): ExitCode {
     if (isCliError(error)) {
       return error.exitCode;
+    }
+    if (isConfigurationError(error)) {
+      return EXIT_CODES.INVALID_CONFIGURATION;
     }
     if (error instanceof Error && error.name === 'AbortError') {
       return EXIT_CODES.CANCELLED;

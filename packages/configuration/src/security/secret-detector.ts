@@ -26,6 +26,19 @@ const isForbiddenKey = (key: string): boolean => {
   return FORBIDDEN_NORMALIZED_KEYS.has(normalized);
 };
 
+const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
+  /\bAuthorization\s*:\s*\S+/i,
+  /\b(?:Set-Cookie|Cookie)\s*:\s*\S+/i,
+  /\b(?:password|passwd|token|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|bearer[_-]?token)\s*[:=]\s*\S+/i,
+  /\bBearer\s+[A-Za-z0-9_\-.~+/=]{8,}\b/i,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b/i,
+  /\bgithub_pat_[A-Za-z0-9_]{16,}\b/i,
+] as const;
+
+const containsObviousSecretPattern = (text: string): boolean => {
+  return SECRET_VALUE_PATTERNS.some((pattern) => pattern.test(text));
+};
+
 export const MAX_ALLOWED_NESTING_DEPTH = 20;
 
 export const detectForbiddenSecrets = (
@@ -52,7 +65,20 @@ export const detectForbiddenSecrets = (
 
   const violations: SecretViolation[] = [];
 
-  if (Array.isArray(value)) {
+  if (typeof value === 'string') {
+    if (containsObviousSecretPattern(value)) {
+      const keySegment =
+        currentPath
+          .split('.')
+          .pop()
+          ?.replace(/\[\d+\]$/, '') || 'value';
+      violations.push({
+        path: currentPath || 'root',
+        key: keySegment,
+        code: 'CONFIG_SECRET_FORBIDDEN',
+      });
+    }
+  } else if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
       const itemPath = currentPath ? `${currentPath}[${i}]` : `[${i}]`;
       violations.push(...detectForbiddenSecrets(value[i], itemPath, maxDepth - 1));

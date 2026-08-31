@@ -1,3 +1,7 @@
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { SourceRegistry } from '@busca-ofertas-ai/configuration';
 import type { ExitCode } from './runtime/exit-codes.js';
 import { TerminalPort, NodeTerminalAdapter } from './runtime/terminal.js';
 import { SignalManagerPort, ProcessSignalManager } from './runtime/signals.js';
@@ -7,10 +11,18 @@ import { ErrorPresenter } from './runtime/errors.js';
 import { MenuFormatter, CONTRACTUAL_MENU_OPTIONS } from './presentation/menu-formatter.js';
 import {
   type MenuAction,
+  CreateSearchActionHandler,
+  EditSearchActionHandler,
+  ConfigurationActionHandler,
   NotImplementedActionHandler,
   ExitActionHandler,
 } from './shell/menu-actions.js';
 import { CliShell } from './shell/cli-shell.js';
+import {
+  type SavedSearchConfigStore,
+  NodeFileSystemSavedSearchConfigStore,
+} from './storage/saved-search-store.js';
+import { type TextFilePort, NodeTextFileAdapter } from './storage/text-file-port.js';
 
 export interface CliApplicationOptions {
   readonly terminal?: TerminalPort;
@@ -20,6 +32,10 @@ export interface CliApplicationOptions {
   readonly actions?: readonly MenuAction[];
   readonly formatter?: MenuFormatter;
   readonly errorPresenter?: ErrorPresenter;
+  readonly sourceRegistry?: SourceRegistry;
+  readonly configStore?: SavedSearchConfigStore;
+  readonly textFilePort?: TextFilePort;
+  readonly searchConfigDirectory?: string;
 }
 
 export interface CliApplication {
@@ -29,28 +45,100 @@ export interface CliApplication {
   readonly diagnostics: DiagnosticLogger;
   readonly progress: ProgressReporter;
   readonly errorPresenter: ErrorPresenter;
+  readonly sourceRegistry: SourceRegistry;
+  readonly configStore: SavedSearchConfigStore;
+  readonly textFilePort: TextFilePort;
   run(): Promise<ExitCode>;
+}
+
+/**
+ * Resolves the default pre-XDG storage directory for saved searches.
+ * Deterministic and independent of process.cwd() when unconfigured.
+ */
+export function resolveDefaultSearchConfigDirectory(explicitDir?: string): string {
+  if (explicitDir) {
+    return path.resolve(explicitDir);
+  }
+
+  // Walk up from current module location to locate workspace root containing pnpm-workspace.yaml
+  let currentDir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    const candidateWorkspace = path.join(currentDir, 'pnpm-workspace.yaml');
+    if (fs.existsSync(candidateWorkspace)) {
+      return path.join(currentDir, 'config/searches');
+    }
+    const parent = path.dirname(currentDir);
+    if (parent === currentDir) break;
+    currentDir = parent;
+  }
+
+  // Fallback: 3 levels up from apps/cli/src or apps/cli/dist
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../config/searches');
 }
 
 /**
  * Creates default menu action handlers for the 8 contractual options.
  */
-export function createDefaultMenuActions(formatter?: MenuFormatter): MenuAction[] {
+export function createDefaultMenuActions(
+  param?:
+    | MenuFormatter
+    | {
+        formatter?: MenuFormatter | undefined;
+        sourceRegistry?: SourceRegistry | undefined;
+        configStore?: SavedSearchConfigStore | undefined;
+        textFilePort?: TextFilePort | undefined;
+        searchConfigDirectory?: string | undefined;
+      },
+): MenuAction[] {
   const actions: MenuAction[] = [];
-  const fmt = formatter ?? new MenuFormatter();
+  const fmt = param instanceof MenuFormatter ? param : (param?.formatter ?? new MenuFormatter());
+  const reg =
+    param instanceof MenuFormatter
+      ? new SourceRegistry()
+      : (param?.sourceRegistry ?? new SourceRegistry());
+  const defaultDir = resolveDefaultSearchConfigDirectory(
+    param instanceof MenuFormatter ? undefined : param?.searchConfigDirectory,
+  );
+  const store =
+    param instanceof MenuFormatter
+      ? new NodeFileSystemSavedSearchConfigStore(defaultDir)
+      : (param?.configStore ?? new NodeFileSystemSavedSearchConfigStore(defaultDir));
+  const textPort =
+    param instanceof MenuFormatter
+      ? new NodeTextFileAdapter()
+      : (param?.textFilePort ?? new NodeTextFileAdapter());
 
   for (const item of CONTRACTUAL_MENU_OPTIONS) {
     if (item.optionNumber === 8) {
       actions.push(new ExitActionHandler(fmt));
+    } else if (item.optionNumber === 2) {
+      actions.push(
+        new CreateSearchActionHandler({
+          sourceRegistry: reg,
+          configStore: store,
+        }),
+      );
+    } else if (item.optionNumber === 3) {
+      actions.push(
+        new EditSearchActionHandler({
+          sourceRegistry: reg,
+          configStore: store,
+        }),
+      );
+    } else if (item.optionNumber === 7) {
+      actions.push(
+        new ConfigurationActionHandler({
+          sourceRegistry: reg,
+          configStore: store,
+          textFilePort: textPort,
+        }),
+      );
     } else {
       const idMap: Record<number, string> = {
         1: 'run-search',
-        2: 'create-search',
-        3: 'edit-search',
         4: 'view-history',
         5: 'review-listings',
         6: 'source-errors',
-        7: 'configuration',
       };
       actions.push(
         new NotImplementedActionHandler({
@@ -68,7 +156,7 @@ export function createDefaultMenuActions(formatter?: MenuFormatter): MenuAction[
 
 /**
  * Composition Root: wires the terminal, signal handling, diagnostics, error presentation,
- * and CLI shell without instantiating business rules, SQLite, Playwright, or network clients.
+ * source registry, storage seams, and CLI shell.
  */
 export function createCliApplication(options?: CliApplicationOptions): CliApplication {
   const terminal = options?.terminal ?? new NodeTerminalAdapter();
@@ -77,9 +165,24 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
   const progress = options?.progress ?? new TerminalProgressReporter(terminal);
   const errorPresenter = options?.errorPresenter ?? new ErrorPresenter(terminal);
   const formatter = options?.formatter ?? new MenuFormatter();
-  const actions = options?.actions ?? createDefaultMenuActions(formatter);
 
-  // Finding 1 & Cleanup Low: Connect terminal interrupt to central SignalManager and capture unsubscription
+  const sourceRegistry = options?.sourceRegistry ?? new SourceRegistry();
+  const defaultStorageDir = resolveDefaultSearchConfigDirectory(options?.searchConfigDirectory);
+  const configStore =
+    options?.configStore ?? new NodeFileSystemSavedSearchConfigStore(defaultStorageDir);
+  const textFilePort = options?.textFilePort ?? new NodeTextFileAdapter();
+
+  const actions =
+    options?.actions ??
+    createDefaultMenuActions({
+      formatter,
+      sourceRegistry,
+      configStore,
+      textFilePort,
+      searchConfigDirectory: options?.searchConfigDirectory,
+    });
+
+  // Connect terminal interrupt to central SignalManager and capture unsubscription
   let unsubscribeInterrupt: (() => void) | undefined;
   if (terminal.onInterrupt) {
     unsubscribeInterrupt = terminal.onInterrupt((reason) => {
@@ -103,9 +206,11 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
     diagnostics,
     progress,
     errorPresenter,
+    sourceRegistry,
+    configStore,
+    textFilePort,
     run: async (): Promise<ExitCode> => {
       try {
-        // Finding 4: Single ownership of terminal closing and interrupt subscription teardown
         signalManager.registerCleanup(async () => {
           if (unsubscribeInterrupt) {
             unsubscribeInterrupt();

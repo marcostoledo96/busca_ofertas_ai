@@ -2,7 +2,7 @@
 
 Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunidades provenientes de múltiples fuentes. El primer caso de uso será encontrar **Nintendo Switch Lite en Facebook Marketplace dentro de AMBA**, pero el núcleo se diseña para admitir otros productos, precios, monedas, sitios, inmuebles y vehículos sin modificar la lógica central.
 
-> Estado actual: **shell interactiva y composition root implementados (`BOAI-006`); la lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
+> Estado actual: **wizard interactivo de configuración implementado (`BOAI-007`); shell CLI (`BOAI-006`), lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
 
 ## Requisitos
 
@@ -43,20 +43,26 @@ pnpm build
 node apps/cli/dist/bin.js
 ```
 
-#### Estado de opciones del menú (BOAI-006)
+#### Estado de opciones del menú (BOAI-007)
 
 El menú principal contractual presenta 8 opciones:
 
 1. `1. Ejecutar una búsqueda`: Todavía no implementado (previsto para BOAI-011).
-2. `2. Crear una búsqueda`: Todavía no implementado (previsto para BOAI-007).
-3. `3. Editar una búsqueda`: Todavía no implementado (previsto para BOAI-007).
+2. `2. Crear una búsqueda`: **Disponible** — Wizard guiado (modo Simple y Avanzado) para crear búsquedas válidas en base a capacidades registradas.
+3. `3. Editar una búsqueda`: **Disponible** — Edición modular de secciones con preservación de campos no modificados y diff estructural antes de guardar.
 4. `4. Ver historial`: Todavía no implementado (previsto para BOAI-010).
 5. `5. Revisar publicaciones dudosas`: Todavía no implementado (previsto para BOAI-011).
 6. `6. Ver errores de fuentes`: Todavía no implementado (previsto para BOAI-011).
-7. `7. Configuración`: Todavía no implementado (previsto para BOAI-007).
+7. `7. Configuración`: **Disponible** — Submenú para importar YAML, exportar búsquedas y eliminar configuraciones.
 8. `8. Salir`: **Disponible** — Finaliza la aplicación limpiamente con código de salida `0`.
 
 Seleccionar una opción no disponible informa al usuario que aún no está implementada y regresa de forma segura al menú interactivo.
+
+### Gestión de búsquedas y almacenamiento (BOAI-007)
+
+- **Directorio provisional pre-XDG**: Las búsquedas se persisten como archivos `${id}.yml` en `config/searches/`. _Nota: BOAI-008 reemplazará esta resolución por directorios XDG del sistema operativo mediante el seam de almacenamiento `SavedSearchConfigStore` sin modificar la lógica del wizard._
+- **Defaults del Wizard v1**: Solo los bloques contractuales obligatorios (`evaluation`, `ai`, `retention`) y `enabled=true` poseen valores predeterminados (visibles y editables). Opciones específicas como moneda, modelo, filtros de producto o proveedor de IA no están predefinidas globalmente.
+- **Fuentes y capacidades**: Las preguntas se adaptan dinámicamente según el `SourceRegistry`. En el runtime productivo inicial sin adaptadores cargados, la CLI muestra un mensaje accionable y regresa al menú de forma segura. En tests, se comprueban los flujos completos con adaptadores sintéticos fake.
 
 #### Tabla de Códigos de Salida (Exit Codes)
 
