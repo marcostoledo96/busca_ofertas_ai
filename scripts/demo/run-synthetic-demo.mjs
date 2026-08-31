@@ -21,12 +21,18 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { importSavedSearchYaml, validateSearchCapabilities } from '@busca-ofertas-ai/configuration';
+import {
+  importSavedSearchYaml,
+  validateSearchCapabilities,
+  ConfigurationError,
+  isConfigurationError,
+} from '@busca-ofertas-ai/configuration';
 import { createDefaultSourceRegistry } from '@busca-ofertas-ai/cli';
 import {
   createSanitizedAdapterContext,
   createSanitizedLogger,
   createSanitizedArtifactWriter,
+  isSourceAdapterError,
 } from '@busca-ofertas-ai/adapter-sdk';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -38,34 +44,33 @@ export async function runSyntheticDemo(configPathInput) {
   const configFilePath = configPathInput ? resolve(configPathInput) : defaultConfigFile;
 
   if (!existsSync(configFilePath)) {
-    console.error(`Error: Configuration file not found at ${configFilePath}`);
-    process.exit(1);
+    throw new ConfigurationError({
+      code: 'CONFIG_FILE_NOT_FOUND',
+      path: configFilePath,
+      message: `Configuration file not found at ${configFilePath}`,
+    });
   }
 
   const rawYaml = readFileSync(configFilePath, 'utf8');
 
-  // 1. Parse & validate SavedSearch configuration schema
+  // 1. Parse & validate SavedSearch configuration schema (throws ConfigurationError on invalid config)
   const importResult = importSavedSearchYaml(rawYaml, {
     clock: { now: () => new Date('2026-08-31T12:00:00Z') },
   });
-  if (!importResult.valid && !importResult.configuration) {
-    console.error('Error: SavedSearch configuration is invalid:');
-    for (const err of importResult.errors) {
-      console.error(`  - [${err.code}] ${err.path}: ${err.message}`);
-    }
-    process.exit(20); // INVALID_CONFIGURATION
-  }
 
   const savedSearch = importResult.configuration;
 
-  // 2. Build SourceRegistry & validate capabilities
+  // 2. Build SourceRegistry & validate capabilities (throws ConfigurationError if incompatible)
   const registry = createDefaultSourceRegistry();
   validateSearchCapabilities(savedSearch, registry);
 
   const sourceConfig = savedSearch.sources.find((s) => s.id === 'synthetic');
   if (!sourceConfig || !sourceConfig.enabled) {
-    console.error('Error: No enabled synthetic source in configuration');
-    process.exit(20);
+    throw new ConfigurationError({
+      code: 'CONFIG_SOURCE_NOT_FOUND',
+      path: 'sources',
+      message: 'No enabled synthetic source found in configuration',
+    });
   }
 
   // 3. Create adapter via registry factory
@@ -162,7 +167,20 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(__filename)) {
       process.exit(0);
     })
     .catch((err) => {
-      console.error('Fatal error in synthetic demo:', err);
-      process.exit(1);
+      if (isConfigurationError(err)) {
+        console.error(`[INVALID_CONFIGURATION] ${err.code}: ${err.message}`);
+        if (err.issues && err.issues.length > 0) {
+          for (const issue of err.issues) {
+            console.error(`  - [${issue.code}] ${issue.path}: ${issue.message}`);
+          }
+        }
+        process.exit(20); // EXIT_CODES.INVALID_CONFIGURATION
+      } else if (isSourceAdapterError(err)) {
+        console.error(`[TOTAL_SOURCE_FAILURE] ${err.code}: ${err.message}`);
+        process.exit(30); // EXIT_CODES.TOTAL_SOURCE_FAILURE
+      } else {
+        console.error(`[INTERNAL_ERROR] ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(70); // EXIT_CODES.INTERNAL_ERROR
+      }
     });
 }

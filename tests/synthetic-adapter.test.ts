@@ -652,4 +652,217 @@ describe('SyntheticAdapter Unit & Functional Specification (BOAI-009)', () => {
       }
     });
   });
+
+  describe('11. Defensive Fixture Isolation and Mutation Immutability (Finding 1)', () => {
+    it('prevents search result mutations from contaminating subsequent search runs', async () => {
+      const request = makeSearchRequest({
+        savedSearchId: 's1',
+        queries: ['Nintendo Switch Lite'],
+        pagination: { maxPages: 1, maxItems: 3 },
+      });
+
+      const result1 = await adapter.search(request);
+      expect(result1.status).toBe('SUCCESS');
+      if (result1.status === 'SUCCESS') {
+        const item1 = result1.items[0];
+        expect(item1).toBeDefined();
+        if (item1) {
+          const originalTitle = item1.title;
+          const originalMeta = { ...item1.sourceMetadata };
+          const originalImageCount = item1.imageUrls.length;
+
+          // Aggressively mutate returned result
+          item1.sourceMetadata['poisoned'] = 'evil_data';
+          delete item1.sourceMetadata['sellerCity'];
+          (item1.imageUrls as string[]).push('https://evil.invalid/hacked.png');
+          (item1.imageUrls as string[])[0] = 'https://evil.invalid/replaced.png';
+
+          // Run search again and verify pristine data
+          const result2 = await adapter.search(request);
+          expect(result2.status).toBe('SUCCESS');
+          if (result2.status === 'SUCCESS') {
+            const item2 = result2.items[0];
+            expect(item2).toBeDefined();
+            if (item2) {
+              expect(item2.title).toBe(originalTitle);
+              expect(item2.sourceMetadata).toEqual(originalMeta);
+              expect(item2.sourceMetadata['poisoned']).toBeUndefined();
+              expect(item2.imageUrls).toHaveLength(originalImageCount);
+              expect(item2.imageUrls).not.toContain('https://evil.invalid/hacked.png');
+              expect(item2.imageUrls[0]).not.toBe('https://evil.invalid/replaced.png');
+            }
+          }
+        }
+      }
+    });
+
+    it('prevents getDetails result mutations from contaminating subsequent getDetails calls', async () => {
+      const ref = makeReference('syn-001');
+
+      const details1 = await adapter.getDetails(ref, makeControl());
+      const originalMeta = { ...details1.sourceMetadata };
+      const originalAttributes = { ...details1.attributes };
+      const originalImages = [...details1.imageUrls];
+
+      // Mutate details1
+      details1.sourceMetadata['hacked_field'] = 'attack';
+      details1.attributes['tampered'] = true;
+      if (details1.sellerInfo) {
+        details1.sellerInfo['injected'] = 999;
+      }
+      (details1.imageUrls as string[]).push('https://evil.invalid/extra.png');
+
+      // Request details again
+      const details2 = await adapter.getDetails(ref, makeControl());
+      expect(details2.sourceMetadata).toEqual(originalMeta);
+      expect(details2.sourceMetadata['hacked_field']).toBeUndefined();
+      expect(details2.attributes).toEqual(originalAttributes);
+      expect(details2.attributes['tampered']).toBeUndefined();
+      if (details2.sellerInfo) {
+        expect(details2.sellerInfo['injected']).toBeUndefined();
+      }
+      expect(details2.imageUrls).toEqual(originalImages);
+    });
+
+    it('prevents external mutation of fixtures passed to constructor from altering adapter behavior', async () => {
+      const customFixtures = [
+        {
+          externalId: 'syn-custom-001',
+          canonicalUrl: 'https://synthetic.invalid/listings/syn-custom-001',
+          title: 'Custom Nintendo Switch Lite',
+          description: 'Original description',
+          rawPriceText: 'ARS 200.000',
+          sourceCurrencyCode: 'ARS',
+          rawLocationText: 'Palermo',
+          rawConditionText: 'NEW',
+          rawAvailabilityText: 'IN_STOCK',
+          imageUrls: ['https://synthetic.invalid/images/custom-1.jpg'],
+          sourceMetadata: { originalKey: 'originalValue' },
+          matchingQueries: ['custom switch'],
+          attributes: { color: 'yellow' },
+        },
+      ];
+
+      const customAdapter = new SyntheticAdapter({ fixtures: customFixtures });
+      await customAdapter.initialize(context);
+
+      // Mutate external array and object after construction
+      const targetFixture = customFixtures[0]!;
+      targetFixture.title = 'MUTATED TITLE';
+      targetFixture.sourceMetadata.originalKey = 'MUTATED VALUE';
+      targetFixture.imageUrls.push('https://evil.invalid/hacked.jpg');
+      customFixtures.pop();
+
+      // Search via customAdapter
+      const searchRes = await customAdapter.search(
+        makeSearchRequest({
+          queries: ['custom switch'],
+          pagination: { maxPages: 1, maxItems: 10 },
+        }),
+      );
+
+      expect(searchRes.status).toBe('SUCCESS');
+      if (searchRes.status === 'SUCCESS') {
+        expect(searchRes.items).toHaveLength(1);
+        expect(searchRes.items[0]?.title).toBe('Custom Nintendo Switch Lite');
+        expect(searchRes.items[0]?.sourceMetadata['originalKey']).toBe('originalValue');
+        expect(searchRes.items[0]?.imageUrls).toHaveLength(1);
+      }
+
+      await customAdapter.dispose();
+    });
+  });
+
+  describe('12. Consistent PageSize Validation Matrix (Finding 2)', () => {
+    describe('Constructor pageSize validation', () => {
+      const invalidConstructorValues = [0, -1, 1.5, NaN, Infinity, '5', null, {}];
+
+      for (const invalidVal of invalidConstructorValues) {
+        it(`rejects constructor pageSize = ${JSON.stringify(invalidVal)} with TypeError`, () => {
+          expect(
+            () =>
+              new SyntheticAdapter({
+                pageSize: invalidVal as unknown as number,
+              }),
+          ).toThrow(TypeError);
+        });
+      }
+
+      it('accepts valid constructor pageSize = 1 and 5', () => {
+        const ad1 = new SyntheticAdapter({ pageSize: 1 });
+        expect(ad1.pageSize).toBe(1);
+        const ad5 = new SyntheticAdapter({ pageSize: 5 });
+        expect(ad5.pageSize).toBe(5);
+      });
+    });
+
+    describe('setPageSize validation', () => {
+      const invalidSetValues = [0, -1, 1.5, NaN, Infinity];
+
+      for (const invalidVal of invalidSetValues) {
+        it(`rejects setPageSize(${invalidVal}) with TypeError`, () => {
+          expect(() => adapter.setPageSize(invalidVal)).toThrow(TypeError);
+        });
+      }
+
+      it('accepts valid setPageSize(1) and setPageSize(5)', () => {
+        adapter.setPageSize(1);
+        expect(adapter.pageSize).toBe(1);
+        adapter.setPageSize(5);
+        expect(adapter.pageSize).toBe(5);
+      });
+    });
+
+    describe('sourceOptions.pageSize validation during search()', () => {
+      const invalidOptionValues = [0, -1, 1.5, NaN, Infinity, '5', null, {}];
+
+      for (const invalidVal of invalidOptionValues) {
+        it(`rejects sourceOptions.pageSize = ${JSON.stringify(invalidVal)} with CONFIGURATION_UNSUPPORTED without silent fallback`, async () => {
+          try {
+            await adapter.search(
+              makeSearchRequest({
+                queries: ['Nintendo Switch Lite'],
+                pagination: { maxPages: 1, maxItems: 10 },
+                sourceOptions: { pageSize: invalidVal },
+              }),
+            );
+            expect.unreachable('Should throw SourceAdapterError');
+          } catch (error) {
+            expect(isSourceAdapterError(error)).toBe(true);
+            if (isSourceAdapterError(error)) {
+              expect(error.code).toBe('CONFIGURATION_UNSUPPORTED');
+              expect(error.retryable).toBe(false);
+              expect(error.evidence?.[0]).toContain('sourceOptions.pageSize');
+            }
+          }
+        });
+      }
+
+      it('accepts valid sourceOptions.pageSize = 1 and sourceOptions.pageSize = 5', async () => {
+        const res1 = await adapter.search(
+          makeSearchRequest({
+            queries: ['Nintendo Switch Lite'],
+            pagination: { maxPages: 1, maxItems: 10 },
+            sourceOptions: { pageSize: 1 },
+          }),
+        );
+        expect(res1.status).toBe('SUCCESS');
+        if (res1.status === 'SUCCESS') {
+          expect(res1.items).toHaveLength(1);
+        }
+
+        const res5 = await adapter.search(
+          makeSearchRequest({
+            queries: ['Nintendo Switch Lite'],
+            pagination: { maxPages: 1, maxItems: 10 },
+            sourceOptions: { pageSize: 5 },
+          }),
+        );
+        expect(res5.status).toBe('SUCCESS');
+        if (res5.status === 'SUCCESS') {
+          expect(res5.items).toHaveLength(5);
+        }
+      });
+    });
+  });
 });

@@ -29,10 +29,15 @@ import type {
 } from './types.js';
 import {
   DEFAULT_SYNTHETIC_PAGE_SIZE,
+  deepCloneJson,
+  isValidSyntheticPageSize,
   isSyntheticScenario,
+  MAX_SYNTHETIC_PAGE_SIZE,
+  MIN_SYNTHETIC_PAGE_SIZE,
   SYNTHETIC_ADAPTER_CAPABILITIES,
   SYNTHETIC_ADAPTER_ID,
   SYNTHETIC_ADAPTER_VERSION,
+  validateSyntheticPageSize,
 } from './types.js';
 
 /**
@@ -68,8 +73,11 @@ export class SyntheticAdapter implements SourceAdapter {
   constructor(options: SyntheticAdapterOptions = {}) {
     this._scenario = options.defaultScenario ?? 'SUCCESS';
     this._healthStatus = options.healthStatus ?? 'HEALTHY';
-    this._pageSize = options.pageSize ?? DEFAULT_SYNTHETIC_PAGE_SIZE;
-    this._fixtures = options.fixtures ?? SYNTHETIC_FIXTURES;
+    this._pageSize =
+      options.pageSize !== undefined
+        ? validateSyntheticPageSize(options.pageSize)
+        : DEFAULT_SYNTHETIC_PAGE_SIZE;
+    this._fixtures = (options.fixtures ?? SYNTHETIC_FIXTURES).map((f) => deepCloneJson(f));
   }
 
   get isInitialized(): boolean {
@@ -111,17 +119,12 @@ export class SyntheticAdapter implements SourceAdapter {
   }
 
   public setPageSize(pageSize: number): this {
-    if (pageSize <= 0 || !Number.isInteger(pageSize)) {
-      throw new Error(
-        `Synthetic adapter pageSize must be a positive integer, received: ${pageSize}`,
-      );
-    }
-    this._pageSize = pageSize;
+    this._pageSize = validateSyntheticPageSize(pageSize);
     return this;
   }
 
   public setFixtures(fixtures: readonly SyntheticListingFixture[]): this {
-    this._fixtures = fixtures;
+    this._fixtures = fixtures.map((f) => deepCloneJson(f));
     return this;
   }
 
@@ -312,11 +315,23 @@ export class SyntheticAdapter implements SourceAdapter {
     let pageSize = this._pageSize;
     if (request.sourceOptions && typeof request.sourceOptions === 'object') {
       const optionPageSize = request.sourceOptions['pageSize'];
-      if (
-        typeof optionPageSize === 'number' &&
-        Number.isInteger(optionPageSize) &&
-        optionPageSize > 0
-      ) {
+      if (optionPageSize !== undefined) {
+        if (!isValidSyntheticPageSize(optionPageSize)) {
+          const pageSizeDisplay =
+            typeof optionPageSize === 'string' ||
+            typeof optionPageSize === 'number' ||
+            typeof optionPageSize === 'boolean'
+              ? String(optionPageSize)
+              : (JSON.stringify(optionPageSize) ?? 'invalid');
+          return Promise.reject(
+            new SourceAdapterError({
+              code: 'CONFIGURATION_UNSUPPORTED',
+              message: `Invalid synthetic pageSize '${pageSizeDisplay}' specified in sourceOptions. Must be an integer between ${MIN_SYNTHETIC_PAGE_SIZE} and ${MAX_SYNTHETIC_PAGE_SIZE}.`,
+              retryable: false,
+              evidence: [`sourceOptions.pageSize = ${pageSizeDisplay}`],
+            }),
+          );
+        }
         pageSize = optionPageSize;
       }
     }
@@ -356,9 +371,9 @@ export class SyntheticAdapter implements SourceAdapter {
           rawLocationText: fixture.rawLocationText ?? null,
           rawConditionText: fixture.rawConditionText ?? null,
           rawAvailabilityText: fixture.rawAvailabilityText ?? null,
-          imageUrls: fixture.imageUrls,
+          imageUrls: deepCloneJson(fixture.imageUrls),
           observedAt,
-          sourceMetadata: fixture.sourceMetadata,
+          sourceMetadata: deepCloneJson(fixture.sourceMetadata),
         });
 
         if (collectedCandidates.length >= maxItems) {
@@ -445,11 +460,13 @@ export class SyntheticAdapter implements SourceAdapter {
       rawLocationText: found.rawLocationText ?? null,
       rawConditionText: found.rawConditionText ?? null,
       rawAvailabilityText: found.rawAvailabilityText ?? null,
-      imageUrls: found.imageUrls,
-      sellerInfo: found.sellerInfo,
-      attributes: found.attributes ?? { condition: found.rawConditionText ?? 'used' },
+      imageUrls: deepCloneJson(found.imageUrls),
+      sellerInfo: found.sellerInfo ? deepCloneJson(found.sellerInfo) : undefined,
+      attributes: found.attributes
+        ? deepCloneJson(found.attributes)
+        : { condition: found.rawConditionText ?? 'used' },
       fetchedAt,
-      sourceMetadata: found.sourceMetadata,
+      sourceMetadata: deepCloneJson(found.sourceMetadata),
     });
   }
 

@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import {
   getAdapterSyntheticPackageMetadata,
   SYNTHETIC_ADAPTER_PACKAGE_NAME,
+  SYNTHETIC_FIXTURE_SET_METADATA,
 } from '@busca-ofertas-ai/adapter-synthetic';
 
 describe('Synthetic Adapter Architecture, Network & Privacy Gates (BOAI-009)', () => {
@@ -14,6 +15,16 @@ describe('Synthetic Adapter Architecture, Network & Privacy Gates (BOAI-009)', (
       name: '@busca-ofertas-ai/adapter-synthetic',
       version: '0.1.0',
       initialized: true,
+    });
+  });
+
+  it('Finding 4: declares contractual fixture set metadata for synthetic corpus', () => {
+    expect(SYNTHETIC_FIXTURE_SET_METADATA).toBeDefined();
+    expect(SYNTHETIC_FIXTURE_SET_METADATA).toEqual({
+      schema: 'raw-listing-candidate-fixture',
+      schemaVersion: 1,
+      sourceId: 'synthetic',
+      sourceVersion: '0.1.0',
     });
   });
 
@@ -114,5 +125,23 @@ describe('Synthetic Adapter Architecture, Network & Privacy Gates (BOAI-009)', (
         ).toBe(false);
       }
     }
+  });
+
+  it('Finding 5: dependency-cruiser boundary rules enforce strict composition-root isolation and adapter whitelist', () => {
+    const depcruisePath = path.resolve(__dirname, '../dependency-cruiser.config.cjs');
+    const configContent = fs.readFileSync(depcruisePath, 'utf8');
+
+    // Rule: CLI non-composition-root modules cannot import adapters
+    expect(configContent).toContain('cli-non-composition-root-no-adapters');
+
+    // Rule: adapters can ONLY depend on adapter-sdk and core (strict whitelist)
+    expect(configContent).toContain('adapters-allowed-dependencies');
+    expect(configContent).toContain('^packages/adapter-sdk/');
+    expect(configContent).toContain('^packages/core/');
+
+    // Rules: packages cannot depend on adapters
+    expect(configContent).toContain('core-no-adapters');
+    expect(configContent).toContain('adapter-sdk-no-adapters');
+    expect(configContent).toContain('configuration-no-adapters');
   });
 });

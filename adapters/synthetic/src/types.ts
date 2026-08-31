@@ -4,7 +4,45 @@ export const SYNTHETIC_ADAPTER_ID = 'synthetic' as const;
 export const SYNTHETIC_ADAPTER_VERSION = '0.1.0' as const;
 export const SYNTHETIC_ADAPTER_SDK_VERSION = ADAPTER_SDK_VERSION;
 export const SYNTHETIC_ADAPTER_PACKAGE_NAME = '@busca-ofertas-ai/adapter-synthetic' as const;
+
+export const MIN_SYNTHETIC_PAGE_SIZE = 1;
+export const MAX_SYNTHETIC_PAGE_SIZE = 100;
 export const DEFAULT_SYNTHETIC_PAGE_SIZE = 3;
+
+export function isValidSyntheticPageSize(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    Number.isFinite(value) &&
+    value >= MIN_SYNTHETIC_PAGE_SIZE &&
+    value <= MAX_SYNTHETIC_PAGE_SIZE
+  );
+}
+
+export function validateSyntheticPageSize(pageSize: unknown): number {
+  if (!isValidSyntheticPageSize(pageSize)) {
+    throw new TypeError(
+      `Synthetic adapter pageSize must be an integer between ${MIN_SYNTHETIC_PAGE_SIZE} and ${MAX_SYNTHETIC_PAGE_SIZE}, received: ${String(pageSize)}`,
+    );
+  }
+  return pageSize;
+}
+
+export const SYNTHETIC_FIXTURE_SET_METADATA = {
+  schema: 'raw-listing-candidate-fixture',
+  schemaVersion: 1,
+  sourceId: SYNTHETIC_ADAPTER_ID,
+  sourceVersion: SYNTHETIC_ADAPTER_VERSION,
+} as const;
+
+export type SyntheticFixtureSetMetadata = typeof SYNTHETIC_FIXTURE_SET_METADATA;
+
+export function deepCloneJson<T>(value: T): T {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  return structuredClone(value);
+}
 
 export const SYNTHETIC_ADAPTER_CAPABILITIES: SourceCapabilities = {
   textSearch: true,

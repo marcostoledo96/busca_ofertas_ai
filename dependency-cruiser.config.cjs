@@ -91,18 +91,26 @@ module.exports = {
       to: { path: '^adapters/' },
     },
     {
-      name: 'adapters-allowed-dependencies',
-      comment: 'adapters solo pueden depender de adapter-sdk y core.',
+      name: 'cli-non-composition-root-no-adapters',
+      comment:
+        'Solo apps/cli/src/composition-root.ts puede importar adapters; el resto de apps/cli no debe depender de adapters.',
       severity: 'error',
-      from: { path: '^adapters/' },
+      from: {
+        path: '^apps/cli/',
+        pathNot: '^apps/cli/(src|dist)/composition-root\\.(ts|js|d\\.ts)$',
+      },
       to: {
-        path: [
-          '^packages/storage-sqlite',
-          '^apps/cli',
-          '^packages/configuration',
-          '^packages/rules-engine',
-          '^packages/report-html',
-        ],
+        path: '^adapters/',
+      },
+    },
+    {
+      name: 'adapters-allowed-dependencies',
+      comment: 'adapters solo pueden depender de adapter-sdk, core y sus propios módulos internos.',
+      severity: 'error',
+      from: { path: '^adapters/([^/]+)/' },
+      to: {
+        path: '^(?:packages|apps|adapters)/',
+        pathNot: ['^adapters/$1/', '^packages/adapter-sdk/', '^packages/core/'],
       },
     },
     {
