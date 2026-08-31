@@ -1,0 +1,29 @@
+{
+  "name": "@busca-ofertas-ai/configuration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@busca-ofertas-ai/adapter-sdk": "workspace:*",
+    "@busca-ofertas-ai/core": "workspace:*",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.2"
+  }
+}
