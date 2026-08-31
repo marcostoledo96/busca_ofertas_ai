@@ -11,6 +11,9 @@ importers:
       '@busca-ofertas-ai/adapter-sdk':
         specifier: workspace:*
         version: link:packages/adapter-sdk
+      '@busca-ofertas-ai/adapter-synthetic':
+        specifier: workspace:*
+        version: link:adapters/synthetic
       '@busca-ofertas-ai/cli':
         specifier: workspace:*
         version: link:apps/cli
@@ -51,8 +54,20 @@ importers:
         specifier: ^2.7.0
         version: 2.9.0
 
+  adapters/synthetic:
+    dependencies:
+      '@busca-ofertas-ai/adapter-sdk':
+        specifier: workspace:*
+        version: link:../../packages/adapter-sdk
+      '@busca-ofertas-ai/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   apps/cli:
     dependencies:
+      '@busca-ofertas-ai/adapter-synthetic':
+        specifier: workspace:*
+        version: link:../../adapters/synthetic
       '@busca-ofertas-ai/configuration':
         specifier: workspace:*
         version: link:../../packages/configuration

@@ -2,7 +2,7 @@
 
 Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunidades provenientes de múltiples fuentes. El primer caso de uso será encontrar **Nintendo Switch Lite en Facebook Marketplace dentro de AMBA**, pero el núcleo se diseña para admitir otros productos, precios, monedas, sitios, inmuebles y vehículos sin modificar la lógica central.
 
-> Estado actual: **launcher de Ubuntu y directorios XDG (`BOAI-008`); wizard interactivo de configuración (`BOAI-007`); shell CLI (`BOAI-006`), lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
+> Estado actual: **adaptador sintético y escenario demo offline (`BOAI-009`); launcher de Ubuntu y directorios XDG (`BOAI-008`); wizard interactivo de configuración (`BOAI-007`); shell CLI (`BOAI-006`), lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
 
 ## Requisitos
 
@@ -55,6 +55,7 @@ Todos los scripts se ejecutan desde la raíz del monorepo:
 - `pnpm typecheck`: verifica los tipos en todo el monorepo sin emitir archivos mediante TypeScript (`tsc -b`).
 - `pnpm test`: compila los paquetes del workspace y ejecuta la suite de tests locales mediante Vitest.
 - `pnpm test:watch`: ejecuta Vitest en modo interactivo/watch.
+- `pnpm demo:synthetic`: ejecuta el escenario demo offline con el adaptador sintético y la configuración `config/searches/synthetic-demo.example.yml` (100% offline, 0 requests, 0 secretos).
 - `pnpm build`: compila los paquetes del workspace y la CLI mediante TypeScript (`tsc -b`).
 - `pnpm clean`: limpia los artefactos de build y cachés de compilación.
 

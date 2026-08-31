@@ -1,0 +1,69 @@
+schemaVersion: 1
+id: synthetic-demo
+name: Demo sintética offline
+enabled: true
+category: PRODUCT
+
+sources:
+  - id: synthetic
+    enabled: true
+    queries:
+      - Nintendo Switch Lite
+      - Switch Lite
+      - Nintendo Lite
+    options:
+      scenario: SUCCESS
+      maxPages: 3
+      maxItems: 50
+
+location: null
+
+price:
+  targetCurrency: ARS
+  maximum: 250000
+  minimumPlausible: null
+  foreignCurrency:
+    mode: MANUAL_RATE
+    onUnknown: REVIEW
+
+condition:
+  accepted:
+    - NEW
+    - LIKE_NEW
+    - GOOD
+
+product:
+  expectedModels:
+    - NINTENDO_SWITCH_LITE
+  requireFunctional: true
+  chargerRequired: false
+  boxRequired: false
+
+rules:
+  profile: synthetic-demo
+  include: []
+  exclude: []
+
+evaluation:
+  matchThreshold: 80
+  reviewThreshold: 40
+  precisionProfile: MIXED
+
+ai:
+  enabled: false
+  evaluateOnlyReview: true
+  provider: deepseek
+  requireConfirmation: true
+  maxEvaluationsPerRun: 5
+
+retention:
+  rawArtifacts: ERRORS_AND_REVIEW
+  rawDataDays: 30
+
+report:
+  openAutomatically: false
+  includeRejected: COLLAPSED
+  exports:
+    - HTML
+    - JSON
+    - CSV
