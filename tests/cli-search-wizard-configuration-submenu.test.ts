@@ -187,7 +187,7 @@ sources:
     queries:
       - Nintendo
     options:
-      apiKey: "SUPER_SECRET_TOKEN_123"
+      apiKey: "fake-secret-token-123"
 evaluation:
   matchThreshold: 80
   reviewThreshold: 40
@@ -217,7 +217,7 @@ retention:
     expect(await store.exists('secret-search')).toBe(false);
     const output = terminal.getRawOutput();
     expect(output).toContain('CONFIG_SECRET_FORBIDDEN');
-    expect(output).not.toContain('SUPER_SECRET_TOKEN_123'); // Sanitized!
+    expect(output).not.toContain('fake-secret-token-123'); // Sanitized!
   });
 
   it('handles capability mismatch in imported YAML safely without writing', async () => {
