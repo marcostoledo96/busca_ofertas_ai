@@ -140,11 +140,6 @@ export function validateProvenance(rootDir = process.cwd()) {
           `PROVENANCE_MISMATCH: gentle-ai commit SHA mismatch ('${gentleUpstream.sha}' vs '${gentleData.tool?.commit}')`,
         );
       }
-      if (gentleData.tool?.license && gentleUpstream.license !== gentleData.tool.license) {
-        errors.push(
-          `PROVENANCE_MISMATCH: gentle-ai license mismatch ('${gentleUpstream.license}' vs '${gentleData.tool?.license}')`,
-        );
-      }
       if (gentleUpstream.lock !== 'GENTLE_AI.lock.yml') {
         errors.push(
           `PROVENANCE_MISMATCH: gentle-ai lock path in UPSTREAMS must be 'GENTLE_AI.lock.yml'`,

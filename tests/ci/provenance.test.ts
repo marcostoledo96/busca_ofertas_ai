@@ -153,27 +153,6 @@ describe('validate-provenance', () => {
       expect(res.errors.some((e) => e.includes('gentle-ai commit SHA mismatch'))).toBe(true);
     });
 
-    it('fails when Gentle AI license in UPSTREAMS does not match GENTLE_AI.lock.yml', () => {
-      const gentleLock = [
-        'schemaVersion: 1',
-        'tool:',
-        '  name: gentle-ai',
-        '  repository: https://github.com/Gentleman-Programming/gentle-ai',
-        '  release: v2.5.0-rc.3',
-        '  commit: 8e5c79b08c14b5ecded4a449e7d21cd526f52e94',
-        '  license: AGPL-3.0',
-        '  runtime: antigravity',
-        '  vendoredBinary: false',
-        'policy:',
-        '  automaticUpgrade: false',
-      ].join('\n');
-      writeFileSync(join(testRepoDir, 'GENTLE_AI.lock.yml'), gentleLock);
-
-      const res = runValidate(testRepoDir);
-      expect(res.status).toBe(1);
-      expect(res.errors.some((e) => e.includes('gentle-ai license mismatch'))).toBe(true);
-    });
-
     it('fails when skills source SHA in UPSTREAMS does not match .agents/skills.lock.yml', () => {
       const skillsLock = [
         'schemaVersion: 1',

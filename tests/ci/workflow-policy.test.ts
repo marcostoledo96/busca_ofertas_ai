@@ -104,11 +104,37 @@ describe('validate-workflow', () => {
       expect(res.errors.some((e) => e.includes('INVALID_PERMISSIONS'))).toBe(true);
     });
 
-    it('fails when a job defines permissions: write-all', () => {
+    it('fails when top-level permissions expands beyond contents: read (e.g. issues: read)', () => {
+      const wfPath = join(testRepoDir, '.github/workflows/ci.yml');
+      const mutated = readFileSync(wfPath, 'utf-8').replace(
+        'permissions:\n  contents: read',
+        'permissions:\n  contents: read\n  issues: read',
+      );
+      writeFileSync(wfPath, mutated);
+
+      const res = runWorkflowValidation(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.errors.some((e) => e.includes('INVALID_PERMISSIONS'))).toBe(true);
+    });
+
+    it('fails when top-level permissions expands beyond contents: read (e.g. actions: read)', () => {
+      const wfPath = join(testRepoDir, '.github/workflows/ci.yml');
+      const mutated = readFileSync(wfPath, 'utf-8').replace(
+        'permissions:\n  contents: read',
+        'permissions:\n  contents: read\n  actions: read',
+      );
+      writeFileSync(wfPath, mutated);
+
+      const res = runWorkflowValidation(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.errors.some((e) => e.includes('INVALID_PERMISSIONS'))).toBe(true);
+    });
+
+    it('fails when a job defines permissions (even contents: read)', () => {
       const wfPath = join(testRepoDir, '.github/workflows/ci.yml');
       const mutated = readFileSync(wfPath, 'utf-8').replace(
         '  verify:\n    name: Quality & supply-chain',
-        '  verify:\n    name: Quality & supply-chain\n    permissions: write-all',
+        '  verify:\n    name: Quality & supply-chain\n    permissions:\n      contents: read',
       );
       writeFileSync(wfPath, mutated);
 
@@ -117,17 +143,94 @@ describe('validate-workflow', () => {
       expect(res.errors.some((e) => e.includes('FORBIDDEN_JOB_PERMISSIONS'))).toBe(true);
     });
 
-    it('fails when a job defines write permissions', () => {
+    it('fails when a job defines permissions: {}', () => {
       const wfPath = join(testRepoDir, '.github/workflows/ci.yml');
       const mutated = readFileSync(wfPath, 'utf-8').replace(
         '  verify:\n    name: Quality & supply-chain',
-        '  verify:\n    name: Quality & supply-chain\n    permissions:\n      contents: write',
+        '  verify:\n    name: Quality & supply-chain\n    permissions: {}',
       );
       writeFileSync(wfPath, mutated);
 
       const res = runWorkflowValidation(testRepoDir);
       expect(res.status).toBe(1);
       expect(res.errors.some((e) => e.includes('FORBIDDEN_JOB_PERMISSIONS'))).toBe(true);
+    });
+
+    it('fails when a job defines continue-on-error: true', () => {
+      const wfPath = join(testRepoDir, '.github/workflows/ci.yml');
+      const mutated = readFileSync(wfPath, 'utf-8').replace(
+        '  verify:\n    name: Quality & supply-chain',
+        '  verify:\n    name: Quality & supply-chain\n    continue-on-error: true',
+      );
+      writeFileSync(wfPath, mutated);
+
+      const res = runWorkflowValidation(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.errors.some((e) => e.includes('FORBIDDEN_JOB_CONTINUE_ON_ERROR'))).toBe(true);
+    });
+
+    it('fails when a job defines continue-on-error expression', () => {
+      const wfPath = join(testRepoDir, '.github/workflows/ci.yml');
+      const mutated = readFileSync(wfPath, 'utf-8').replace(
+        '  verify:\n    name: Quality & supply-chain',
+        '  verify:\n    name: Quality & supply-chain\n    continue-on-error: ${{ true }}',
+      );
+      writeFileSync(wfPath, mutated);
+
+      const res = runWorkflowValidation(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.errors.some((e) => e.includes('FORBIDDEN_JOB_CONTINUE_ON_ERROR'))).toBe(true);
+    });
+
+    it('fails when quality-gate job defines if condition (e.g. if: false)', () => {
+      const wfPath = join(testRepoDir, '.github/workflows/ci.yml');
+      const mutated = readFileSync(wfPath, 'utf-8').replace(
+        '  verify:\n    name: Quality & supply-chain',
+        '  verify:\n    name: Quality & supply-chain\n    if: false',
+      );
+      writeFileSync(wfPath, mutated);
+
+      const res = runWorkflowValidation(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(res.errors.some((e) => e.includes('FORBIDDEN_JOB_CONDITIONAL'))).toBe(true);
+    });
+
+    it('fails when a required step defines if: false', () => {
+      const wfPath = join(testRepoDir, '.github/workflows/ci.yml');
+      const mutated = readFileSync(wfPath, 'utf-8').replace(
+        '      - name: Test\n        run: pnpm test',
+        '      - name: Test\n        if: false\n        run: pnpm test',
+      );
+      writeFileSync(wfPath, mutated);
+
+      const res = runWorkflowValidation(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(
+        res.errors.some(
+          (e) =>
+            e.includes('QUALITY_GATE_CONDITIONAL') ||
+            e.includes("Required command 'pnpm test' not found"),
+        ),
+      ).toBe(true);
+    });
+
+    it('fails when dependency audit step defines if: ${{ false }}', () => {
+      const wfPath = join(testRepoDir, '.github/workflows/ci.yml');
+      const mutated = readFileSync(wfPath, 'utf-8').replace(
+        '      - name: Dependency audit\n        run: pnpm audit --audit-level=high',
+        '      - name: Dependency audit\n        if: ${{ false }}\n        run: pnpm audit --audit-level=high',
+      );
+      writeFileSync(wfPath, mutated);
+
+      const res = runWorkflowValidation(testRepoDir);
+      expect(res.status).toBe(1);
+      expect(
+        res.errors.some(
+          (e) =>
+            e.includes('QUALITY_GATE_CONDITIONAL') ||
+            e.includes("Required command 'pnpm audit --audit-level=high' not found"),
+        ),
+      ).toBe(true);
     });
 
     it('fails when a job uses secrets: inherit', () => {
@@ -252,8 +355,8 @@ describe('validate-workflow', () => {
       expect(
         res.errors.some(
           (e) =>
-            e.includes('must not have continue-on-error: true') ||
-            e.includes("Required command 'pnpm test' not found or neutralized"),
+            e.includes('must not set continue-on-error') ||
+            e.includes("Required command 'pnpm test' not found"),
         ),
       ).toBe(true);
     });

@@ -98,24 +98,20 @@ export function validateWorkflow(rootDir = process.cwd()) {
     errors.push("MISSING_TRIGGER: Workflow must trigger on 'pull_request'");
   }
 
-  // 2. Permissions
+  // 2. Permissions (Exact: must be object with single key 'contents: read')
   const permissions = doc.permissions;
   if (!permissions) {
     errors.push('MISSING_PERMISSIONS: Workflow must explicitly specify top-level permissions');
   } else if (typeof permissions === 'string') {
     errors.push(
-      `INVALID_PERMISSIONS: String permissions '${permissions}' prohibited; expected explicit 'contents: read'`,
+      `INVALID_PERMISSIONS: String permissions '${permissions}' prohibited; expected explicit { contents: 'read' }`,
     );
-  } else if (typeof permissions === 'object') {
-    if (permissions.contents !== 'read') {
+  } else if (typeof permissions === 'object' && permissions !== null) {
+    const permKeys = Object.keys(permissions);
+    if (permKeys.length !== 1 || permKeys[0] !== 'contents' || permissions.contents !== 'read') {
       errors.push(
-        `INVALID_PERMISSIONS: 'contents' permission must be 'read', got '${permissions.contents}'`,
+        `INVALID_PERMISSIONS: Workflow must define exactly { contents: 'read' }, got: ${JSON.stringify(permissions)}`,
       );
-    }
-    for (const [permKey, permVal] of Object.entries(permissions)) {
-      if (permVal === 'write' || permVal === 'write-all') {
-        errors.push(`FORBIDDEN_PERMISSIONS: '${permVal}' permission on '${permKey}' is prohibited`);
-      }
     }
   }
 
@@ -130,25 +126,25 @@ export function validateWorkflow(rootDir = process.cwd()) {
   for (const [jobId, job] of Object.entries(jobs)) {
     if (!job || typeof job !== 'object') continue;
 
-    // Check job-level permissions: no write, write-all, read-all, or elevating permissions
+    // Check job-level permissions: MUST BE ABSENT
     if (job.permissions !== undefined) {
-      if (typeof job.permissions === 'string') {
-        errors.push(
-          `FORBIDDEN_JOB_PERMISSIONS: Job '${jobId}' defines forbidden string permissions '${job.permissions}'`,
-        );
-      } else if (typeof job.permissions === 'object' && job.permissions !== null) {
-        for (const [permKey, permVal] of Object.entries(job.permissions)) {
-          if (
-            permVal === 'write' ||
-            permVal === 'write-all' ||
-            (permKey === 'contents' && permVal !== 'read')
-          ) {
-            errors.push(
-              `FORBIDDEN_JOB_PERMISSIONS: Job '${jobId}' defines forbidden permission '${permVal}' on '${permKey}'`,
-            );
-          }
-        }
-      }
+      errors.push(
+        `FORBIDDEN_JOB_PERMISSIONS: Job '${jobId}' defines job-level permissions; job-level permissions must be absent`,
+      );
+    }
+
+    // Check job-level continue-on-error: MUST BE ABSENT OR FALSE
+    if (job['continue-on-error'] !== undefined && job['continue-on-error'] !== false) {
+      errors.push(
+        `FORBIDDEN_JOB_CONTINUE_ON_ERROR: Job '${jobId}' must not set continue-on-error (got ${JSON.stringify(job['continue-on-error'])})`,
+      );
+    }
+
+    // Check job-level conditional: MUST BE ABSENT
+    if (job.if !== undefined) {
+      errors.push(
+        `FORBIDDEN_JOB_CONDITIONAL: Job '${jobId}' containing required quality gates must not define 'if' (got ${JSON.stringify(job.if)})`,
+      );
     }
 
     // Check job-level reusable workflow uses
@@ -259,7 +255,7 @@ export function validateWorkflow(rootDir = process.cwd()) {
     errors.push('FORBIDDEN_SECRET_REFERENCE: Workflow contains reference to secrets context');
   }
 
-  // 6. Quality Gates / Required Commands
+  // 6. Quality Gates / Required Commands (must be blocking, non-neutralized, non-conditional, without continue-on-error)
   for (const reqCmd of REQUIRED_STEPS_COMMANDS) {
     let foundValidBlockingStep = false;
 
@@ -276,9 +272,13 @@ export function validateWorkflow(rootDir = process.cwd()) {
       });
 
       if (executesCommand) {
-        if (step['continue-on-error'] === true || step['continue-on-error'] === 'true') {
+        if (step.if !== undefined) {
           errors.push(
-            `QUALITY_GATE_CONTINUE_ON_ERROR: Step running '${reqCmd}' must not have continue-on-error: true`,
+            `QUALITY_GATE_CONDITIONAL: Step executing '${reqCmd}' must not define 'if' condition (got ${JSON.stringify(step.if)})`,
+          );
+        } else if (step['continue-on-error'] !== undefined && step['continue-on-error'] !== false) {
+          errors.push(
+            `QUALITY_GATE_CONTINUE_ON_ERROR: Step executing '${reqCmd}' must not set continue-on-error (got ${JSON.stringify(step['continue-on-error'])})`,
           );
         } else {
           foundValidBlockingStep = true;
