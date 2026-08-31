@@ -23,17 +23,11 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-NODE_VERSION_CHECK=$(node -e "
-  const [major] = process.versions.node.split('.');
-  if (Number(major) < 22) {
-    process.stderr.write('NODE_VERSION_TOO_OLD:' + process.version);
-    process.exit(1);
-  }
-" 2>&1 || true)
+NODE_VERSION_RAW="$(node -v 2>/dev/null || echo '')"
+NODE_MAJOR=$(echo "$NODE_VERSION_RAW" | sed -E 's/^v([0-9]+).*/\1/' || echo '0')
 
-if [[ "$NODE_VERSION_CHECK" == NODE_VERSION_TOO_OLD* ]]; then
-  DETECTED_VERSION=$(node -v)
-  echo "[ERROR] Node.js >= 22.0.0 es requerido. Versión detectada: $DETECTED_VERSION" >&2
+if [ -z "$NODE_MAJOR" ] || ! [ "$NODE_MAJOR" -ge 22 ] 2>/dev/null; then
+  echo "[ERROR] Node.js >= 22.0.0 es requerido. Versión detectada: ${NODE_VERSION_RAW:-desconocida}" >&2
   exit 1
 fi
 

@@ -82,11 +82,34 @@ export class NodeFileSystemSavedSearchConfigStore implements SavedSearchConfigSt
   }
 
   private async ensureStorageRoot(): Promise<void> {
-    await fs.promises.mkdir(this.storageRoot, { recursive: true, mode: 0o700 });
     try {
-      await fs.promises.chmod(this.storageRoot, 0o700);
-    } catch {
-      // Best-effort chmod for non-POSIX platforms
+      await fs.promises.mkdir(this.storageRoot, { recursive: true, mode: 0o700 });
+      try {
+        await fs.promises.chmod(this.storageRoot, 0o700);
+      } catch (chmodErr) {
+        if (
+          chmodErr instanceof Error &&
+          'code' in chmodErr &&
+          (chmodErr as { code: string }).code === 'EPERM' &&
+          process.platform === 'win32'
+        ) {
+          // Ignore Windows permission limitation
+        } else {
+          throw chmodErr;
+        }
+      }
+    } catch (err) {
+      if (err instanceof CliError) {
+        throw err;
+      }
+      throw new CliError({
+        code: 'DIRECTORY_PERMISSION_FAILED',
+        userMessage: `No se pudieron asegurar los permisos privados (0700) del directorio de almacenamiento: ${this.storageRoot}`,
+        suggestedAction:
+          'Verificá que tu usuario sea propietario del directorio y tenga permisos suficientes de lectura y escritura.',
+        exitCode: EXIT_CODES.INVALID_CONFIGURATION,
+        cause: err,
+      });
     }
   }
 

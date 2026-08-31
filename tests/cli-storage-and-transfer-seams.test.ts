@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -33,6 +33,30 @@ describe('CLI Storage and Transfer Seams (BOAI-007)', () => {
       expect(defaultStore.storageRoot.endsWith(path.join('busca-ofertas-ai', 'searches'))).toBe(
         true,
       );
+    });
+
+    it('FINDING 1: throws DIRECTORY_PERMISSION_FAILED on POSIX chmod failure and does not continue silently', async () => {
+      const chmodSpy = vi
+        .spyOn(fs.promises, 'chmod')
+        .mockRejectedValueOnce(new Error('EACCES: permission denied'));
+
+      try {
+        await expect(store.write('permission-fail', 'test')).rejects.toThrow();
+
+        try {
+          await store.write('permission-fail', 'test');
+        } catch (err) {
+          expect(isCliError(err)).toBe(true);
+          if (isCliError(err)) {
+            expect(err.code).toBe('DIRECTORY_PERMISSION_FAILED');
+            expect(err.userMessage).toContain(
+              'No se pudieron asegurar los permisos privados (0700)',
+            );
+          }
+        }
+      } finally {
+        chmodSpy.mockRestore();
+      }
     });
 
     it('writes and reads a saved search YAML file atomically with 0600 file and 0700 dir permissions', async () => {

@@ -31,13 +31,23 @@ describe('Ubuntu Installer and Uninstaller Scripts (BOAI-008)', () => {
     }
   });
 
+  const isValidatorAvailable = (): boolean => {
+    try {
+      execFileSync('desktop-file-validate', ['--version'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const runScript = (
     scriptPath: string,
     envOverrides?: Record<string, string>,
     cwd?: string,
   ): { stdout: string; stderr: string; status: number } => {
     try {
-      const stdout = execFileSync('bash', [scriptPath], {
+      const bashBin = fs.existsSync('/bin/bash') ? '/bin/bash' : 'bash';
+      const stdout = execFileSync(bashBin, [scriptPath], {
         cwd: cwd ?? repoRoot,
         env: {
           ...process.env,
@@ -105,11 +115,10 @@ describe('Ubuntu Installer and Uninstaller Scripts (BOAI-008)', () => {
     expect(desktopContent).not.toContain('nohup');
     expect(desktopContent).not.toContain('npm start');
 
-    // 3. Validate with desktop-file-validate if present on host
-    try {
-      execFileSync('desktop-file-validate', [desktopPath], { stdio: 'ignore' });
-    } catch {
-      // desktop-file-validate passed or not available
+    // 3. FINDING 3: Validate strictly with desktop-file-validate when present (without swallowing errors)
+    if (isValidatorAvailable()) {
+      // Must succeed and exit 0
+      execFileSync('desktop-file-validate', [desktopPath], { stdio: 'pipe' });
     }
 
     // 4. Verify directory creation & 0700 permissions
@@ -131,6 +140,102 @@ describe('Ubuntu Installer and Uninstaller Scripts (BOAI-008)', () => {
     }
   });
 
+  it('FINDING 3: desktop-file-validate negative proof fails as expected on invalid desktop files', async () => {
+    if (!isValidatorAvailable()) {
+      return;
+    }
+
+    const invalidDesktopPath = path.join(testDataHome, 'invalid.desktop');
+    await fs.promises.mkdir(path.dirname(invalidDesktopPath), { recursive: true });
+    await fs.promises.writeFile(
+      invalidDesktopPath,
+      'InvalidDesktopFileWithoutHeader=true\nKey=Value\n',
+      'utf-8',
+    );
+
+    expect(() => {
+      execFileSync('desktop-file-validate', [invalidDesktopPath], { stdio: 'pipe' });
+    }).toThrow();
+  });
+
+  it('FINDING 3: fails and prevents partial installation when Node is missing from PATH', () => {
+    const noNodeBinDir = path.join(testHome, 'no-node-bin');
+    fs.mkdirSync(noNodeBinDir, { recursive: true });
+
+    // Link essential system binaries except node
+    for (const bin of [
+      'bash',
+      'uname',
+      'sed',
+      'cat',
+      'mkdir',
+      'chmod',
+      'dirname',
+      'basename',
+      'which',
+    ]) {
+      try {
+        const binPath = execFileSync('which', [bin], { encoding: 'utf-8' }).trim();
+        fs.symlinkSync(binPath, path.join(noNodeBinDir, bin));
+      } catch {
+        // Ignore if binary not found
+      }
+    }
+
+    const res = runScript(installScriptPath, { PATH: noNodeBinDir });
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('Node.js no está instalado o no se encuentra en $PATH');
+
+    // Verify zero partial installation
+    expect(fs.existsSync(path.join(testHome, '.local/bin/busca-ofertas'))).toBe(false);
+    expect(fs.existsSync(path.join(testDataHome, 'applications/busca-ofertas-ai.desktop'))).toBe(
+      false,
+    );
+  });
+
+  it('FINDING 3: fails and prevents partial installation when Node version is too old (< 22)', () => {
+    const mockBinDir = path.join(testHome, 'old-node-bin');
+    fs.mkdirSync(mockBinDir, { recursive: true });
+
+    // Create a mock node binary that reports v18.0.0
+    const mockNodePath = path.join(mockBinDir, 'node');
+    fs.writeFileSync(mockNodePath, '#!/usr/bin/env bash\necho "v18.0.0"\n', { mode: 0o755 });
+
+    const res = runScript(installScriptPath, {
+      PATH: `${mockBinDir}:${process.env['PATH'] ?? ''}`,
+    });
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('Node.js >= 22.0.0 es requerido. Versión detectada: v18.0.0');
+
+    // Verify zero partial installation
+    expect(fs.existsSync(path.join(testHome, '.local/bin/busca-ofertas'))).toBe(false);
+    expect(fs.existsSync(path.join(testDataHome, 'applications/busca-ofertas-ai.desktop'))).toBe(
+      false,
+    );
+  });
+
+  it('fails with clear error and prevents partial installation if application build does not exist', async () => {
+    // Create a mock repo directory without dist
+    const fakeRepo = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boai-fake-repo-'));
+    try {
+      const fakeScripts = path.join(fakeRepo, 'scripts');
+      await fs.promises.mkdir(fakeScripts, { recursive: true });
+      await fs.promises.copyFile(installScriptPath, path.join(fakeScripts, 'install-ubuntu.sh'));
+
+      const res = runScript(path.join(fakeScripts, 'install-ubuntu.sh'), undefined, fakeRepo);
+      expect(res.status).toBe(1);
+      expect(res.stderr).toContain('Build no encontrado. Ejecutá: pnpm build');
+
+      // Verify zero partial installation
+      expect(fs.existsSync(path.join(testHome, '.local/bin/busca-ofertas'))).toBe(false);
+      expect(fs.existsSync(path.join(testDataHome, 'applications/busca-ofertas-ai.desktop'))).toBe(
+        false,
+      );
+    } finally {
+      await fs.promises.rm(fakeRepo, { recursive: true, force: true });
+    }
+  });
+
   it('installer is idempotent and can be run multiple times safely', () => {
     const res1 = runScript(installScriptPath);
     expect(res1.status).toBe(0);
@@ -143,22 +248,6 @@ describe('Ubuntu Installer and Uninstaller Scripts (BOAI-008)', () => {
     const desktopPath = path.join(testDataHome, 'applications/busca-ofertas-ai.desktop');
     expect(fs.existsSync(commandPath)).toBe(true);
     expect(fs.existsSync(desktopPath)).toBe(true);
-  });
-
-  it('fails with clear error if application build does not exist', async () => {
-    // Create a mock repo directory without dist
-    const fakeRepo = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boai-fake-repo-'));
-    try {
-      const fakeScripts = path.join(fakeRepo, 'scripts');
-      await fs.promises.mkdir(fakeScripts, { recursive: true });
-      await fs.promises.copyFile(installScriptPath, path.join(fakeScripts, 'install-ubuntu.sh'));
-
-      const res = runScript(path.join(fakeScripts, 'install-ubuntu.sh'), undefined, fakeRepo);
-      expect(res.status).toBe(1);
-      expect(res.stderr).toContain('Build no encontrado. Ejecutá: pnpm build');
-    } finally {
-      await fs.promises.rm(fakeRepo, { recursive: true, force: true });
-    }
   });
 
   it('uninstaller removes command wrapper and desktop file and is idempotent', () => {
