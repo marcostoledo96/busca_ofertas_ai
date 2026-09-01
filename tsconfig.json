@@ -4,6 +4,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/adapter-sdk" },
     { "path": "./packages/configuration" },
+    { "path": "./packages/storage-sqlite" },
     { "path": "./adapters/synthetic" },
     { "path": "./apps/cli" },
     { "path": "./tests" }

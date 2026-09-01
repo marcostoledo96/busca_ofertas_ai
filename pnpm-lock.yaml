@@ -23,6 +23,9 @@ importers:
       '@busca-ofertas-ai/core':
         specifier: workspace:*
         version: link:packages/core
+      '@busca-ofertas-ai/storage-sqlite':
+        specifier: workspace:*
+        version: link:packages/storage-sqlite
       '@eslint/js':
         specifier: ^9.21.0
         version: 9.39.5
@@ -98,6 +101,8 @@ importers:
         version: 3.25.76
 
   packages/core: {}
+
+  packages/storage-sqlite: {}
 
 packages:
 
