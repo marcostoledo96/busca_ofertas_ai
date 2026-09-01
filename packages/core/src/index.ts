@@ -137,13 +137,19 @@ export {
 
 // Ports
 export {
+  type SavedSearchRevisionRecord,
   type SavedSearchRepository,
   type ListingRepository,
   type ObservationRepository,
   type OpportunityRepository,
   type FeedbackRepository,
+  type RunSummary,
+  type SourceRunMetrics,
+  type SourceRunExecutionMetadata,
   type RunRepository,
 } from './ports/repositories.js';
+
+export { type ExecutionLockHandle, type ExecutionLockPort } from './ports/execution-lock.js';
 
 // Package Metadata
 export const CORE_PACKAGE_NAME = '@busca-ofertas-ai/core' as const;

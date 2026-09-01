@@ -1,0 +1,370 @@
+import {
+  type Run,
+  type RunRepository,
+  type RunSummary,
+  type SourceRun,
+  type SourceRunExecutionMetadata,
+  type CreateRunParams,
+  type CreateSourceRunParams,
+  createRun,
+  createSourceRun,
+} from '@busca-ofertas-ai/core';
+import type { SqliteDatabase } from '../database/types.js';
+import { StorageCorruptionError } from '../errors/storage-errors.js';
+import { sanitizeErrorMessage } from '../sanitization/sanitizer.js';
+
+interface RunRow {
+  readonly id: string;
+  readonly saved_search_id: string;
+  readonly status: string;
+  readonly started_at: string;
+  readonly finished_at: string | null;
+  readonly error: string | null;
+}
+
+interface SourceRunRow {
+  readonly id: string;
+  readonly run_id: string;
+  readonly source_id: string;
+  readonly collector_id: string | null;
+  readonly adapter_version: string | null;
+  readonly status: string;
+  readonly started_at: string;
+  readonly finished_at: string | null;
+  readonly items_count: number | null;
+  readonly error: string | null;
+  readonly pages_requested: number | null;
+  readonly pages_completed: number | null;
+  readonly raw_items_count: number | null;
+  readonly parsed_items_count: number | null;
+  readonly rejected_items_count: number | null;
+  readonly stop_reason: string | null;
+}
+
+interface RunSummaryRow {
+  readonly total_source_runs: number;
+  readonly success_count: number;
+  readonly zero_results_count: number;
+  readonly failed_count: number;
+  readonly total_items_count: number;
+}
+
+function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+function parseIsoDate(
+  isoString: string | null,
+  fieldName: string,
+  entityId: string,
+): Date | undefined {
+  if (isoString === null || isoString === undefined) {
+    return undefined;
+  }
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted date in '${fieldName}' for entity '${entityId}': '${isoString}' is not valid ISO date`,
+    );
+  }
+  return date;
+}
+
+function rehydrateRun(row: RunRow): Run {
+  try {
+    const startedAt = parseIsoDate(row.started_at, 'started_at', row.id);
+    if (!startedAt) {
+      throw new StorageCorruptionError(`Corrupted Run '${row.id}': started_at cannot be empty`);
+    }
+    const finishedAt = parseIsoDate(row.finished_at, 'finished_at', row.id);
+
+    const params: CreateRunParams = {
+      id: row.id,
+      savedSearchId: row.saved_search_id,
+      status: row.status as Run['status'],
+      startedAt,
+      ...(finishedAt !== undefined ? { finishedAt } : {}),
+      ...(row.error !== null && row.error !== undefined ? { error: row.error } : {}),
+    };
+
+    return createRun(params);
+  } catch (err) {
+    if (err instanceof StorageCorruptionError) {
+      throw err;
+    }
+    throw new StorageCorruptionError(
+      `Corrupted persisted Run '${row.id}': domain rehydration failed: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+}
+
+function rehydrateSourceRun(row: SourceRunRow): SourceRun {
+  try {
+    const startedAt = parseIsoDate(row.started_at, 'started_at', row.id);
+    if (!startedAt) {
+      throw new StorageCorruptionError(
+        `Corrupted SourceRun '${row.id}': started_at cannot be empty`,
+      );
+    }
+    const finishedAt = parseIsoDate(row.finished_at, 'finished_at', row.id);
+
+    const params: CreateSourceRunParams = {
+      id: row.id,
+      runId: row.run_id,
+      sourceId: row.source_id,
+      ...(row.collector_id !== null && row.collector_id !== undefined
+        ? { collectorId: row.collector_id }
+        : {}),
+      status: row.status as SourceRun['status'],
+      startedAt,
+      ...(finishedAt !== undefined ? { finishedAt } : {}),
+      ...(row.items_count !== null && row.items_count !== undefined
+        ? { itemsCount: Number(row.items_count) }
+        : {}),
+      ...(row.error !== null && row.error !== undefined ? { error: row.error } : {}),
+    };
+
+    return createSourceRun(params);
+  } catch (err) {
+    if (err instanceof StorageCorruptionError) {
+      throw err;
+    }
+    throw new StorageCorruptionError(
+      `Corrupted persisted SourceRun '${row.id}': domain rehydration failed: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+}
+
+export class SqliteRunRepository implements RunRepository {
+  constructor(private readonly db: SqliteDatabase) {}
+
+  getById(id: string): Promise<Run | null> {
+    try {
+      const stmt = this.db.prepare<RunRow, [string]>(
+        `SELECT id, saved_search_id, status, started_at, finished_at, error
+         FROM runs
+         WHERE id = ?`,
+      );
+      const row = stmt.get(id);
+      if (!row) {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(rehydrateRun(row));
+    } catch (err) {
+      return Promise.reject(toError(err));
+    }
+  }
+
+  save(run: Run): Promise<void> {
+    try {
+      const startedAtIso = run.startedAt.toISOString();
+      const finishedAtIso =
+        'finishedAt' in run && run.finishedAt ? run.finishedAt.toISOString() : null;
+      const rawError = 'error' in run ? (run as { error?: string }).error : undefined;
+      const cleanError = sanitizeErrorMessage(rawError) ?? null;
+
+      this.db.transaction((tx) => {
+        const stmt = tx.prepare(
+          `INSERT INTO runs (id, saved_search_id, status, started_at, finished_at, error)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             status = excluded.status,
+             finished_at = excluded.finished_at,
+             error = excluded.error`,
+        );
+        stmt.run(run.id, run.savedSearchId, run.status, startedAtIso, finishedAtIso, cleanError);
+      });
+
+      return Promise.resolve();
+    } catch (err) {
+      return Promise.reject(toError(err));
+    }
+  }
+
+  saveSourceRun(sourceRun: SourceRun, metadata?: SourceRunExecutionMetadata): Promise<void> {
+    try {
+      const startedAtIso = sourceRun.startedAt.toISOString();
+      const finishedAtIso =
+        'finishedAt' in sourceRun && sourceRun.finishedAt
+          ? sourceRun.finishedAt.toISOString()
+          : null;
+      const rawError = 'error' in sourceRun ? (sourceRun as { error?: string }).error : undefined;
+      const cleanError = sanitizeErrorMessage(rawError) ?? null;
+      const itemsCount =
+        'itemsCount' in sourceRun && sourceRun.itemsCount !== undefined
+          ? sourceRun.itemsCount
+          : null;
+      const collectorId = 'collectorId' in sourceRun ? (sourceRun.collectorId ?? null) : null;
+      const adapterVersion = metadata?.adapterVersion ?? null;
+
+      const pagesRequested = metadata?.metrics?.pagesRequested ?? null;
+      const pagesCompleted = metadata?.metrics?.pagesCompleted ?? null;
+      const rawItemsCount = metadata?.metrics?.rawItemsCount ?? null;
+      const parsedItemsCount = metadata?.metrics?.parsedItemsCount ?? null;
+      const rejectedItemsCount = metadata?.metrics?.rejectedItemsCount ?? null;
+      const stopReason = metadata?.metrics?.stopReason ?? null;
+
+      this.db.transaction((tx) => {
+        const stmt = tx.prepare(
+          `INSERT INTO source_runs (
+            id, run_id, source_id, collector_id, adapter_version, status,
+            started_at, finished_at, items_count, error,
+            pages_requested, pages_completed, raw_items_count, parsed_items_count,
+            rejected_items_count, stop_reason
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            collector_id = excluded.collector_id,
+            adapter_version = excluded.adapter_version,
+            status = excluded.status,
+            finished_at = excluded.finished_at,
+            items_count = excluded.items_count,
+            error = excluded.error,
+            pages_requested = excluded.pages_requested,
+            pages_completed = excluded.pages_completed,
+            raw_items_count = excluded.raw_items_count,
+            parsed_items_count = excluded.parsed_items_count,
+            rejected_items_count = excluded.rejected_items_count,
+            stop_reason = excluded.stop_reason`,
+        );
+        stmt.run(
+          sourceRun.id,
+          sourceRun.runId,
+          sourceRun.sourceId,
+          collectorId,
+          adapterVersion,
+          sourceRun.status,
+          startedAtIso,
+          finishedAtIso,
+          itemsCount,
+          cleanError,
+          pagesRequested,
+          pagesCompleted,
+          rawItemsCount,
+          parsedItemsCount,
+          rejectedItemsCount,
+          stopReason,
+        );
+      });
+
+      return Promise.resolve();
+    } catch (err) {
+      return Promise.reject(toError(err));
+    }
+  }
+
+  listSourceRunsByRunId(runId: string): Promise<readonly SourceRun[]> {
+    try {
+      const stmt = this.db.prepare<SourceRunRow, [string]>(
+        `SELECT id, run_id, source_id, collector_id, adapter_version, status,
+                started_at, finished_at, items_count, error,
+                pages_requested, pages_completed, raw_items_count, parsed_items_count,
+                rejected_items_count, stop_reason
+         FROM source_runs
+         WHERE run_id = ?
+         ORDER BY started_at ASC, id ASC`,
+      );
+      const rows = stmt.all(runId);
+      return Promise.resolve(rows.map((row) => rehydrateSourceRun(row)));
+    } catch (err) {
+      return Promise.reject(toError(err));
+    }
+  }
+
+  getSummaryByRunId(runId: string): Promise<RunSummary | null> {
+    try {
+      const runCheckStmt = this.db.prepare<{ id: string }, [string]>(
+        `SELECT id FROM runs WHERE id = ?`,
+      );
+      const runExists = runCheckStmt.get(runId);
+      if (!runExists) {
+        return Promise.resolve(null);
+      }
+
+      const stmt = this.db.prepare<RunSummaryRow, [string]>(
+        `SELECT
+           COUNT(*) AS total_source_runs,
+           SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) AS success_count,
+           SUM(CASE WHEN status = 'ZERO_RESULTS_CONFIRMED' THEN 1 ELSE 0 END) AS zero_results_count,
+           SUM(CASE WHEN status NOT IN ('PENDING', 'RUNNING', 'SUCCESS', 'ZERO_RESULTS_CONFIRMED') THEN 1 ELSE 0 END) AS failed_count,
+           COALESCE(SUM(items_count), 0) AS total_items_count
+         FROM source_runs
+         WHERE run_id = ?`,
+      );
+      const row = stmt.get(runId);
+      if (!row) {
+        return Promise.resolve({
+          runId,
+          totalSourceRuns: 0,
+          successCount: 0,
+          zeroResultsCount: 0,
+          failedCount: 0,
+          totalItemsCount: 0,
+        });
+      }
+
+      return Promise.resolve({
+        runId,
+        totalSourceRuns: Number(row.total_source_runs ?? 0),
+        successCount: Number(row.success_count ?? 0),
+        zeroResultsCount: Number(row.zero_results_count ?? 0),
+        failedCount: Number(row.failed_count ?? 0),
+        totalItemsCount: Number(row.total_items_count ?? 0),
+      });
+    } catch (err) {
+      return Promise.reject(toError(err));
+    }
+  }
+
+  getSourceRunMetadata(sourceRunId: string): Promise<SourceRunExecutionMetadata | null> {
+    try {
+      const stmt = this.db.prepare<SourceRunRow, [string]>(
+        `SELECT adapter_version, pages_requested, pages_completed, raw_items_count,
+                parsed_items_count, rejected_items_count, stop_reason
+         FROM source_runs
+         WHERE id = ?`,
+      );
+      const row = stmt.get(sourceRunId);
+      if (!row) {
+        return Promise.resolve(null);
+      }
+
+      const hasMetrics =
+        row.pages_requested !== null ||
+        row.pages_completed !== null ||
+        row.raw_items_count !== null ||
+        row.parsed_items_count !== null ||
+        row.rejected_items_count !== null ||
+        row.stop_reason !== null;
+
+      return Promise.resolve({
+        ...(row.adapter_version !== null ? { adapterVersion: row.adapter_version } : {}),
+        ...(hasMetrics
+          ? {
+              metrics: {
+                ...(row.pages_requested !== null
+                  ? { pagesRequested: Number(row.pages_requested) }
+                  : {}),
+                ...(row.pages_completed !== null
+                  ? { pagesCompleted: Number(row.pages_completed) }
+                  : {}),
+                ...(row.raw_items_count !== null
+                  ? { rawItemsCount: Number(row.raw_items_count) }
+                  : {}),
+                ...(row.parsed_items_count !== null
+                  ? { parsedItemsCount: Number(row.parsed_items_count) }
+                  : {}),
+                ...(row.rejected_items_count !== null
+                  ? { rejectedItemsCount: Number(row.rejected_items_count) }
+                  : {}),
+                ...(row.stop_reason !== null ? { stopReason: row.stop_reason } : {}),
+              },
+            }
+          : {}),
+      });
+    } catch (err) {
+      return Promise.reject(toError(err));
+    }
+  }
+}

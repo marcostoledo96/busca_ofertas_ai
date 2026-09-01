@@ -9,7 +9,12 @@ export type SqliteStorageErrorCode =
   | 'TRANSACTION_ALREADY_ACTIVE'
   | 'TRANSACTION_ASYNC_CALLBACK_UNSUPPORTED'
   | 'TRANSACTION_SCOPE_CLOSED'
-  | 'INVALID_DATABASE_PATH';
+  | 'INVALID_DATABASE_PATH'
+  | 'STORAGE_CORRUPTION'
+  | 'EXECUTION_LOCK_HELD'
+  | 'EXECUTION_LOCK_RELEASE_FAILED'
+  | 'LISTING_IDENTITY_COLLISION'
+  | 'SENSITIVE_DATA_DETECTED';
 
 export interface SqliteStorageErrorOptions {
   readonly cause?: unknown;
@@ -148,6 +153,81 @@ export class InvalidDatabasePathError extends SqliteStorageError {
   constructor(message: string, options?: SqliteStorageErrorOptions) {
     super(message, 'INVALID_DATABASE_PATH', options);
     this.name = 'InvalidDatabasePathError';
+  }
+}
+
+export class StorageCorruptionError extends SqliteStorageError {
+  constructor(message: string, options?: SqliteStorageErrorOptions) {
+    super(message, 'STORAGE_CORRUPTION', options);
+    this.name = 'StorageCorruptionError';
+  }
+}
+
+export interface ExecutionLockHeldDetails {
+  readonly holderId: string;
+  readonly acquiredAt: Date;
+}
+
+export class ExecutionLockHeldError extends SqliteStorageError {
+  readonly holderId: string;
+  readonly acquiredAt: Date;
+
+  constructor(
+    details: ExecutionLockHeldDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Execution lock is currently held by '${details.holderId}' (acquired at ${details.acquiredAt.toISOString()}). Concurrent execution rejected.`;
+    super(msg, 'EXECUTION_LOCK_HELD', options);
+    this.name = 'ExecutionLockHeldError';
+    this.holderId = details.holderId;
+    this.acquiredAt = details.acquiredAt;
+  }
+}
+
+export class ExecutionLockReleaseError extends SqliteStorageError {
+  constructor(message: string, options?: SqliteStorageErrorOptions) {
+    super(message, 'EXECUTION_LOCK_RELEASE_FAILED', options);
+    this.name = 'ExecutionLockReleaseError';
+  }
+}
+
+export interface ListingIdentityCollisionDetails {
+  readonly sourceId: string;
+  readonly externalId: string;
+  readonly existingId: string;
+  readonly attemptingId: string;
+}
+
+export class ListingIdentityCollisionError extends SqliteStorageError {
+  readonly sourceId: string;
+  readonly externalId: string;
+  readonly existingId: string;
+  readonly attemptingId: string;
+
+  constructor(
+    details: ListingIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Listing identity conflict on source '${details.sourceId}' and external ID '${details.externalId}': existing record ID '${details.existingId}' cannot be overwritten with new ID '${details.attemptingId}'.`;
+    super(msg, 'LISTING_IDENTITY_COLLISION', options);
+    this.name = 'ListingIdentityCollisionError';
+    this.sourceId = details.sourceId;
+    this.externalId = details.externalId;
+    this.existingId = details.existingId;
+    this.attemptingId = details.attemptingId;
+  }
+}
+
+export class SensitiveDataDetectedError extends SqliteStorageError {
+  constructor(message: string, options?: SqliteStorageErrorOptions) {
+    super(message, 'SENSITIVE_DATA_DETECTED', options);
+    this.name = 'SensitiveDataDetectedError';
   }
 }
 

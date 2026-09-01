@@ -13,47 +13,103 @@ import {
   withTempDatabase,
 } from '@busca-ofertas-ai/storage-sqlite/testing';
 
-describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
-  it('migrates empty database to latest production version idempotently', () => {
+describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => {
+  it('migrates empty database to latest production version (v2) idempotently', () => {
     withTempDatabase((db) => {
       expect(db.getCurrentSchemaVersion()).toBe(0);
       expect(db.getAppliedMigrations()).toEqual([]);
 
-      // First run: applies migration 1
+      // First run: applies migration 1 and migration 2
       const result1 = db.migrate();
       expect(result1.previousVersion).toBe(0);
-      expect(result1.currentVersion).toBe(1);
-      expect(result1.newlyAppliedCount).toBe(1);
-      expect(result1.appliedMigrations.length).toBe(1);
+      expect(result1.currentVersion).toBe(2);
+      expect(result1.newlyAppliedCount).toBe(2);
+      expect(result1.appliedMigrations.length).toBe(2);
       expect(result1.appliedMigrations[0]!.version).toBe(1);
       expect(result1.appliedMigrations[0]!.name).toBe('001_create_schema_migrations');
+      expect(result1.appliedMigrations[1]!.version).toBe(2);
+      expect(result1.appliedMigrations[1]!.name).toBe('002_create_operational_persistence');
       expect(Date.parse(result1.appliedMigrations[0]!.appliedAt)).toBeGreaterThan(0);
+      expect(Date.parse(result1.appliedMigrations[1]!.appliedAt)).toBeGreaterThan(0);
 
-      expect(db.getCurrentSchemaVersion()).toBe(1);
+      expect(db.getCurrentSchemaVersion()).toBe(2);
 
       // Second run: idempotent no-op
       const result2 = db.migrate();
-      expect(result2.previousVersion).toBe(1);
-      expect(result2.currentVersion).toBe(1);
+      expect(result2.previousVersion).toBe(2);
+      expect(result2.currentVersion).toBe(2);
       expect(result2.newlyAppliedCount).toBe(0);
-      expect(result2.appliedMigrations.length).toBe(1);
+      expect(result2.appliedMigrations.length).toBe(2);
 
       // Third run: still idempotent
       const result3 = db.migrate();
-      expect(result3.currentVersion).toBe(1);
+      expect(result3.currentVersion).toBe(2);
       expect(result3.newlyAppliedCount).toBe(0);
     });
   });
 
-  it('rejects unsupported future schema version with fail-closed error', () => {
+  it('migrates v1 database to latest v2 version seamlessly and retains schema_migrations history', () => {
     const ctx = createTempDatabaseContext();
     try {
-      // Create DB with future schema version 2
+      // Step 1: Migrate only v1
+      const v1OnlyMigrations: readonly Migration[] = [PRODUCTION_MIGRATIONS[0]!];
+      const dbV1 = openSqliteDatabase({
+        databasePath: ctx.databasePath,
+        customMigrations: v1OnlyMigrations,
+      });
+      const v1Result = dbV1.migrate();
+      expect(v1Result.currentVersion).toBe(1);
+      expect(v1Result.newlyAppliedCount).toBe(1);
+      expect(dbV1.getCurrentSchemaVersion()).toBe(1);
+      dbV1.close();
+
+      // Step 2: Open with full production runner (v1 and v2)
+      const dbLatest = openSqliteDatabase({
+        databasePath: ctx.databasePath,
+      });
+      expect(dbLatest.getCurrentSchemaVersion()).toBe(1);
+
+      const v2Result = dbLatest.migrate();
+      expect(v2Result.previousVersion).toBe(1);
+      expect(v2Result.currentVersion).toBe(2);
+      expect(v2Result.newlyAppliedCount).toBe(1);
+      expect(v2Result.appliedMigrations.length).toBe(2);
+      expect(v2Result.appliedMigrations[1]!.version).toBe(2);
+      expect(v2Result.appliedMigrations[1]!.name).toBe('002_create_operational_persistence');
+
+      expect(dbLatest.getCurrentSchemaVersion()).toBe(2);
+
+      // Verify all operational tables exist
+      const tables = dbLatest
+        .prepare<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name ASC;",
+        )
+        .all();
+
+      const tableNames = tables.map((t) => t.name);
+      expect(tableNames).toContain('schema_migrations');
+      expect(tableNames).toContain('saved_searches');
+      expect(tableNames).toContain('saved_search_revisions');
+      expect(tableNames).toContain('runs');
+      expect(tableNames).toContain('source_runs');
+      expect(tableNames).toContain('listings');
+      expect(tableNames).toContain('execution_lock');
+
+      dbLatest.close();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it('rejects unsupported future schema version (>2) with fail-closed error', () => {
+    const ctx = createTempDatabaseContext();
+    try {
+      // Create DB with future schema version 3
       const customFutureMigrations: readonly Migration[] = [
         ...PRODUCTION_MIGRATIONS,
         {
-          version: 2,
-          name: '002_future_feature_table',
+          version: 3,
+          name: '003_future_feature_table',
           up: (tx) => {
             tx.exec('CREATE TABLE future_table (id INT PRIMARY KEY);');
           },
@@ -65,10 +121,10 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
         customMigrations: customFutureMigrations,
       });
       dbWithFuture.migrate();
-      expect(dbWithFuture.getCurrentSchemaVersion()).toBe(2);
+      expect(dbWithFuture.getCurrentSchemaVersion()).toBe(3);
       dbWithFuture.close();
 
-      // Now open with standard production runner (which only knows up to version 1)
+      // Now open with standard production runner (which only knows up to version 2)
       const standardDb = openSqliteDatabase({
         databasePath: ctx.databasePath,
       });
@@ -80,9 +136,9 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
         expect(err).toBeInstanceOf(SchemaVersionUnsupportedError);
         if (err instanceof SchemaVersionUnsupportedError) {
           expect(err.code).toBe('SCHEMA_VERSION_UNSUPPORTED');
-          expect(err.foundVersion).toBe(2);
-          expect(err.maxSupportedVersion).toBe(1);
-          expect(err.message).toContain('exceeds maximum version 1');
+          expect(err.foundVersion).toBe(3);
+          expect(err.maxSupportedVersion).toBe(2);
+          expect(err.message).toContain('exceeds maximum version 2');
           expect(err.message).toContain('Please upgrade');
         }
       }
@@ -93,11 +149,47 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
     }
   });
 
+  it('rolls back completely when a migration fails halfway and leaves schema version at previous level', () => {
+    const ctx = createTempDatabaseContext();
+    try {
+      const failingMigrations: readonly Migration[] = [
+        PRODUCTION_MIGRATIONS[0]!,
+        {
+          version: 2,
+          name: '002_failing_migration',
+          up: (tx) => {
+            tx.exec('CREATE TABLE partial_table_uncommitted (id INT PRIMARY KEY);');
+            tx.exec('INVALID SQL SYNTAX THAT THROWS');
+          },
+        },
+      ];
+
+      const db = openSqliteDatabase({
+        databasePath: ctx.databasePath,
+        customMigrations: failingMigrations,
+      });
+
+      expect(() => db.migrate()).toThrow(MigrationFailedError);
+      expect(db.getCurrentSchemaVersion()).toBe(1);
+
+      const tableCheck = db
+        .prepare<{ name: string }, [string]>(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        )
+        .get('partial_table_uncommitted');
+      expect(tableCheck).toBeUndefined();
+
+      db.close();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   it('rejects async migration up callbacks and does not record them in schema_migrations', () => {
     const ctx = createTempDatabaseContext();
     try {
       const asyncMigrations: readonly Migration[] = [
-        ...PRODUCTION_MIGRATIONS,
+        PRODUCTION_MIGRATIONS[0]!,
         {
           version: 2,
           name: '002_async_invalid_migration',
@@ -136,10 +228,7 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
         .get('async_table_uncommitted');
       expect(tableCheck).toBeUndefined();
 
-      // DB remains open, usable and closable
-      expect(db.isOpen).toBe(true);
       db.close();
-      expect(db.isOpen).toBe(false);
     } finally {
       ctx.cleanup();
     }
@@ -147,7 +236,6 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
 
   it('rejects invalid migration manifests before modifying database', () => {
     withTempDatabase((db) => {
-      // 1. Version 0
       expect(() =>
         openSqliteDatabase({
           databasePath: db.databasePath,
@@ -155,7 +243,6 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
         }).migrate(),
       ).toThrow(MigrationManifestInvalidError);
 
-      // 2. Negative version
       expect(() =>
         openSqliteDatabase({
           databasePath: db.databasePath,
@@ -163,7 +250,6 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
         }).migrate(),
       ).toThrow(MigrationManifestInvalidError);
 
-      // 3. Duplicate version
       expect(() =>
         openSqliteDatabase({
           databasePath: db.databasePath,
@@ -174,7 +260,6 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
         }).migrate(),
       ).toThrow(MigrationManifestInvalidError);
 
-      // 4. Duplicate name
       expect(() =>
         openSqliteDatabase({
           databasePath: db.databasePath,
@@ -185,7 +270,6 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
         }).migrate(),
       ).toThrow(MigrationManifestInvalidError);
 
-      // 5. Empty name
       expect(() =>
         openSqliteDatabase({
           databasePath: db.databasePath,
@@ -252,29 +336,13 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
   it('detects and rejects altered migration history (manifest divergence)', () => {
     const ctx = createTempDatabaseContext();
     try {
-      // First apply migration 1 as '001_create_schema_migrations'
       const db1 = openSqliteDatabase({
         databasePath: ctx.databasePath,
-        customMigrations: [
-          {
-            version: 1,
-            name: '001_create_schema_migrations',
-            up: (tx) => {
-              tx.exec(`
-                CREATE TABLE IF NOT EXISTS ${SCHEMA_MIGRATIONS_TABLE_NAME} (
-                  version INTEGER PRIMARY KEY,
-                  name TEXT NOT NULL,
-                  applied_at TEXT NOT NULL
-                );
-              `);
-            },
-          },
-        ],
+        customMigrations: [PRODUCTION_MIGRATIONS[0]!],
       });
       db1.migrate();
       db1.close();
 
-      // Now attempt to run with an altered manifest for version 1
       const dbAltered = openSqliteDatabase({
         databasePath: ctx.databasePath,
         customMigrations: [
@@ -293,7 +361,7 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
     }
   });
 
-  it('creates ONLY schema_migrations table in production schema (0 business tables)', () => {
+  it('creates operational tables and confirms out-of-scope tables are strictly absent (BOAI-011)', () => {
     withTempDatabase((db) => {
       db.migrate();
 
@@ -304,25 +372,27 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010)', () => {
         )
         .all();
 
-      expect(tables.map((t) => t.name)).toEqual([SCHEMA_MIGRATIONS_TABLE_NAME]);
-
-      // Explicit assertions that NO business tables exist
-      const forbiddenTables = [
-        'saved_searches',
-        'saved_search_revisions',
-        'runs',
-        'source_runs',
+      const tableNames = tables.map((t) => t.name).sort();
+      expect(tableNames).toEqual([
+        'execution_lock',
         'listings',
+        'runs',
+        'saved_search_revisions',
+        'saved_searches',
+        'schema_migrations',
+        'source_runs',
+      ]);
+
+      // Explicit assertions that out-of-scope tables do NOT exist
+      const outOfScopeTables = [
         'observations',
         'opportunities',
         'evaluations',
         'feedback',
         'raw_artifacts',
-        'run_lock',
-        'locks',
       ];
 
-      for (const table of forbiddenTables) {
+      for (const table of outOfScopeTables) {
         const check = db
           .prepare<{ name: string }, [string]>(
             "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",

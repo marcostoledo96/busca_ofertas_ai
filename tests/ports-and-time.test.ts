@@ -8,6 +8,7 @@ import {
   type OpportunityRepository,
   type FeedbackRepository,
   type RunRepository,
+  type RunSummary,
   type SavedSearch,
   type Listing,
   type Observation,
@@ -192,6 +193,31 @@ class InMemoryRunRepository implements RunRepository {
 
   public listSourceRunsByRunId(runId: string): Promise<readonly SourceRun[]> {
     return Promise.resolve(this.sourceRuns.filter((sr) => sr.runId === runId));
+  }
+
+  public getSummaryByRunId(runId: string): Promise<RunSummary | null> {
+    if (!this.runs.has(runId)) {
+      return Promise.resolve(null);
+    }
+    const matching = this.sourceRuns.filter((sr) => sr.runId === runId);
+    const successCount = matching.filter((sr) => sr.status === 'SUCCESS').length;
+    const zeroResultsCount = matching.filter((sr) => sr.status === 'ZERO_RESULTS_CONFIRMED').length;
+    const failedCount = matching.filter(
+      (sr) => !['PENDING', 'RUNNING', 'SUCCESS', 'ZERO_RESULTS_CONFIRMED'].includes(sr.status),
+    ).length;
+    const totalItemsCount = matching.reduce(
+      (acc, sr) =>
+        acc + ('itemsCount' in sr && typeof sr.itemsCount === 'number' ? sr.itemsCount : 0),
+      0,
+    );
+    return Promise.resolve({
+      runId,
+      totalSourceRuns: matching.length,
+      successCount,
+      zeroResultsCount,
+      failedCount,
+      totalItemsCount,
+    });
   }
 }
 

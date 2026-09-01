@@ -12,6 +12,8 @@ export {
   type MigrationFailedErrorDetails,
   type SchemaVersionUnsupportedDetails,
   type TransactionErrorCode,
+  type ExecutionLockHeldDetails,
+  type ListingIdentityCollisionDetails,
   SqliteStorageError,
   DatabaseOpenFailedError,
   DatabaseClosedError,
@@ -23,6 +25,11 @@ export {
   TransactionAsyncCallbackUnsupportedError,
   TransactionScopeClosedError,
   InvalidDatabasePathError,
+  StorageCorruptionError,
+  ExecutionLockHeldError,
+  ExecutionLockReleaseError,
+  ListingIdentityCollisionError,
+  SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './errors/index.js';
 
@@ -50,6 +57,25 @@ export {
   inspectSchemaMigrations,
   runMigrations,
 } from './migrations/index.js';
+
+// Sanitization
+export {
+  REDACTED_PLACEHOLDER,
+  MAX_SANITIZATION_DEPTH,
+  sanitizeString,
+  sanitizeErrorMessage,
+  sanitizeObject,
+} from './sanitization/sanitizer.js';
+
+// Repositories and concurrency control
+export {
+  type SqliteRepositories,
+  SqliteSavedSearchRepository,
+  SqliteRunRepository,
+  SqliteListingRepository,
+  SqliteExecutionLock,
+  createSqliteRepositories,
+} from './repositories/index.js';
 
 // Package Metadata
 export const STORAGE_SQLITE_PACKAGE_NAME = '@busca-ofertas-ai/storage-sqlite' as const;

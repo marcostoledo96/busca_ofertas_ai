@@ -20,6 +20,9 @@
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "@busca-ofertas-ai/core": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -b",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
