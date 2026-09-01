@@ -290,11 +290,11 @@ describe('SqliteSavedSearchRepository (BOAI-011)', () => {
             queries: ['nintendo switch lite'],
             options: {
               safeField: 'normal value',
-              apiKey: 'super-secret-api-key-12345',
+              apiKey: 'test-key-123',
               nested: {
-                auth_token: 'bearer token secret',
+                auth_token: 'test-token-456',
                 cookieHeader: 'session=xyz',
-                password: 'plain_password',
+                password: 'test-password-789',
               },
             },
             sessionRef: 'opaque-session-pointer-id',
