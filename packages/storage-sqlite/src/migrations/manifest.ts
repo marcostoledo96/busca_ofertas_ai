@@ -107,7 +107,26 @@ const prodMigration002: Migration = Object.freeze({
           (raw_items_count IS NULL OR (raw_items_count >= 0 AND raw_items_count = round(raw_items_count))) AND
           (parsed_items_count IS NULL OR (parsed_items_count >= 0 AND parsed_items_count = round(parsed_items_count))) AND
           (rejected_items_count IS NULL OR (rejected_items_count >= 0 AND rejected_items_count = round(rejected_items_count))) AND
-          (stop_reason IS NULL OR stop_reason IN ('COMPLETED', 'PAGES_LIMIT_REACHED', 'ITEMS_LIMIT_REACHED', 'EMPTY_PAGE', 'STOP_REQUESTED', 'RATE_LIMITED', 'ERROR'))
+          (stop_reason IS NULL OR stop_reason IN (
+            'ALL_PAGES_FETCHED',
+            'MAX_PAGES_REACHED',
+            'MAX_ITEMS_REACHED',
+            'NO_MORE_RESULTS',
+            'RATE_LIMIT_STOP',
+            'USER_ABORTED',
+            'DEADLINE_EXCEEDED'
+          )) AND
+          (
+            status NOT IN ('SUCCESS', 'ZERO_RESULTS_CONFIRMED') OR
+            (
+              pages_requested IS NOT NULL AND
+              pages_completed IS NOT NULL AND
+              raw_items_count IS NOT NULL AND
+              parsed_items_count IS NOT NULL AND
+              rejected_items_count IS NOT NULL AND
+              stop_reason IS NOT NULL
+            )
+          )
         ),
         CONSTRAINT chk_source_runs_status_consistency CHECK (
           (status IN ('PENDING', 'RUNNING') AND finished_at IS NULL AND items_count IS NULL AND error IS NULL) OR

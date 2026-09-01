@@ -16,6 +16,7 @@ export type SqliteStorageErrorCode =
   | 'LISTING_IDENTITY_COLLISION'
   | 'RUN_IDENTITY_COLLISION'
   | 'SOURCE_RUN_IDENTITY_COLLISION'
+  | 'SAVED_SEARCH_IDENTITY_COLLISION'
   | 'SENSITIVE_DATA_DETECTED';
 
 export interface SqliteStorageErrorOptions {
@@ -261,22 +262,30 @@ export class RunIdentityCollisionError extends SqliteStorageError {
 
 export interface SourceRunIdentityCollisionDetails {
   readonly sourceRunId: string;
-  readonly existingRunId: string;
-  readonly attemptingRunId: string;
-  readonly existingSourceId: string;
-  readonly attemptingSourceId: string;
-  readonly existingStartedAt: Date;
-  readonly attemptingStartedAt: Date;
+  readonly existingRunId?: string | undefined;
+  readonly attemptingRunId?: string | undefined;
+  readonly existingSourceId?: string | undefined;
+  readonly attemptingSourceId?: string | undefined;
+  readonly existingStartedAt?: Date | undefined;
+  readonly attemptingStartedAt?: Date | undefined;
+  readonly existingAdapterVersion?: string | undefined;
+  readonly attemptingAdapterVersion?: string | undefined;
+  readonly existingCollectorId?: string | null | undefined;
+  readonly attemptingCollectorId?: string | null | undefined;
 }
 
 export class SourceRunIdentityCollisionError extends SqliteStorageError {
   readonly sourceRunId: string;
-  readonly existingRunId: string;
-  readonly attemptingRunId: string;
-  readonly existingSourceId: string;
-  readonly attemptingSourceId: string;
-  readonly existingStartedAt: Date;
-  readonly attemptingStartedAt: Date;
+  readonly existingRunId?: string | undefined;
+  readonly attemptingRunId?: string | undefined;
+  readonly existingSourceId?: string | undefined;
+  readonly attemptingSourceId?: string | undefined;
+  readonly existingStartedAt?: Date | undefined;
+  readonly attemptingStartedAt?: Date | undefined;
+  readonly existingAdapterVersion?: string | undefined;
+  readonly attemptingAdapterVersion?: string | undefined;
+  readonly existingCollectorId?: string | null | undefined;
+  readonly attemptingCollectorId?: string | null | undefined;
 
   constructor(
     details: SourceRunIdentityCollisionDetails,
@@ -285,7 +294,7 @@ export class SourceRunIdentityCollisionError extends SqliteStorageError {
   ) {
     const msg =
       message ??
-      `SourceRun identity collision on ID '${details.sourceRunId}': existing record (runId='${details.existingRunId}', sourceId='${details.existingSourceId}', startedAt='${details.existingStartedAt.toISOString()}') cannot be modified to (runId='${details.attemptingRunId}', sourceId='${details.attemptingSourceId}', startedAt='${details.attemptingStartedAt.toISOString()}').`;
+      `SourceRun identity collision on ID '${details.sourceRunId}': existing record cannot be modified to incoming record.`;
     super(msg, 'SOURCE_RUN_IDENTITY_COLLISION', options);
     this.name = 'SourceRunIdentityCollisionError';
     this.sourceRunId = details.sourceRunId;
@@ -295,6 +304,37 @@ export class SourceRunIdentityCollisionError extends SqliteStorageError {
     this.attemptingSourceId = details.attemptingSourceId;
     this.existingStartedAt = details.existingStartedAt;
     this.attemptingStartedAt = details.attemptingStartedAt;
+    this.existingAdapterVersion = details.existingAdapterVersion;
+    this.attemptingAdapterVersion = details.attemptingAdapterVersion;
+    this.existingCollectorId = details.existingCollectorId;
+    this.attemptingCollectorId = details.attemptingCollectorId;
+  }
+}
+
+export interface SavedSearchIdentityCollisionDetails {
+  readonly savedSearchId: string;
+  readonly existingCreatedAt: Date;
+  readonly attemptingCreatedAt: Date;
+}
+
+export class SavedSearchIdentityCollisionError extends SqliteStorageError {
+  readonly savedSearchId: string;
+  readonly existingCreatedAt: Date;
+  readonly attemptingCreatedAt: Date;
+
+  constructor(
+    details: SavedSearchIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `SavedSearch identity collision on ID '${details.savedSearchId}': existing record (createdAt='${details.existingCreatedAt.toISOString()}') cannot be modified to (createdAt='${details.attemptingCreatedAt.toISOString()}').`;
+    super(msg, 'SAVED_SEARCH_IDENTITY_COLLISION', options);
+    this.name = 'SavedSearchIdentityCollisionError';
+    this.savedSearchId = details.savedSearchId;
+    this.existingCreatedAt = details.existingCreatedAt;
+    this.attemptingCreatedAt = details.attemptingCreatedAt;
   }
 }
 

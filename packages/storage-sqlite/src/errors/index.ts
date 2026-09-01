@@ -8,6 +8,7 @@ export {
   type ListingIdentityCollisionDetails,
   type RunIdentityCollisionDetails,
   type SourceRunIdentityCollisionDetails,
+  type SavedSearchIdentityCollisionDetails,
   SqliteStorageError,
   DatabaseOpenFailedError,
   DatabaseClosedError,
@@ -25,6 +26,7 @@ export {
   ListingIdentityCollisionError,
   RunIdentityCollisionError,
   SourceRunIdentityCollisionError,
+  SavedSearchIdentityCollisionError,
   SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './storage-errors.js';

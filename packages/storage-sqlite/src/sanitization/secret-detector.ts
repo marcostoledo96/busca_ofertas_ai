@@ -7,6 +7,7 @@ const FORBIDDEN_NORMALIZED_KEYS = new Set<string>([
   'accesstoken',
   'refreshtoken',
   'authtoken',
+  'bearertoken',
   'authorization',
   'cookie',
   'cookies',
@@ -14,7 +15,9 @@ const FORBIDDEN_NORMALIZED_KEYS = new Set<string>([
   'apikey',
   'secret',
   'clientsecret',
-  'bearertoken',
+  'secretkey',
+  'privatekey',
+  'accesskey',
 ]);
 
 const normalizeKey = (key: string): string => key.toLowerCase().replace(/[-_]/g, '');
@@ -25,6 +28,18 @@ const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /\bBearer\s+[A-Za-z0-9_\-.~+/=]{8,}\b/i,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b/i,
   /\bgithub_pat_[A-Za-z0-9_]{16,}\b/i,
+  /\bpassword\s*=\s*\S+/i,
+  /\bapi_key\s*=\s*\S+/i,
+  /\btoken\s*=\s*\S+/i,
+] as const;
+
+const FORBIDDEN_SESSION_REF_PATTERNS: readonly RegExp[] = [
+  /(?:Set-Cookie|Cookie)\s*:/i,
+  /Authorization\s*:/i,
+  /\bBearer\b/i,
+  /password\s*=/i,
+  /token\s*=/i,
+  /api_key\s*=/i,
 ] as const;
 
 export function validateNoSensitiveData(value: unknown, path = 'options', maxDepth = 20): void {
@@ -32,6 +47,11 @@ export function validateNoSensitiveData(value: unknown, path = 'options', maxDep
     return;
   }
   if (maxDepth <= 0) {
+    if (typeof value === 'object' && Object.keys(value).length > 0) {
+      throw new SensitiveDataDetectedError(
+        `Maximum object nesting depth exceeded at '${path}'. Cannot verify absence of sensitive data; failing closed.`,
+      );
+    }
     return;
   }
 
@@ -62,6 +82,24 @@ export function validateNoSensitiveData(value: unknown, path = 'options', maxDep
         );
       }
       validateNoSensitiveData(v, `${path}.${k}`, maxDepth - 1);
+    }
+  }
+}
+
+export function validateSessionRef(sessionRef: unknown, path = 'sessionRef'): void {
+  if (sessionRef === null || sessionRef === undefined) {
+    return;
+  }
+  if (typeof sessionRef !== 'string') {
+    throw new SensitiveDataDetectedError(
+      `sessionRef must be a string identifier at '${path}', got ${typeof sessionRef}`,
+    );
+  }
+  for (const pattern of FORBIDDEN_SESSION_REF_PATTERNS) {
+    if (pattern.test(sessionRef)) {
+      throw new SensitiveDataDetectedError(
+        `Sensitive credential pattern detected in sessionRef at '${path}'. Direct persistence of session contents is forbidden. Use an opaque session pointer instead.`,
+      );
     }
   }
 }

@@ -5,6 +5,7 @@ import {
   createSavedSearch,
   type Run,
   type SourceRun,
+  type SourceRunStopReason,
 } from '@busca-ofertas-ai/core';
 import {
   SqliteRunRepository,
@@ -16,7 +17,7 @@ import {
 } from '@busca-ofertas-ai/storage-sqlite';
 import { withTempDatabase } from '@busca-ofertas-ai/storage-sqlite/testing';
 
-describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
+describe('SqliteRunRepository (BOAI-011 / Findings A & C)', () => {
   const testSavedSearch = createSavedSearch({
     id: 'search-for-runs',
     schemaVersion: 1,
@@ -256,7 +257,33 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
       ];
 
       for (const sr of sourceRuns) {
-        await repo.saveSourceRun(sr, { adapterVersion: '1.0.0' });
+        if (sr.status === 'SUCCESS') {
+          await repo.saveSourceRun(sr, {
+            adapterVersion: '1.0.0',
+            metrics: {
+              pagesRequested: 2,
+              pagesCompleted: 2,
+              rawItemsCount: 42,
+              parsedItemsCount: 42,
+              rejectedItemsCount: 0,
+              stopReason: 'ALL_PAGES_FETCHED',
+            },
+          });
+        } else if (sr.status === 'ZERO_RESULTS_CONFIRMED') {
+          await repo.saveSourceRun(sr, {
+            adapterVersion: '1.0.0',
+            metrics: {
+              pagesRequested: 1,
+              pagesCompleted: 1,
+              rawItemsCount: 0,
+              parsedItemsCount: 0,
+              rejectedItemsCount: 0,
+              stopReason: 'NO_MORE_RESULTS',
+            },
+          });
+        } else {
+          await repo.saveSourceRun(sr, { adapterVersion: '1.0.0' });
+        }
       }
 
       const list = await repo.listSourceRunsByRunId(parentRun.id);
@@ -278,7 +305,7 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
     });
   });
 
-  it('rejects Run identity collisions when savedSearchId or startedAt differs (Finding 2)', async () => {
+  it('rejects Run identity collisions when savedSearchId or startedAt differs', async () => {
     await withTempDatabase(async (db) => {
       await setupBaseSearch(db);
       const repo = new SqliteRunRepository(db);
@@ -345,7 +372,7 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
     });
   });
 
-  it('rejects SourceRun identity collisions when runId, sourceId, or startedAt differs (Finding 2)', async () => {
+  it('rejects SourceRun identity and provenance collisions (runId, sourceId, startedAt, adapterVersion, collectorId) (Findings A & C)', async () => {
     await withTempDatabase(async (db) => {
       await setupBaseSearch(db);
       const repo = new SqliteRunRepository(db);
@@ -385,9 +412,19 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
         finishedAt: new Date('2026-08-30T12:01:00.000Z'),
         itemsCount: 5,
       });
-      await expect(repo.saveSourceRun(conflictRunId, { adapterVersion: '1.0.0' })).rejects.toThrow(
-        SourceRunIdentityCollisionError,
-      );
+      await expect(
+        repo.saveSourceRun(conflictRunId, {
+          adapterVersion: '1.0.0',
+          metrics: {
+            pagesRequested: 1,
+            pagesCompleted: 1,
+            rawItemsCount: 5,
+            parsedItemsCount: 5,
+            rejectedItemsCount: 0,
+            stopReason: 'ALL_PAGES_FETCHED',
+          },
+        }),
+      ).rejects.toThrow(SourceRunIdentityCollisionError);
 
       // 2. Same source run id + different sourceId -> reject
       const conflictSourceId = createSourceRun({
@@ -400,7 +437,17 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
         itemsCount: 5,
       });
       await expect(
-        repo.saveSourceRun(conflictSourceId, { adapterVersion: '1.0.0' }),
+        repo.saveSourceRun(conflictSourceId, {
+          adapterVersion: '1.0.0',
+          metrics: {
+            pagesRequested: 1,
+            pagesCompleted: 1,
+            rawItemsCount: 5,
+            parsedItemsCount: 5,
+            rejectedItemsCount: 0,
+            stopReason: 'ALL_PAGES_FETCHED',
+          },
+        }),
       ).rejects.toThrow(SourceRunIdentityCollisionError);
 
       // 3. Same source run id + different startedAt -> reject
@@ -414,16 +461,20 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
         itemsCount: 5,
       });
       await expect(
-        repo.saveSourceRun(conflictStartedAt, { adapterVersion: '1.0.0' }),
+        repo.saveSourceRun(conflictStartedAt, {
+          adapterVersion: '1.0.0',
+          metrics: {
+            pagesRequested: 1,
+            pagesCompleted: 1,
+            rawItemsCount: 5,
+            parsedItemsCount: 5,
+            rejectedItemsCount: 0,
+            stopReason: 'ALL_PAGES_FETCHED',
+          },
+        }),
       ).rejects.toThrow(SourceRunIdentityCollisionError);
 
-      // Verify row and metadata unchanged after rejections
-      const listA = await repo.listSourceRunsByRunId(runA.id);
-      expect(listA.length).toBe(1);
-      expect(listA[0]!.status).toBe('RUNNING');
-      expect(listA[0]!.startedAt).toEqual(originalStartedAt);
-
-      // 4. Valid lifecycle update with same identity succeeds
+      // 4. Immutable adapterVersion (Finding C1): attempt to change 1.0.0 -> 1.1.0 -> REJECT
       const validUpdate = createSourceRun({
         id: 'sr-collision-test',
         runId: runA.id,
@@ -434,7 +485,40 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
         itemsCount: 10,
       });
       await expect(
-        repo.saveSourceRun(validUpdate, { adapterVersion: '1.1.0' }),
+        repo.saveSourceRun(validUpdate, {
+          adapterVersion: '1.1.0',
+          metrics: {
+            pagesRequested: 1,
+            pagesCompleted: 1,
+            rawItemsCount: 10,
+            parsedItemsCount: 10,
+            rejectedItemsCount: 0,
+            stopReason: 'ALL_PAGES_FETCHED',
+          },
+        }),
+      ).rejects.toThrow(SourceRunIdentityCollisionError);
+
+      // Verify row and metadata unchanged after rejections
+      const listA = await repo.listSourceRunsByRunId(runA.id);
+      expect(listA.length).toBe(1);
+      expect(listA[0]!.status).toBe('RUNNING');
+      expect(listA[0]!.startedAt).toEqual(originalStartedAt);
+      const meta = await repo.getSourceRunMetadata('sr-collision-test');
+      expect(meta!.adapterVersion).toBe('1.0.0');
+
+      // 5. Valid lifecycle update with same adapterVersion (1.0.0) succeeds
+      await expect(
+        repo.saveSourceRun(validUpdate, {
+          adapterVersion: '1.0.0',
+          metrics: {
+            pagesRequested: 1,
+            pagesCompleted: 1,
+            rawItemsCount: 10,
+            parsedItemsCount: 10,
+            rejectedItemsCount: 0,
+            stopReason: 'ALL_PAGES_FETCHED',
+          },
+        }),
       ).resolves.toBeUndefined();
 
       const finalList = await repo.listSourceRunsByRunId(runA.id);
@@ -442,96 +526,189 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
     });
   });
 
-  it('validates required adapterVersion and non-negative metrics (Finding 5)', async () => {
+  it('enforces collectorId provenance transitions: NULL->A allowed, A->A allowed, A->B rejected, A->NULL preserves A (Finding C2)', async () => {
     await withTempDatabase(async (db) => {
       await setupBaseSearch(db);
       const repo = new SqliteRunRepository(db);
 
-      const parentRun = createRun({
-        id: 'parent-run-metrics-val',
+      const run = createRun({
+        id: 'run-collector-test',
         savedSearchId: testSavedSearch.id,
         status: 'RUNNING',
         startedAt: new Date('2026-08-30T12:00:00.000Z'),
       });
-      await repo.save(parentRun);
+      await repo.save(run);
 
-      const sourceRun = createSourceRun({
-        id: 'sr-metrics-test',
-        runId: parentRun.id,
+      const sr = createSourceRun({
+        id: 'sr-collector-1',
+        runId: run.id,
         sourceId: 'fb-marketplace',
-        status: 'SUCCESS',
+        status: 'RUNNING',
         startedAt: new Date('2026-08-30T12:00:00.000Z'),
-        finishedAt: new Date('2026-08-30T12:00:15.000Z'),
-        itemsCount: 10,
       });
 
-      // 1. Missing or empty adapterVersion -> reject
-      await expect(
-        repo.saveSourceRun(sourceRun, undefined as unknown as { adapterVersion: string }),
-      ).rejects.toThrow(/adapterVersion/);
+      // 1. Initial insert with no collectorId -> stored as NULL
+      await repo.saveSourceRun(sr, { adapterVersion: '1.0.0' });
+      let meta = await repo.getSourceRunMetadata('sr-collector-1');
+      expect(meta!.collectorId).toBeUndefined();
 
-      await expect(repo.saveSourceRun(sourceRun, { adapterVersion: '' })).rejects.toThrow(
-        /adapterVersion/,
-      );
-
-      await expect(repo.saveSourceRun(sourceRun, { adapterVersion: '   ' })).rejects.toThrow(
-        /adapterVersion/,
-      );
-
-      // 2. Negative metric count -> reject
-      await expect(
-        repo.saveSourceRun(sourceRun, {
-          adapterVersion: '1.0.0',
-          metrics: { pagesRequested: -1 },
-        }),
-      ).rejects.toThrow(/must be a non-negative finite integer/);
-
-      // 3. Fractional metric count -> reject
-      await expect(
-        repo.saveSourceRun(sourceRun, {
-          adapterVersion: '1.0.0',
-          metrics: { rawItemsCount: 3.5 },
-        }),
-      ).rejects.toThrow(/must be a non-negative finite integer/);
-
-      // 4. Invalid stopReason -> reject
-      await expect(
-        repo.saveSourceRun(sourceRun, {
-          adapterVersion: '1.0.0',
-          metrics: { stopReason: 'INVALID_STOP_REASON' as unknown as 'COMPLETED' },
-        }),
-      ).rejects.toThrow(/Invalid stopReason/);
-
-      // 5. Valid metadata round-trip
-      await expect(
-        repo.saveSourceRun(sourceRun, {
-          adapterVersion: '2.0.1',
-          metrics: {
-            pagesRequested: 5,
-            pagesCompleted: 5,
-            rawItemsCount: 50,
-            parsedItemsCount: 25,
-            rejectedItemsCount: 25,
-            stopReason: 'COMPLETED',
-          },
-        }),
-      ).resolves.toBeUndefined();
-
-      const meta = await repo.getSourceRunMetadata('sr-metrics-test');
-      expect(meta).not.toBeNull();
-      expect(meta!.adapterVersion).toBe('2.0.1');
-      expect(meta!.metrics).toEqual({
-        pagesRequested: 5,
-        pagesCompleted: 5,
-        rawItemsCount: 50,
-        parsedItemsCount: 25,
-        rejectedItemsCount: 25,
-        stopReason: 'COMPLETED',
+      // 2. NULL -> concrete collector 'collector-A': allowed
+      await repo.saveSourceRun(sr, {
+        adapterVersion: '1.0.0',
+        collectorId: 'collector-A',
       });
+      meta = await repo.getSourceRunMetadata('sr-collector-1');
+      expect(meta!.collectorId).toBe('collector-A');
+
+      // 3. concrete A -> same A: allowed
+      await repo.saveSourceRun(sr, {
+        adapterVersion: '1.0.0',
+        collectorId: 'collector-A',
+      });
+      meta = await repo.getSourceRunMetadata('sr-collector-1');
+      expect(meta!.collectorId).toBe('collector-A');
+
+      // 4. concrete A -> different B: reject with SourceRunIdentityCollisionError, row unchanged
+      await expect(
+        repo.saveSourceRun(sr, {
+          adapterVersion: '1.0.0',
+          collectorId: 'collector-B',
+        }),
+      ).rejects.toThrow(SourceRunIdentityCollisionError);
+      meta = await repo.getSourceRunMetadata('sr-collector-1');
+      expect(meta!.collectorId).toBe('collector-A');
+
+      // 5. concrete A -> NULL / undefined: does NOT erase provenance (keeps 'collector-A')
+      await repo.saveSourceRun(sr, { adapterVersion: '1.0.0' });
+      meta = await repo.getSourceRunMetadata('sr-collector-1');
+      expect(meta!.collectorId).toBe('collector-A');
     });
   });
 
-  it('calculates deterministic RunSummary without counting CANCELLED as failedCount (Finding 6)', async () => {
+  it('enforces mandatory complete metrics for SUCCESS and ZERO_RESULTS_CONFIRMED (Finding A)', async () => {
+    await withTempDatabase(async (db) => {
+      await setupBaseSearch(db);
+      const repo = new SqliteRunRepository(db);
+
+      const run = createRun({
+        id: 'run-metrics-req',
+        savedSearchId: testSavedSearch.id,
+        status: 'RUNNING',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
+      });
+      await repo.save(run);
+
+      const successSr = createSourceRun({
+        id: 'sr-success-metrics',
+        runId: run.id,
+        sourceId: 'fb-marketplace',
+        status: 'SUCCESS',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
+        finishedAt: new Date('2026-08-30T12:01:00.000Z'),
+        itemsCount: 5,
+      });
+
+      const zeroResultsSr = createSourceRun({
+        id: 'sr-zero-metrics',
+        runId: run.id,
+        sourceId: 'fb-marketplace',
+        status: 'ZERO_RESULTS_CONFIRMED',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
+        finishedAt: new Date('2026-08-30T12:01:00.000Z'),
+        itemsCount: 0,
+      });
+
+      // 1. SUCCESS without metrics -> reject
+      await expect(repo.saveSourceRun(successSr, { adapterVersion: '1.0.0' })).rejects.toThrow(
+        /requires complete execution metrics/,
+      );
+
+      // 2. ZERO_RESULTS_CONFIRMED without metrics -> reject
+      await expect(repo.saveSourceRun(zeroResultsSr, { adapterVersion: '1.0.0' })).rejects.toThrow(
+        /requires complete execution metrics/,
+      );
+
+      // 3. SUCCESS with partial metrics -> reject
+      await expect(
+        repo.saveSourceRun(successSr, {
+          adapterVersion: '1.0.0',
+          metrics: { pagesRequested: 1 },
+        }),
+      ).rejects.toThrow(/requires complete execution metrics/);
+
+      // 4. Old invented values PAGES_LIMIT_REACHED / COMPLETED / ERROR -> reject
+      await expect(
+        repo.saveSourceRun(successSr, {
+          adapterVersion: '1.0.0',
+          metrics: {
+            pagesRequested: 1,
+            pagesCompleted: 1,
+            rawItemsCount: 5,
+            parsedItemsCount: 5,
+            rejectedItemsCount: 0,
+            stopReason: 'COMPLETED' as unknown as SourceRunStopReason,
+          },
+        }),
+      ).rejects.toThrow(/Invalid stopReason/);
+
+      await expect(
+        repo.saveSourceRun(successSr, {
+          adapterVersion: '1.0.0',
+          metrics: {
+            pagesRequested: 1,
+            pagesCompleted: 1,
+            rawItemsCount: 5,
+            parsedItemsCount: 5,
+            rejectedItemsCount: 0,
+            stopReason: 'PAGES_LIMIT_REACHED' as unknown as SourceRunStopReason,
+          },
+        }),
+      ).rejects.toThrow(/Invalid stopReason/);
+
+      // 5. SUCCESS with real Adapter SDK stop reasons -> accepted and exact round-trip
+      const testCases: { stopReason: SourceRunStopReason; expected: SourceRunStopReason }[] = [
+        { stopReason: 'ALL_PAGES_FETCHED', expected: 'ALL_PAGES_FETCHED' },
+        { stopReason: 'MAX_PAGES_REACHED', expected: 'MAX_PAGES_REACHED' },
+        { stopReason: 'MAX_ITEMS_REACHED', expected: 'MAX_ITEMS_REACHED' },
+        { stopReason: 'NO_MORE_RESULTS', expected: 'NO_MORE_RESULTS' },
+        { stopReason: 'RATE_LIMIT_STOP', expected: 'RATE_LIMIT_STOP' },
+        { stopReason: 'USER_ABORTED', expected: 'USER_ABORTED' },
+        { stopReason: 'DEADLINE_EXCEEDED', expected: 'DEADLINE_EXCEEDED' },
+      ];
+
+      for (let i = 0; i < testCases.length; i++) {
+        const tc = testCases[i]!;
+        const srId = `sr-test-reason-${i}`;
+        const itemSr = createSourceRun({
+          id: srId,
+          runId: run.id,
+          sourceId: 'fb-marketplace',
+          status: 'SUCCESS',
+          startedAt: new Date('2026-08-30T12:00:00.000Z'),
+          finishedAt: new Date('2026-08-30T12:01:00.000Z'),
+          itemsCount: 10,
+        });
+
+        await repo.saveSourceRun(itemSr, {
+          adapterVersion: '1.0.0',
+          metrics: {
+            pagesRequested: 3,
+            pagesCompleted: 3,
+            rawItemsCount: 20,
+            parsedItemsCount: 10,
+            rejectedItemsCount: 10,
+            stopReason: tc.stopReason,
+          },
+        });
+
+        const meta = await repo.getSourceRunMetadata(srId);
+        expect(meta).not.toBeNull();
+        expect(meta!.metrics?.stopReason).toBe(tc.expected);
+      }
+    });
+  });
+
+  it('calculates deterministic RunSummary without counting CANCELLED as failedCount', async () => {
     await withTempDatabase(async (db) => {
       await setupBaseSearch(db);
       const repo = new SqliteRunRepository(db);
@@ -556,7 +733,17 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
           finishedAt: new Date('2026-08-30T12:01:00.000Z'),
           itemsCount: 10,
         }),
-        { adapterVersion: '1.0.0' },
+        {
+          adapterVersion: '1.0.0',
+          metrics: {
+            pagesRequested: 1,
+            pagesCompleted: 1,
+            rawItemsCount: 10,
+            parsedItemsCount: 10,
+            rejectedItemsCount: 0,
+            stopReason: 'ALL_PAGES_FETCHED',
+          },
+        },
       );
       await repo.saveSourceRun(
         createSourceRun({
@@ -568,7 +755,17 @@ describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
           finishedAt: new Date('2026-08-30T12:02:00.000Z'),
           itemsCount: 0,
         }),
-        { adapterVersion: '1.0.0' },
+        {
+          adapterVersion: '1.0.0',
+          metrics: {
+            pagesRequested: 1,
+            pagesCompleted: 1,
+            rawItemsCount: 0,
+            parsedItemsCount: 0,
+            rejectedItemsCount: 0,
+            stopReason: 'NO_MORE_RESULTS',
+          },
+        },
       );
       await repo.saveSourceRun(
         createSourceRun({

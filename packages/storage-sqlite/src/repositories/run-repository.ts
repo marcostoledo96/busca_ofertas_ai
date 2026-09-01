@@ -57,13 +57,13 @@ interface RunSummaryRow {
 }
 
 const VALID_STOP_REASONS: ReadonlySet<SourceRunStopReason> = new Set([
-  'COMPLETED',
-  'PAGES_LIMIT_REACHED',
-  'ITEMS_LIMIT_REACHED',
-  'EMPTY_PAGE',
-  'STOP_REQUESTED',
-  'RATE_LIMITED',
-  'ERROR',
+  'ALL_PAGES_FETCHED',
+  'MAX_PAGES_REACHED',
+  'MAX_ITEMS_REACHED',
+  'NO_MORE_RESULTS',
+  'RATE_LIMIT_STOP',
+  'USER_ABORTED',
+  'DEADLINE_EXCEEDED',
 ]);
 
 function toError(err: unknown): Error {
@@ -272,6 +272,24 @@ export class SqliteRunRepository implements RunRepository {
         throw new Error('SourceRunExecutionMetadata.adapterVersion must be a non-empty string');
       }
       const adapterVersion = metadata.adapterVersion.trim();
+
+      // Mandatory complete metrics for SUCCESS and ZERO_RESULTS_CONFIRMED (Finding A)
+      if (sourceRun.status === 'SUCCESS' || sourceRun.status === 'ZERO_RESULTS_CONFIRMED') {
+        if (
+          !metadata.metrics ||
+          metadata.metrics.pagesRequested === undefined ||
+          metadata.metrics.pagesCompleted === undefined ||
+          metadata.metrics.rawItemsCount === undefined ||
+          metadata.metrics.parsedItemsCount === undefined ||
+          metadata.metrics.rejectedItemsCount === undefined ||
+          metadata.metrics.stopReason === undefined
+        ) {
+          throw new Error(
+            `SourceRun with status '${sourceRun.status}' requires complete execution metrics (pagesRequested, pagesCompleted, rawItemsCount, parsedItemsCount, rejectedItemsCount, stopReason).`,
+          );
+        }
+      }
+
       validateMetrics(metadata.metrics);
 
       const startedAtIso = sourceRun.startedAt.toISOString();
@@ -296,10 +314,17 @@ export class SqliteRunRepository implements RunRepository {
 
       this.db.transaction((tx) => {
         const checkStmt = tx.prepare<
-          { id: string; run_id: string; source_id: string; started_at: string },
+          {
+            id: string;
+            run_id: string;
+            source_id: string;
+            started_at: string;
+            adapter_version: string;
+            collector_id: string | null;
+          },
           [string]
         >(
-          `SELECT id, run_id, source_id, started_at
+          `SELECT id, run_id, source_id, started_at, adapter_version, collector_id
            FROM source_runs
            WHERE id = ?`,
         );
@@ -323,6 +348,42 @@ export class SqliteRunRepository implements RunRepository {
             });
           }
 
+          // Immutable adapterVersion check (Finding C1)
+          if (existing.adapter_version !== adapterVersion) {
+            throw new SourceRunIdentityCollisionError(
+              {
+                sourceRunId: sourceRun.id,
+                existingAdapterVersion: existing.adapter_version,
+                attemptingAdapterVersion: adapterVersion,
+              },
+              `SourceRun '${sourceRun.id}' immutable adapterVersion collision: existing '${existing.adapter_version}' cannot be modified to '${adapterVersion}'.`,
+            );
+          }
+
+          // CollectorId provenance transition policy (Finding C2)
+          let resolvedCollectorId = existing.collector_id;
+          const incomingCollector = metadata.collectorId ?? collectorId;
+          if (existing.collector_id !== null) {
+            if (
+              incomingCollector !== null &&
+              incomingCollector !== undefined &&
+              incomingCollector !== existing.collector_id
+            ) {
+              throw new SourceRunIdentityCollisionError(
+                {
+                  sourceRunId: sourceRun.id,
+                  existingCollectorId: existing.collector_id,
+                  attemptingCollectorId: incomingCollector,
+                },
+                `SourceRun '${sourceRun.id}' immutable collectorId collision: existing '${existing.collector_id}' cannot be modified to '${incomingCollector}'.`,
+              );
+            }
+            // If incoming is null/undefined or equals existing, resolvedCollectorId remains existing.collector_id
+          } else {
+            // NULL -> concrete: permitted
+            resolvedCollectorId = incomingCollector ?? null;
+          }
+
           const updateStmt = tx.prepare(
             `UPDATE source_runs
              SET collector_id = ?, adapter_version = ?, status = ?, finished_at = ?,
@@ -332,7 +393,7 @@ export class SqliteRunRepository implements RunRepository {
              WHERE id = ?`,
           );
           updateStmt.run(
-            collectorId,
+            resolvedCollectorId,
             adapterVersion,
             sourceRun.status,
             finishedAtIso,
@@ -347,6 +408,7 @@ export class SqliteRunRepository implements RunRepository {
             sourceRun.id,
           );
         } else {
+          const resolvedCollectorId = metadata.collectorId ?? collectorId ?? null;
           const insertStmt = tx.prepare(
             `INSERT INTO source_runs (
               id, run_id, source_id, collector_id, adapter_version, status,
@@ -359,7 +421,7 @@ export class SqliteRunRepository implements RunRepository {
             sourceRun.id,
             sourceRun.runId,
             sourceRun.sourceId,
-            collectorId,
+            resolvedCollectorId,
             adapterVersion,
             sourceRun.status,
             startedAtIso,
@@ -451,7 +513,7 @@ export class SqliteRunRepository implements RunRepository {
   getSourceRunMetadata(sourceRunId: string): Promise<SourceRunExecutionMetadata | null> {
     try {
       const stmt = this.db.prepare<SourceRunRow, [string]>(
-        `SELECT adapter_version, pages_requested, pages_completed, raw_items_count,
+        `SELECT adapter_version, collector_id, pages_requested, pages_completed, raw_items_count,
                 parsed_items_count, rejected_items_count, stop_reason
          FROM source_runs
          WHERE id = ?`,
@@ -471,6 +533,7 @@ export class SqliteRunRepository implements RunRepository {
 
       return Promise.resolve({
         adapterVersion: row.adapter_version,
+        ...(row.collector_id !== null ? { collectorId: row.collector_id } : {}),
         ...(hasMetrics
           ? {
               metrics: {

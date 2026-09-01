@@ -106,10 +106,16 @@ export class SqliteListingRepository implements ListingRepository {
       this.db.transaction((tx) => {
         // 1. Check if a listing with (source_id, external_id) already exists
         const existingByNaturalKeyStmt = tx.prepare<
-          { id: string; source_id: string; external_id: string },
+          {
+            id: string;
+            source_id: string;
+            external_id: string;
+            first_seen_at: string;
+            last_seen_at: string;
+          },
           [string, string]
         >(
-          `SELECT id, source_id, external_id
+          `SELECT id, source_id, external_id, first_seen_at, last_seen_at
            FROM listings
            WHERE source_id = ? AND external_id = ?`,
         );
@@ -128,13 +134,39 @@ export class SqliteListingRepository implements ListingRepository {
             });
           }
 
-          // Same identity -> update canonicalUrl, first_seen_at, last_seen_at
+          // Same identity -> update canonicalUrl, preserve earliest first_seen_at and latest last_seen_at (Finding C4)
+          const existingFirstSeen = parseIsoDate(
+            existingByNaturalKey.first_seen_at,
+            'first_seen_at',
+            existingByNaturalKey.id,
+          );
+          const existingLastSeen = parseIsoDate(
+            existingByNaturalKey.last_seen_at,
+            'last_seen_at',
+            existingByNaturalKey.id,
+          );
+
+          const earliestFirstSeen =
+            listing.firstSeenAt.getTime() < existingFirstSeen.getTime()
+              ? listing.firstSeenAt
+              : existingFirstSeen;
+
+          const latestLastSeen =
+            listing.lastSeenAt.getTime() > existingLastSeen.getTime()
+              ? listing.lastSeenAt
+              : existingLastSeen;
+
           const updateStmt = tx.prepare(
             `UPDATE listings
              SET canonical_url = ?, first_seen_at = ?, last_seen_at = ?
              WHERE id = ?`,
           );
-          updateStmt.run(listing.canonicalUrl, firstSeenAtIso, lastSeenAtIso, listing.id);
+          updateStmt.run(
+            listing.canonicalUrl,
+            earliestFirstSeen.toISOString(),
+            latestLastSeen.toISOString(),
+            listing.id,
+          );
           return;
         }
 

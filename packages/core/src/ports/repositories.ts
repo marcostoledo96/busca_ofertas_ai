@@ -57,13 +57,13 @@ export interface RunSummary {
 }
 
 export type SourceRunStopReason =
-  | 'COMPLETED'
-  | 'PAGES_LIMIT_REACHED'
-  | 'ITEMS_LIMIT_REACHED'
-  | 'EMPTY_PAGE'
-  | 'STOP_REQUESTED'
-  | 'RATE_LIMITED'
-  | 'ERROR';
+  | 'ALL_PAGES_FETCHED'
+  | 'MAX_PAGES_REACHED'
+  | 'MAX_ITEMS_REACHED'
+  | 'NO_MORE_RESULTS'
+  | 'RATE_LIMIT_STOP'
+  | 'USER_ABORTED'
+  | 'DEADLINE_EXCEEDED';
 
 export interface SourceRunMetrics {
   readonly pagesRequested?: number;
@@ -74,8 +74,18 @@ export interface SourceRunMetrics {
   readonly stopReason?: SourceRunStopReason;
 }
 
+export interface CompleteSourceRunMetrics {
+  readonly pagesRequested: number;
+  readonly pagesCompleted: number;
+  readonly rawItemsCount: number;
+  readonly parsedItemsCount: number;
+  readonly rejectedItemsCount: number;
+  readonly stopReason: SourceRunStopReason;
+}
+
 export interface SourceRunExecutionMetadata {
   readonly adapterVersion: string;
+  readonly collectorId?: string;
   readonly metrics?: SourceRunMetrics;
 }
 

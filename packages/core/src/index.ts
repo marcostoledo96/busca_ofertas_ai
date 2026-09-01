@@ -146,6 +146,7 @@ export {
   type RunSummary,
   type SourceRunStopReason,
   type SourceRunMetrics,
+  type CompleteSourceRunMetrics,
   type SourceRunExecutionMetadata,
   type RunRepository,
 } from './ports/repositories.js';

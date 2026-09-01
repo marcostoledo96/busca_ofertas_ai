@@ -125,6 +125,64 @@ describe('SqliteListingRepository (BOAI-011)', () => {
     });
   });
 
+  it('preserves earliest firstSeenAt and latest lastSeenAt across repeated saves (Finding C4)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const repo = new SqliteListingRepository(db);
+
+      // 1. Initial listing firstSeen 10:00, lastSeen 10:00
+      const initial = createListing({
+        id: 'listing-temporal-1',
+        sourceId: 'fb-marketplace',
+        externalId: 'ext-temp-1',
+        canonicalUrl: 'https://fb.com/initial',
+        firstSeenAt: new Date('2026-08-30T10:00:00.000Z'),
+        lastSeenAt: new Date('2026-08-30T10:00:00.000Z'),
+      });
+      await repo.save(initial);
+
+      // 2. Save same identity with firstSeen 12:00, lastSeen 14:00, and new canonicalUrl
+      const later = createListing({
+        id: 'listing-temporal-1',
+        sourceId: 'fb-marketplace',
+        externalId: 'ext-temp-1',
+        canonicalUrl: 'https://fb.com/updated-url',
+        firstSeenAt: new Date('2026-08-30T12:00:00.000Z'),
+        lastSeenAt: new Date('2026-08-30T14:00:00.000Z'),
+      });
+      await repo.save(later);
+
+      const afterLater = await repo.getById('listing-temporal-1');
+      expect(afterLater).not.toBeNull();
+      // persisted firstSeen remains 10:00 (earliest known)
+      expect(afterLater!.firstSeenAt).toEqual(new Date('2026-08-30T10:00:00.000Z'));
+      // persisted lastSeen becomes 14:00 (latest known)
+      expect(afterLater!.lastSeenAt).toEqual(new Date('2026-08-30T14:00:00.000Z'));
+      // canonicalUrl is updated
+      expect(afterLater!.canonicalUrl).toBe('https://fb.com/updated-url');
+
+      // 3. Save older observation (e.g. from an out-of-order run) with lastSeen 11:00
+      const older = createListing({
+        id: 'listing-temporal-1',
+        sourceId: 'fb-marketplace',
+        externalId: 'ext-temp-1',
+        canonicalUrl: 'https://fb.com/out-of-order',
+        firstSeenAt: new Date('2026-08-30T09:00:00.000Z'), // even earlier!
+        lastSeenAt: new Date('2026-08-30T11:00:00.000Z'), // older than 14:00
+      });
+      await repo.save(older);
+
+      const afterOlder = await repo.getById('listing-temporal-1');
+      expect(afterOlder).not.toBeNull();
+      // persisted firstSeen moves to 09:00 (new earliest known)
+      expect(afterOlder!.firstSeenAt).toEqual(new Date('2026-08-30T09:00:00.000Z'));
+      // persisted lastSeen does NOT regress to 11:00; remains 14:00 (latest known)
+      expect(afterOlder!.lastSeenAt).toEqual(new Date('2026-08-30T14:00:00.000Z'));
+      // canonicalUrl updated
+      expect(afterOlder!.canonicalUrl).toBe('https://fb.com/out-of-order');
+    });
+  });
+
   it('rejects collision when saving listing with same (sourceId, externalId) but different internal ID with typed error', async () => {
     await withTempDatabase(async (db) => {
       db.migrate();

@@ -33,6 +33,7 @@ export {
   ListingIdentityCollisionError,
   RunIdentityCollisionError,
   SourceRunIdentityCollisionError,
+  SavedSearchIdentityCollisionError,
   SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './errors/index.js';
@@ -70,7 +71,7 @@ export {
   sanitizeErrorMessage,
   sanitizeObject,
 } from './sanitization/sanitizer.js';
-export { validateNoSensitiveData } from './sanitization/secret-detector.js';
+export { validateNoSensitiveData, validateSessionRef } from './sanitization/secret-detector.js';
 
 // Repositories and concurrency control
 export {
