@@ -1,11 +1,17 @@
-import { type ExecutionLockHandle, type ExecutionLockPort } from '@busca-ofertas-ai/core';
+import { randomUUID } from 'node:crypto';
+import {
+  type ExecutionLockHandle,
+  type ExecutionLockInfo,
+  type ExecutionLockPort,
+} from '@busca-ofertas-ai/core';
 import type { SqliteDatabase } from '../database/types.js';
-import { ExecutionLockHeldError, ExecutionLockReleaseError } from '../errors/storage-errors.js';
+import { ExecutionLockHeldError } from '../errors/storage-errors.js';
 import { sanitizeObject } from '../sanitization/sanitizer.js';
 
 interface ExecutionLockRow {
   readonly lock_key: string;
   readonly holder_id: string;
+  readonly lock_token: string;
   readonly acquired_at: string;
   readonly metadata: string | null;
 }
@@ -25,89 +31,67 @@ export class SqliteExecutionLock implements ExecutionLockPort {
         throw new Error('holderId must be a non-empty string');
       }
       const cleanHolderId = holderId.trim();
+      const token = randomUUID();
+      const acquiredAt = new Date();
+      const acquiredAtIso = acquiredAt.toISOString();
+      const metadataJson = metadata ? JSON.stringify(sanitizeObject(metadata)) : null;
 
-      const handle = this.db.transaction((tx) => {
-        const selectStmt = tx.prepare<ExecutionLockRow, [string]>(
-          `SELECT lock_key, holder_id, acquired_at, metadata
+      // Atomic acquisition using SQLite uniqueness authority
+      const insertStmt = this.db.prepare(
+        `INSERT INTO execution_lock (lock_key, holder_id, lock_token, acquired_at, metadata)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(lock_key) DO NOTHING`,
+      );
+      const result = insertStmt.run(
+        DEFAULT_LOCK_KEY,
+        cleanHolderId,
+        token,
+        acquiredAtIso,
+        metadataJson,
+      );
+
+      if (result.changes === 0) {
+        // Lock is already held: inspect current holder to provide typed error details
+        const selectStmt = this.db.prepare<{ holder_id: string; acquired_at: string }, [string]>(
+          `SELECT holder_id, acquired_at
            FROM execution_lock
            WHERE lock_key = ?`,
         );
-        const existing = selectStmt.get(DEFAULT_LOCK_KEY);
+        const current = selectStmt.get(DEFAULT_LOCK_KEY);
+        const currentHolderId = current?.holder_id ?? 'unknown';
+        const currentAcquiredAt = current ? new Date(current.acquired_at) : new Date();
 
-        if (existing) {
-          if (existing.holder_id === cleanHolderId) {
-            const acquiredAt = new Date(existing.acquired_at);
-            return {
-              holderId: cleanHolderId,
-              acquiredAt,
-              release: () => this.release(cleanHolderId),
-            };
+        throw new ExecutionLockHeldError({
+          holderId: currentHolderId,
+          acquiredAt: currentAcquiredAt,
+        });
+      }
+
+      // Lock successfully acquired. The release capability is bound strictly to the private token.
+      let isReleased = false;
+
+      const handle: ExecutionLockHandle = {
+        holderId: cleanHolderId,
+        acquiredAt,
+        release: () => {
+          if (isReleased) {
+            return Promise.resolve();
           }
-
-          const acquiredAt = new Date(existing.acquired_at);
-          throw new ExecutionLockHeldError({
-            holderId: existing.holder_id,
-            acquiredAt,
-          });
-        }
-
-        const acquiredAt = new Date();
-        const acquiredAtIso = acquiredAt.toISOString();
-        const metadataJson = metadata ? JSON.stringify(sanitizeObject(metadata)) : null;
-
-        const insertStmt = tx.prepare(
-          `INSERT INTO execution_lock (lock_key, holder_id, acquired_at, metadata)
-           VALUES (?, ?, ?, ?)`,
-        );
-        insertStmt.run(DEFAULT_LOCK_KEY, cleanHolderId, acquiredAtIso, metadataJson);
-
-        return {
-          holderId: cleanHolderId,
-          acquiredAt,
-          release: () => this.release(cleanHolderId),
-        };
-      });
+          try {
+            const deleteStmt = this.db.prepare(
+              `DELETE FROM execution_lock
+               WHERE lock_key = ? AND lock_token = ?`,
+            );
+            deleteStmt.run(DEFAULT_LOCK_KEY, token);
+            isReleased = true;
+            return Promise.resolve();
+          } catch (err) {
+            return Promise.reject(toError(err));
+          }
+        },
+      };
 
       return Promise.resolve(handle);
-    } catch (err) {
-      return Promise.reject(toError(err));
-    }
-  }
-
-  release(holderId: string): Promise<void> {
-    try {
-      if (typeof holderId !== 'string' || holderId.trim().length === 0) {
-        throw new Error('holderId must be a non-empty string');
-      }
-      const cleanHolderId = holderId.trim();
-
-      this.db.transaction((tx) => {
-        const selectStmt = tx.prepare<ExecutionLockRow, [string]>(
-          `SELECT lock_key, holder_id, acquired_at, metadata
-           FROM execution_lock
-           WHERE lock_key = ?`,
-        );
-        const existing = selectStmt.get(DEFAULT_LOCK_KEY);
-
-        if (!existing) {
-          // Idempotent: lock is already released
-          return;
-        }
-
-        if (existing.holder_id !== cleanHolderId) {
-          throw new ExecutionLockReleaseError(
-            `Cannot release execution lock held by '${existing.holder_id}' from holder '${cleanHolderId}'`,
-          );
-        }
-
-        const deleteStmt = tx.prepare(
-          `DELETE FROM execution_lock
-           WHERE lock_key = ? AND holder_id = ?`,
-        );
-        deleteStmt.run(DEFAULT_LOCK_KEY, cleanHolderId);
-      });
-
-      return Promise.resolve();
     } catch (err) {
       return Promise.reject(toError(err));
     }
@@ -125,10 +109,10 @@ export class SqliteExecutionLock implements ExecutionLockPort {
     }
   }
 
-  getHolder(): Promise<ExecutionLockHandle | null> {
+  getHolder(): Promise<ExecutionLockInfo | null> {
     try {
       const stmt = this.db.prepare<ExecutionLockRow, [string]>(
-        `SELECT lock_key, holder_id, acquired_at, metadata
+        `SELECT lock_key, holder_id, lock_token, acquired_at, metadata
          FROM execution_lock
          WHERE lock_key = ?`,
       );
@@ -140,11 +124,13 @@ export class SqliteExecutionLock implements ExecutionLockPort {
       const acquiredAt = new Date(row.acquired_at);
       const holderId = row.holder_id;
 
-      return Promise.resolve({
+      // Returns read-only lock info. Does NOT expose lock_token or release capability.
+      const info: ExecutionLockInfo = {
         holderId,
         acquiredAt,
-        release: () => this.release(holderId),
-      });
+      };
+
+      return Promise.resolve(info);
     } catch (err) {
       return Promise.reject(toError(err));
     }

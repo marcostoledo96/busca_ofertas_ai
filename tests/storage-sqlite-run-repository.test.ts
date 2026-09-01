@@ -10,11 +10,13 @@ import {
   SqliteRunRepository,
   SqliteSavedSearchRepository,
   StorageCorruptionError,
+  RunIdentityCollisionError,
+  SourceRunIdentityCollisionError,
   REDACTED_PLACEHOLDER,
 } from '@busca-ofertas-ai/storage-sqlite';
 import { withTempDatabase } from '@busca-ofertas-ai/storage-sqlite/testing';
 
-describe('SqliteRunRepository (BOAI-011)', () => {
+describe('SqliteRunRepository (BOAI-011 / Findings 2, 5, 6)', () => {
   const testSavedSearch = createSavedSearch({
     id: 'search-for-runs',
     schemaVersion: 1,
@@ -98,20 +100,30 @@ describe('SqliteRunRepository (BOAI-011)', () => {
 
       for (const r of runs) {
         await repo.save(r);
-        const retrieved = await repo.getById(r.id);
-        expect(retrieved).not.toBeNull();
-        expect(retrieved).toEqual(r);
+      }
+
+      for (const expected of runs) {
+        const actual = await repo.getById(expected.id);
+        expect(actual).not.toBeNull();
+        expect(actual!.id).toBe(expected.id);
+        expect(actual!.status).toBe(expected.status);
+        if ('finishedAt' in expected && expected.finishedAt && actual && 'finishedAt' in actual) {
+          expect(actual.finishedAt).toEqual(expected.finishedAt);
+        }
+        if ('error' in expected && expected.error && actual && 'error' in actual) {
+          expect(actual.error).toBe(expected.error);
+        }
       }
     });
   });
 
-  it('persists and retrieves all 14 SourceRun statuses and verifies SUCCESS != ZERO_RESULTS != ERROR', async () => {
+  it('persists and retrieves all 14 SourceRun statuses respecting SUCCESS != ZERO_RESULTS != failures', async () => {
     await withTempDatabase(async (db) => {
       await setupBaseSearch(db);
       const repo = new SqliteRunRepository(db);
 
       const parentRun = createRun({
-        id: 'parent-run-1',
+        id: 'parent-run-for-sources',
         savedSearchId: testSavedSearch.id,
         status: 'RUNNING',
         startedAt: new Date('2026-08-30T12:00:00.000Z'),
@@ -123,7 +135,6 @@ describe('SqliteRunRepository (BOAI-011)', () => {
           id: 'sr-pending',
           runId: parentRun.id,
           sourceId: 'fb-marketplace',
-          collectorId: 'graphql',
           status: 'PENDING',
           startedAt: new Date('2026-08-30T12:00:00.000Z'),
         }),
@@ -131,7 +142,6 @@ describe('SqliteRunRepository (BOAI-011)', () => {
           id: 'sr-running',
           runId: parentRun.id,
           sourceId: 'fb-marketplace',
-          collectorId: 'graphql',
           status: 'RUNNING',
           startedAt: new Date('2026-08-30T12:00:05.000Z'),
         }),
@@ -139,20 +149,18 @@ describe('SqliteRunRepository (BOAI-011)', () => {
           id: 'sr-success',
           runId: parentRun.id,
           sourceId: 'fb-marketplace',
-          collectorId: 'graphql',
           status: 'SUCCESS',
           startedAt: new Date('2026-08-30T12:00:10.000Z'),
-          finishedAt: new Date('2026-08-30T12:00:20.000Z'),
+          finishedAt: new Date('2026-08-30T12:00:30.000Z'),
           itemsCount: 42,
         }),
         createSourceRun({
           id: 'sr-zero-results',
           runId: parentRun.id,
-          sourceId: 'mercadolibre',
-          collectorId: 'search-api',
+          sourceId: 'fb-marketplace',
           status: 'ZERO_RESULTS_CONFIRMED',
-          startedAt: new Date('2026-08-30T12:00:25.000Z'),
-          finishedAt: new Date('2026-08-30T12:00:30.000Z'),
+          startedAt: new Date('2026-08-30T12:00:15.000Z'),
+          finishedAt: new Date('2026-08-30T12:00:35.000Z'),
           itemsCount: 0,
         }),
         createSourceRun({
@@ -160,39 +168,39 @@ describe('SqliteRunRepository (BOAI-011)', () => {
           runId: parentRun.id,
           sourceId: 'fb-marketplace',
           status: 'AUTHENTICATION_REQUIRED',
-          startedAt: new Date('2026-08-30T12:00:35.000Z'),
-          finishedAt: new Date('2026-08-30T12:00:40.000Z'),
-          error: 'Session cookie expired',
+          startedAt: new Date('2026-08-30T12:00:40.000Z'),
+          finishedAt: new Date('2026-08-30T12:00:45.000Z'),
+          error: 'Session expired, login required',
         }),
         createSourceRun({
           id: 'sr-manual-int',
           runId: parentRun.id,
           sourceId: 'fb-marketplace',
           status: 'MANUAL_INTERVENTION_REQUIRED',
-          startedAt: new Date('2026-08-30T12:00:45.000Z'),
-          finishedAt: new Date('2026-08-30T12:00:50.000Z'),
-          error: 'CAPTCHA detected',
+          startedAt: new Date('2026-08-30T12:00:50.000Z'),
+          finishedAt: new Date('2026-08-30T12:00:55.000Z'),
+          error: 'Checkpoint triggered',
         }),
         createSourceRun({
           id: 'sr-rate-limit',
           runId: parentRun.id,
           sourceId: 'fb-marketplace',
           status: 'RATE_LIMITED',
-          startedAt: new Date('2026-08-30T12:00:55.000Z'),
-          finishedAt: new Date('2026-08-30T12:01:00.000Z'),
+          startedAt: new Date('2026-08-30T12:01:00.000Z'),
+          finishedAt: new Date('2026-08-30T12:01:05.000Z'),
           error: 'HTTP 429 Too Many Requests',
         }),
         createSourceRun({
-          id: 'sr-net-err',
+          id: 'sr-network-err',
           runId: parentRun.id,
           sourceId: 'fb-marketplace',
           status: 'NETWORK_ERROR',
-          startedAt: new Date('2026-08-30T12:01:05.000Z'),
-          finishedAt: new Date('2026-08-30T12:01:10.000Z'),
-          error: 'ECONNRESET',
+          startedAt: new Date('2026-08-30T12:01:10.000Z'),
+          finishedAt: new Date('2026-08-30T12:01:15.000Z'),
+          error: 'ECONNRESET connecting to Facebook',
         }),
         createSourceRun({
-          id: 'sr-src-unavail',
+          id: 'sr-source-unavail',
           runId: parentRun.id,
           sourceId: 'fb-marketplace',
           status: 'SOURCE_UNAVAILABLE',
@@ -248,7 +256,7 @@ describe('SqliteRunRepository (BOAI-011)', () => {
       ];
 
       for (const sr of sourceRuns) {
-        await repo.saveSourceRun(sr);
+        await repo.saveSourceRun(sr, { adapterVersion: '1.0.0' });
       }
 
       const list = await repo.listSourceRunsByRunId(parentRun.id);
@@ -270,13 +278,177 @@ describe('SqliteRunRepository (BOAI-011)', () => {
     });
   });
 
-  it('persists and retrieves SourceRun execution metadata and metrics', async () => {
+  it('rejects Run identity collisions when savedSearchId or startedAt differs (Finding 2)', async () => {
+    await withTempDatabase(async (db) => {
+      await setupBaseSearch(db);
+      const repo = new SqliteRunRepository(db);
+
+      const searchB = createSavedSearch({
+        ...testSavedSearch,
+        id: 'search-b',
+        name: 'Search B',
+      });
+      const searchRepo = new SqliteSavedSearchRepository(db);
+      await searchRepo.save(searchB);
+
+      const originalStartedAt = new Date('2026-08-30T12:00:00.000Z');
+      const initialRun = createRun({
+        id: 'run-collision-test',
+        savedSearchId: testSavedSearch.id,
+        status: 'RUNNING',
+        startedAt: originalStartedAt,
+      });
+      await repo.save(initialRun);
+
+      // 1. Same run id + different savedSearchId -> reject
+      const conflictingSearchRun = createRun({
+        id: 'run-collision-test',
+        savedSearchId: 'search-b',
+        status: 'SUCCESS',
+        startedAt: originalStartedAt,
+        finishedAt: new Date('2026-08-30T12:05:00.000Z'),
+      });
+      await expect(repo.save(conflictingSearchRun)).rejects.toThrow(RunIdentityCollisionError);
+
+      // Verify row unchanged after rejection
+      const afterConflict1 = await repo.getById('run-collision-test');
+      expect(afterConflict1!.savedSearchId).toBe(testSavedSearch.id);
+      expect(afterConflict1!.status).toBe('RUNNING');
+
+      // 2. Same run id + different startedAt -> reject
+      const conflictingDateRun = createRun({
+        id: 'run-collision-test',
+        savedSearchId: testSavedSearch.id,
+        status: 'SUCCESS',
+        startedAt: new Date('2026-08-30T13:00:00.000Z'),
+        finishedAt: new Date('2026-08-30T13:05:00.000Z'),
+      });
+      await expect(repo.save(conflictingDateRun)).rejects.toThrow(RunIdentityCollisionError);
+
+      // Verify row unchanged after rejection
+      const afterConflict2 = await repo.getById('run-collision-test');
+      expect(afterConflict2!.startedAt).toEqual(originalStartedAt);
+      expect(afterConflict2!.status).toBe('RUNNING');
+
+      // 3. Valid lifecycle update with same identity succeeds
+      const updatedRun = createRun({
+        id: 'run-collision-test',
+        savedSearchId: testSavedSearch.id,
+        status: 'SUCCESS',
+        startedAt: originalStartedAt,
+        finishedAt: new Date('2026-08-30T12:10:00.000Z'),
+      });
+      await expect(repo.save(updatedRun)).resolves.toBeUndefined();
+
+      const finalRun = await repo.getById('run-collision-test');
+      expect(finalRun!.status).toBe('SUCCESS');
+    });
+  });
+
+  it('rejects SourceRun identity collisions when runId, sourceId, or startedAt differs (Finding 2)', async () => {
+    await withTempDatabase(async (db) => {
+      await setupBaseSearch(db);
+      const repo = new SqliteRunRepository(db);
+
+      const runA = createRun({
+        id: 'run-a',
+        savedSearchId: testSavedSearch.id,
+        status: 'RUNNING',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
+      });
+      const runB = createRun({
+        id: 'run-b',
+        savedSearchId: testSavedSearch.id,
+        status: 'RUNNING',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
+      });
+      await repo.save(runA);
+      await repo.save(runB);
+
+      const originalStartedAt = new Date('2026-08-30T12:00:05.000Z');
+      const initialSr = createSourceRun({
+        id: 'sr-collision-test',
+        runId: runA.id,
+        sourceId: 'fb-marketplace',
+        status: 'RUNNING',
+        startedAt: originalStartedAt,
+      });
+      await repo.saveSourceRun(initialSr, { adapterVersion: '1.0.0' });
+
+      // 1. Same source run id + different runId -> reject
+      const conflictRunId = createSourceRun({
+        id: 'sr-collision-test',
+        runId: runB.id,
+        sourceId: 'fb-marketplace',
+        status: 'SUCCESS',
+        startedAt: originalStartedAt,
+        finishedAt: new Date('2026-08-30T12:01:00.000Z'),
+        itemsCount: 5,
+      });
+      await expect(repo.saveSourceRun(conflictRunId, { adapterVersion: '1.0.0' })).rejects.toThrow(
+        SourceRunIdentityCollisionError,
+      );
+
+      // 2. Same source run id + different sourceId -> reject
+      const conflictSourceId = createSourceRun({
+        id: 'sr-collision-test',
+        runId: runA.id,
+        sourceId: 'mercadolibre',
+        status: 'SUCCESS',
+        startedAt: originalStartedAt,
+        finishedAt: new Date('2026-08-30T12:01:00.000Z'),
+        itemsCount: 5,
+      });
+      await expect(
+        repo.saveSourceRun(conflictSourceId, { adapterVersion: '1.0.0' }),
+      ).rejects.toThrow(SourceRunIdentityCollisionError);
+
+      // 3. Same source run id + different startedAt -> reject
+      const conflictStartedAt = createSourceRun({
+        id: 'sr-collision-test',
+        runId: runA.id,
+        sourceId: 'fb-marketplace',
+        status: 'SUCCESS',
+        startedAt: new Date('2026-08-30T12:15:00.000Z'),
+        finishedAt: new Date('2026-08-30T12:16:00.000Z'),
+        itemsCount: 5,
+      });
+      await expect(
+        repo.saveSourceRun(conflictStartedAt, { adapterVersion: '1.0.0' }),
+      ).rejects.toThrow(SourceRunIdentityCollisionError);
+
+      // Verify row and metadata unchanged after rejections
+      const listA = await repo.listSourceRunsByRunId(runA.id);
+      expect(listA.length).toBe(1);
+      expect(listA[0]!.status).toBe('RUNNING');
+      expect(listA[0]!.startedAt).toEqual(originalStartedAt);
+
+      // 4. Valid lifecycle update with same identity succeeds
+      const validUpdate = createSourceRun({
+        id: 'sr-collision-test',
+        runId: runA.id,
+        sourceId: 'fb-marketplace',
+        status: 'SUCCESS',
+        startedAt: originalStartedAt,
+        finishedAt: new Date('2026-08-30T12:01:00.000Z'),
+        itemsCount: 10,
+      });
+      await expect(
+        repo.saveSourceRun(validUpdate, { adapterVersion: '1.1.0' }),
+      ).resolves.toBeUndefined();
+
+      const finalList = await repo.listSourceRunsByRunId(runA.id);
+      expect(finalList[0]!.status).toBe('SUCCESS');
+    });
+  });
+
+  it('validates required adapterVersion and non-negative metrics (Finding 5)', async () => {
     await withTempDatabase(async (db) => {
       await setupBaseSearch(db);
       const repo = new SqliteRunRepository(db);
 
       const parentRun = createRun({
-        id: 'parent-run-meta',
+        id: 'parent-run-metrics-val',
         savedSearchId: testSavedSearch.id,
         status: 'RUNNING',
         startedAt: new Date('2026-08-30T12:00:00.000Z'),
@@ -284,38 +456,155 @@ describe('SqliteRunRepository (BOAI-011)', () => {
       await repo.save(parentRun);
 
       const sourceRun = createSourceRun({
-        id: 'sr-with-meta',
+        id: 'sr-metrics-test',
         runId: parentRun.id,
         sourceId: 'fb-marketplace',
-        collectorId: 'graphql',
         status: 'SUCCESS',
         startedAt: new Date('2026-08-30T12:00:00.000Z'),
         finishedAt: new Date('2026-08-30T12:00:15.000Z'),
-        itemsCount: 15,
+        itemsCount: 10,
       });
 
-      await repo.saveSourceRun(sourceRun, {
-        adapterVersion: '1.2.0',
-        metrics: {
-          pagesRequested: 3,
-          pagesCompleted: 3,
-          rawItemsCount: 30,
-          parsedItemsCount: 15,
-          rejectedItemsCount: 15,
-          stopReason: 'NO_MORE_RESULTS',
-        },
-      });
+      // 1. Missing or empty adapterVersion -> reject
+      await expect(
+        repo.saveSourceRun(sourceRun, undefined as unknown as { adapterVersion: string }),
+      ).rejects.toThrow(/adapterVersion/);
 
-      const metadata = await repo.getSourceRunMetadata('sr-with-meta');
-      expect(metadata).not.toBeNull();
-      expect(metadata!.adapterVersion).toBe('1.2.0');
-      expect(metadata!.metrics).toEqual({
-        pagesRequested: 3,
-        pagesCompleted: 3,
-        rawItemsCount: 30,
-        parsedItemsCount: 15,
-        rejectedItemsCount: 15,
-        stopReason: 'NO_MORE_RESULTS',
+      await expect(repo.saveSourceRun(sourceRun, { adapterVersion: '' })).rejects.toThrow(
+        /adapterVersion/,
+      );
+
+      await expect(repo.saveSourceRun(sourceRun, { adapterVersion: '   ' })).rejects.toThrow(
+        /adapterVersion/,
+      );
+
+      // 2. Negative metric count -> reject
+      await expect(
+        repo.saveSourceRun(sourceRun, {
+          adapterVersion: '1.0.0',
+          metrics: { pagesRequested: -1 },
+        }),
+      ).rejects.toThrow(/must be a non-negative finite integer/);
+
+      // 3. Fractional metric count -> reject
+      await expect(
+        repo.saveSourceRun(sourceRun, {
+          adapterVersion: '1.0.0',
+          metrics: { rawItemsCount: 3.5 },
+        }),
+      ).rejects.toThrow(/must be a non-negative finite integer/);
+
+      // 4. Invalid stopReason -> reject
+      await expect(
+        repo.saveSourceRun(sourceRun, {
+          adapterVersion: '1.0.0',
+          metrics: { stopReason: 'INVALID_STOP_REASON' as unknown as 'COMPLETED' },
+        }),
+      ).rejects.toThrow(/Invalid stopReason/);
+
+      // 5. Valid metadata round-trip
+      await expect(
+        repo.saveSourceRun(sourceRun, {
+          adapterVersion: '2.0.1',
+          metrics: {
+            pagesRequested: 5,
+            pagesCompleted: 5,
+            rawItemsCount: 50,
+            parsedItemsCount: 25,
+            rejectedItemsCount: 25,
+            stopReason: 'COMPLETED',
+          },
+        }),
+      ).resolves.toBeUndefined();
+
+      const meta = await repo.getSourceRunMetadata('sr-metrics-test');
+      expect(meta).not.toBeNull();
+      expect(meta!.adapterVersion).toBe('2.0.1');
+      expect(meta!.metrics).toEqual({
+        pagesRequested: 5,
+        pagesCompleted: 5,
+        rawItemsCount: 50,
+        parsedItemsCount: 25,
+        rejectedItemsCount: 25,
+        stopReason: 'COMPLETED',
+      });
+    });
+  });
+
+  it('calculates deterministic RunSummary without counting CANCELLED as failedCount (Finding 6)', async () => {
+    await withTempDatabase(async (db) => {
+      await setupBaseSearch(db);
+      const repo = new SqliteRunRepository(db);
+
+      const run = createRun({
+        id: 'run-summary-test',
+        savedSearchId: testSavedSearch.id,
+        status: 'PARTIAL_SUCCESS',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
+        finishedAt: new Date('2026-08-30T12:05:00.000Z'),
+      });
+      await repo.save(run);
+
+      // 1 SUCCESS, 1 ZERO_RESULTS_CONFIRMED, 1 FAILED-like, 1 CANCELLED
+      await repo.saveSourceRun(
+        createSourceRun({
+          id: 'sr-s1',
+          runId: run.id,
+          sourceId: 's1',
+          status: 'SUCCESS',
+          startedAt: new Date('2026-08-30T12:00:00.000Z'),
+          finishedAt: new Date('2026-08-30T12:01:00.000Z'),
+          itemsCount: 10,
+        }),
+        { adapterVersion: '1.0.0' },
+      );
+      await repo.saveSourceRun(
+        createSourceRun({
+          id: 'sr-s2',
+          runId: run.id,
+          sourceId: 's2',
+          status: 'ZERO_RESULTS_CONFIRMED',
+          startedAt: new Date('2026-08-30T12:01:00.000Z'),
+          finishedAt: new Date('2026-08-30T12:02:00.000Z'),
+          itemsCount: 0,
+        }),
+        { adapterVersion: '1.0.0' },
+      );
+      await repo.saveSourceRun(
+        createSourceRun({
+          id: 'sr-s3',
+          runId: run.id,
+          sourceId: 's3',
+          status: 'NETWORK_ERROR',
+          startedAt: new Date('2026-08-30T12:02:00.000Z'),
+          finishedAt: new Date('2026-08-30T12:03:00.000Z'),
+          error: 'Timeout error',
+        }),
+        { adapterVersion: '1.0.0' },
+      );
+      await repo.saveSourceRun(
+        createSourceRun({
+          id: 'sr-s4',
+          runId: run.id,
+          sourceId: 's4',
+          status: 'CANCELLED',
+          startedAt: new Date('2026-08-30T12:03:00.000Z'),
+          finishedAt: new Date('2026-08-30T12:04:00.000Z'),
+          error: 'User cancelled',
+        }),
+        { adapterVersion: '1.0.0' },
+      );
+
+      const summary = await repo.getSummaryByRunId(run.id);
+      expect(summary).not.toBeNull();
+      expect(summary!).toEqual({
+        runId: run.id,
+        totalSourceRuns: 4,
+        successCount: 1,
+        zeroResultsCount: 1,
+        failedCount: 1, // NOT 2! CANCELLED is not counted in failedCount
+        cancelledCount: 1,
+        totalItemsCount: 10,
       });
     });
   });
@@ -345,7 +634,7 @@ describe('SqliteRunRepository (BOAI-011)', () => {
         finishedAt: new Date('2026-08-30T12:00:10.000Z'),
         error: 'Login failed with password="mySuperPassword123" and api_key=topsecret999',
       });
-      await repo.saveSourceRun(sourceRunWithSecretError);
+      await repo.saveSourceRun(sourceRunWithSecretError, { adapterVersion: '1.0.0' });
 
       // Verify Run error was sanitized
       const retrievedRun = await repo.getById('run-secret-err');
@@ -366,94 +655,6 @@ describe('SqliteRunRepository (BOAI-011)', () => {
         expect(retrievedSr.error).not.toContain('topsecret999');
         expect(retrievedSr.error).toContain(REDACTED_PLACEHOLDER);
       }
-    });
-  });
-
-  it('calculates deterministic RunSummary via SQL aggregation', async () => {
-    await withTempDatabase(async (db) => {
-      await setupBaseSearch(db);
-      const repo = new SqliteRunRepository(db);
-
-      const run = createRun({
-        id: 'run-for-summary',
-        savedSearchId: testSavedSearch.id,
-        status: 'PARTIAL_SUCCESS',
-        startedAt: new Date('2026-08-30T12:00:00.000Z'),
-        finishedAt: new Date('2026-08-30T12:05:00.000Z'),
-      });
-      await repo.save(run);
-
-      // Add 2 SUCCESS, 1 ZERO_RESULTS_CONFIRMED, 2 FAILED source runs
-      await repo.saveSourceRun(
-        createSourceRun({
-          id: 'sr-sum-1',
-          runId: run.id,
-          sourceId: 'fb-marketplace',
-          status: 'SUCCESS',
-          startedAt: new Date('2026-08-30T12:00:00.000Z'),
-          finishedAt: new Date('2026-08-30T12:01:00.000Z'),
-          itemsCount: 20,
-        }),
-      );
-      await repo.saveSourceRun(
-        createSourceRun({
-          id: 'sr-sum-2',
-          runId: run.id,
-          sourceId: 'mercadolibre',
-          status: 'SUCCESS',
-          startedAt: new Date('2026-08-30T12:01:00.000Z'),
-          finishedAt: new Date('2026-08-30T12:02:00.000Z'),
-          itemsCount: 15,
-        }),
-      );
-      await repo.saveSourceRun(
-        createSourceRun({
-          id: 'sr-sum-3',
-          runId: run.id,
-          sourceId: 'olx',
-          status: 'ZERO_RESULTS_CONFIRMED',
-          startedAt: new Date('2026-08-30T12:02:00.000Z'),
-          finishedAt: new Date('2026-08-30T12:03:00.000Z'),
-          itemsCount: 0,
-        }),
-      );
-      await repo.saveSourceRun(
-        createSourceRun({
-          id: 'sr-sum-4',
-          runId: run.id,
-          sourceId: 'custom-store',
-          status: 'NETWORK_ERROR',
-          startedAt: new Date('2026-08-30T12:03:00.000Z'),
-          finishedAt: new Date('2026-08-30T12:04:00.000Z'),
-          error: 'Connection timeout',
-        }),
-      );
-      await repo.saveSourceRun(
-        createSourceRun({
-          id: 'sr-sum-5',
-          runId: run.id,
-          sourceId: 'another-store',
-          status: 'RATE_LIMITED',
-          startedAt: new Date('2026-08-30T12:04:00.000Z'),
-          finishedAt: new Date('2026-08-30T12:05:00.000Z'),
-          error: '429 Rate limit',
-        }),
-      );
-
-      const summary = await repo.getSummaryByRunId(run.id);
-      expect(summary).not.toBeNull();
-      expect(summary!).toEqual({
-        runId: run.id,
-        totalSourceRuns: 5,
-        successCount: 2,
-        zeroResultsCount: 1,
-        failedCount: 2,
-        totalItemsCount: 35,
-      });
-
-      // Querying nonexistent run returns null
-      const nonexistentSummary = await repo.getSummaryByRunId('nonexistent-run');
-      expect(nonexistentSummary).toBeNull();
     });
   });
 

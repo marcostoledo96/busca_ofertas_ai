@@ -12,14 +12,14 @@ export interface SavedSearchRevisionRecord {
   readonly revisionNumber: number;
   readonly schemaVersion: number;
   readonly recordedAt: Date;
-  readonly snapshot: unknown;
+  readonly snapshot: SavedSearch;
 }
 
 export interface SavedSearchRepository {
   getById(id: string): Promise<SavedSearch | null>;
   listEnabled(): Promise<readonly SavedSearch[]>;
   save(savedSearch: SavedSearch): Promise<void>;
-  listRevisions?(savedSearchId: string): Promise<readonly SavedSearchRevisionRecord[]>;
+  listRevisions(savedSearchId: string): Promise<readonly SavedSearchRevisionRecord[]>;
 }
 
 export interface ListingRepository {
@@ -52,8 +52,18 @@ export interface RunSummary {
   readonly successCount: number;
   readonly zeroResultsCount: number;
   readonly failedCount: number;
+  readonly cancelledCount: number;
   readonly totalItemsCount: number;
 }
+
+export type SourceRunStopReason =
+  | 'COMPLETED'
+  | 'PAGES_LIMIT_REACHED'
+  | 'ITEMS_LIMIT_REACHED'
+  | 'EMPTY_PAGE'
+  | 'STOP_REQUESTED'
+  | 'RATE_LIMITED'
+  | 'ERROR';
 
 export interface SourceRunMetrics {
   readonly pagesRequested?: number;
@@ -61,19 +71,19 @@ export interface SourceRunMetrics {
   readonly rawItemsCount?: number;
   readonly parsedItemsCount?: number;
   readonly rejectedItemsCount?: number;
-  readonly stopReason?: string;
+  readonly stopReason?: SourceRunStopReason;
 }
 
 export interface SourceRunExecutionMetadata {
-  readonly adapterVersion?: string;
+  readonly adapterVersion: string;
   readonly metrics?: SourceRunMetrics;
 }
 
 export interface RunRepository {
   getById(id: string): Promise<Run | null>;
   save(run: Run): Promise<void>;
-  saveSourceRun(sourceRun: SourceRun, metadata?: SourceRunExecutionMetadata): Promise<void>;
+  saveSourceRun(sourceRun: SourceRun, metadata: SourceRunExecutionMetadata): Promise<void>;
   listSourceRunsByRunId(runId: string): Promise<readonly SourceRun[]>;
   getSummaryByRunId(runId: string): Promise<RunSummary | null>;
-  getSourceRunMetadata?(sourceRunId: string): Promise<SourceRunExecutionMetadata | null>;
+  getSourceRunMetadata(sourceRunId: string): Promise<SourceRunExecutionMetadata | null>;
 }

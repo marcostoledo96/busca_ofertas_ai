@@ -383,6 +383,28 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
         'source_runs',
       ]);
 
+      // Introspect table columns on execution_lock
+      const lockCols = db
+        .prepare<{ name: string; notnull: number }, []>("PRAGMA table_info('execution_lock');")
+        .all();
+      const lockColNames = lockCols.map((c) => c.name);
+      expect(lockColNames).toContain('lock_key');
+      expect(lockColNames).toContain('holder_id');
+      expect(lockColNames).toContain('lock_token');
+      expect(lockColNames).toContain('acquired_at');
+      expect(lockColNames).toContain('metadata');
+
+      // Verify lock_token is NOT NULL
+      const tokenCol = lockCols.find((c) => c.name === 'lock_token');
+      expect(tokenCol?.notnull).toBe(1);
+
+      // Verify adapter_version in source_runs is NOT NULL
+      const srCols = db
+        .prepare<{ name: string; notnull: number }, []>("PRAGMA table_info('source_runs');")
+        .all();
+      const adapterVerCol = srCols.find((c) => c.name === 'adapter_version');
+      expect(adapterVerCol?.notnull).toBe(1);
+
       // Explicit assertions that out-of-scope tables do NOT exist
       const outOfScopeTables = [
         'observations',

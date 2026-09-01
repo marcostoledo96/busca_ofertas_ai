@@ -4,13 +4,19 @@ import {
   type RunSummary,
   type SourceRun,
   type SourceRunExecutionMetadata,
+  type SourceRunMetrics,
+  type SourceRunStopReason,
   type CreateRunParams,
   type CreateSourceRunParams,
   createRun,
   createSourceRun,
 } from '@busca-ofertas-ai/core';
 import type { SqliteDatabase } from '../database/types.js';
-import { StorageCorruptionError } from '../errors/storage-errors.js';
+import {
+  StorageCorruptionError,
+  RunIdentityCollisionError,
+  SourceRunIdentityCollisionError,
+} from '../errors/storage-errors.js';
 import { sanitizeErrorMessage } from '../sanitization/sanitizer.js';
 
 interface RunRow {
@@ -27,7 +33,7 @@ interface SourceRunRow {
   readonly run_id: string;
   readonly source_id: string;
   readonly collector_id: string | null;
-  readonly adapter_version: string | null;
+  readonly adapter_version: string;
   readonly status: string;
   readonly started_at: string;
   readonly finished_at: string | null;
@@ -46,8 +52,19 @@ interface RunSummaryRow {
   readonly success_count: number;
   readonly zero_results_count: number;
   readonly failed_count: number;
+  readonly cancelled_count: number;
   readonly total_items_count: number;
 }
+
+const VALID_STOP_REASONS: ReadonlySet<SourceRunStopReason> = new Set([
+  'COMPLETED',
+  'PAGES_LIMIT_REACHED',
+  'ITEMS_LIMIT_REACHED',
+  'EMPTY_PAGE',
+  'STOP_REQUESTED',
+  'RATE_LIMITED',
+  'ERROR',
+]);
 
 function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
@@ -137,6 +154,35 @@ function rehydrateSourceRun(row: SourceRunRow): SourceRun {
   }
 }
 
+function validateMetrics(metrics?: SourceRunMetrics): void {
+  if (!metrics) return;
+
+  const countKeys: (keyof SourceRunMetrics)[] = [
+    'pagesRequested',
+    'pagesCompleted',
+    'rawItemsCount',
+    'parsedItemsCount',
+    'rejectedItemsCount',
+  ];
+
+  for (const key of countKeys) {
+    const val = metrics[key];
+    if (val !== undefined) {
+      if (typeof val !== 'number' || !Number.isInteger(val) || !Number.isFinite(val) || val < 0) {
+        throw new Error(
+          `Metric '${key}' must be a non-negative finite integer, got: ${String(val)}`,
+        );
+      }
+    }
+  }
+
+  if (metrics.stopReason !== undefined) {
+    if (!VALID_STOP_REASONS.has(metrics.stopReason)) {
+      throw new Error(`Invalid stopReason: '${String(metrics.stopReason)}'`);
+    }
+  }
+}
+
 export class SqliteRunRepository implements RunRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
@@ -166,15 +212,48 @@ export class SqliteRunRepository implements RunRepository {
       const cleanError = sanitizeErrorMessage(rawError) ?? null;
 
       this.db.transaction((tx) => {
-        const stmt = tx.prepare(
-          `INSERT INTO runs (id, saved_search_id, status, started_at, finished_at, error)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET
-             status = excluded.status,
-             finished_at = excluded.finished_at,
-             error = excluded.error`,
+        const checkStmt = tx.prepare<RunRow, [string]>(
+          `SELECT id, saved_search_id, status, started_at, finished_at, error
+           FROM runs
+           WHERE id = ?`,
         );
-        stmt.run(run.id, run.savedSearchId, run.status, startedAtIso, finishedAtIso, cleanError);
+        const existing = checkStmt.get(run.id);
+
+        if (existing) {
+          const existingStartedAt = new Date(existing.started_at);
+          if (
+            existing.saved_search_id !== run.savedSearchId ||
+            existingStartedAt.getTime() !== run.startedAt.getTime()
+          ) {
+            throw new RunIdentityCollisionError({
+              runId: run.id,
+              existingSavedSearchId: existing.saved_search_id,
+              attemptingSavedSearchId: run.savedSearchId,
+              existingStartedAt,
+              attemptingStartedAt: run.startedAt,
+            });
+          }
+
+          const updateStmt = tx.prepare(
+            `UPDATE runs
+             SET status = ?, finished_at = ?, error = ?
+             WHERE id = ?`,
+          );
+          updateStmt.run(run.status, finishedAtIso, cleanError, run.id);
+        } else {
+          const insertStmt = tx.prepare(
+            `INSERT INTO runs (id, saved_search_id, status, started_at, finished_at, error)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          );
+          insertStmt.run(
+            run.id,
+            run.savedSearchId,
+            run.status,
+            startedAtIso,
+            finishedAtIso,
+            cleanError,
+          );
+        }
       });
 
       return Promise.resolve();
@@ -183,8 +262,18 @@ export class SqliteRunRepository implements RunRepository {
     }
   }
 
-  saveSourceRun(sourceRun: SourceRun, metadata?: SourceRunExecutionMetadata): Promise<void> {
+  saveSourceRun(sourceRun: SourceRun, metadata: SourceRunExecutionMetadata): Promise<void> {
     try {
+      if (
+        !metadata ||
+        typeof metadata.adapterVersion !== 'string' ||
+        metadata.adapterVersion.trim().length === 0
+      ) {
+        throw new Error('SourceRunExecutionMetadata.adapterVersion must be a non-empty string');
+      }
+      const adapterVersion = metadata.adapterVersion.trim();
+      validateMetrics(metadata.metrics);
+
       const startedAtIso = sourceRun.startedAt.toISOString();
       const finishedAtIso =
         'finishedAt' in sourceRun && sourceRun.finishedAt
@@ -197,55 +286,94 @@ export class SqliteRunRepository implements RunRepository {
           ? sourceRun.itemsCount
           : null;
       const collectorId = 'collectorId' in sourceRun ? (sourceRun.collectorId ?? null) : null;
-      const adapterVersion = metadata?.adapterVersion ?? null;
 
-      const pagesRequested = metadata?.metrics?.pagesRequested ?? null;
-      const pagesCompleted = metadata?.metrics?.pagesCompleted ?? null;
-      const rawItemsCount = metadata?.metrics?.rawItemsCount ?? null;
-      const parsedItemsCount = metadata?.metrics?.parsedItemsCount ?? null;
-      const rejectedItemsCount = metadata?.metrics?.rejectedItemsCount ?? null;
-      const stopReason = metadata?.metrics?.stopReason ?? null;
+      const pagesRequested = metadata.metrics?.pagesRequested ?? null;
+      const pagesCompleted = metadata.metrics?.pagesCompleted ?? null;
+      const rawItemsCount = metadata.metrics?.rawItemsCount ?? null;
+      const parsedItemsCount = metadata.metrics?.parsedItemsCount ?? null;
+      const rejectedItemsCount = metadata.metrics?.rejectedItemsCount ?? null;
+      const stopReason = metadata.metrics?.stopReason ?? null;
 
       this.db.transaction((tx) => {
-        const stmt = tx.prepare(
-          `INSERT INTO source_runs (
-            id, run_id, source_id, collector_id, adapter_version, status,
-            started_at, finished_at, items_count, error,
-            pages_requested, pages_completed, raw_items_count, parsed_items_count,
-            rejected_items_count, stop_reason
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            collector_id = excluded.collector_id,
-            adapter_version = excluded.adapter_version,
-            status = excluded.status,
-            finished_at = excluded.finished_at,
-            items_count = excluded.items_count,
-            error = excluded.error,
-            pages_requested = excluded.pages_requested,
-            pages_completed = excluded.pages_completed,
-            raw_items_count = excluded.raw_items_count,
-            parsed_items_count = excluded.parsed_items_count,
-            rejected_items_count = excluded.rejected_items_count,
-            stop_reason = excluded.stop_reason`,
+        const checkStmt = tx.prepare<
+          { id: string; run_id: string; source_id: string; started_at: string },
+          [string]
+        >(
+          `SELECT id, run_id, source_id, started_at
+           FROM source_runs
+           WHERE id = ?`,
         );
-        stmt.run(
-          sourceRun.id,
-          sourceRun.runId,
-          sourceRun.sourceId,
-          collectorId,
-          adapterVersion,
-          sourceRun.status,
-          startedAtIso,
-          finishedAtIso,
-          itemsCount,
-          cleanError,
-          pagesRequested,
-          pagesCompleted,
-          rawItemsCount,
-          parsedItemsCount,
-          rejectedItemsCount,
-          stopReason,
-        );
+        const existing = checkStmt.get(sourceRun.id);
+
+        if (existing) {
+          const existingStartedAt = new Date(existing.started_at);
+          if (
+            existing.run_id !== sourceRun.runId ||
+            existing.source_id !== sourceRun.sourceId ||
+            existingStartedAt.getTime() !== sourceRun.startedAt.getTime()
+          ) {
+            throw new SourceRunIdentityCollisionError({
+              sourceRunId: sourceRun.id,
+              existingRunId: existing.run_id,
+              attemptingRunId: sourceRun.runId,
+              existingSourceId: existing.source_id,
+              attemptingSourceId: sourceRun.sourceId,
+              existingStartedAt,
+              attemptingStartedAt: sourceRun.startedAt,
+            });
+          }
+
+          const updateStmt = tx.prepare(
+            `UPDATE source_runs
+             SET collector_id = ?, adapter_version = ?, status = ?, finished_at = ?,
+                 items_count = ?, error = ?, pages_requested = ?, pages_completed = ?,
+                 raw_items_count = ?, parsed_items_count = ?, rejected_items_count = ?,
+                 stop_reason = ?
+             WHERE id = ?`,
+          );
+          updateStmt.run(
+            collectorId,
+            adapterVersion,
+            sourceRun.status,
+            finishedAtIso,
+            itemsCount,
+            cleanError,
+            pagesRequested,
+            pagesCompleted,
+            rawItemsCount,
+            parsedItemsCount,
+            rejectedItemsCount,
+            stopReason,
+            sourceRun.id,
+          );
+        } else {
+          const insertStmt = tx.prepare(
+            `INSERT INTO source_runs (
+              id, run_id, source_id, collector_id, adapter_version, status,
+              started_at, finished_at, items_count, error,
+              pages_requested, pages_completed, raw_items_count, parsed_items_count,
+              rejected_items_count, stop_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          );
+          insertStmt.run(
+            sourceRun.id,
+            sourceRun.runId,
+            sourceRun.sourceId,
+            collectorId,
+            adapterVersion,
+            sourceRun.status,
+            startedAtIso,
+            finishedAtIso,
+            itemsCount,
+            cleanError,
+            pagesRequested,
+            pagesCompleted,
+            rawItemsCount,
+            parsedItemsCount,
+            rejectedItemsCount,
+            stopReason,
+          );
+        }
       });
 
       return Promise.resolve();
@@ -287,7 +415,8 @@ export class SqliteRunRepository implements RunRepository {
            COUNT(*) AS total_source_runs,
            SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) AS success_count,
            SUM(CASE WHEN status = 'ZERO_RESULTS_CONFIRMED' THEN 1 ELSE 0 END) AS zero_results_count,
-           SUM(CASE WHEN status NOT IN ('PENDING', 'RUNNING', 'SUCCESS', 'ZERO_RESULTS_CONFIRMED') THEN 1 ELSE 0 END) AS failed_count,
+           SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled_count,
+           SUM(CASE WHEN status NOT IN ('PENDING', 'RUNNING', 'SUCCESS', 'ZERO_RESULTS_CONFIRMED', 'CANCELLED') THEN 1 ELSE 0 END) AS failed_count,
            COALESCE(SUM(items_count), 0) AS total_items_count
          FROM source_runs
          WHERE run_id = ?`,
@@ -300,6 +429,7 @@ export class SqliteRunRepository implements RunRepository {
           successCount: 0,
           zeroResultsCount: 0,
           failedCount: 0,
+          cancelledCount: 0,
           totalItemsCount: 0,
         });
       }
@@ -310,6 +440,7 @@ export class SqliteRunRepository implements RunRepository {
         successCount: Number(row.success_count ?? 0),
         zeroResultsCount: Number(row.zero_results_count ?? 0),
         failedCount: Number(row.failed_count ?? 0),
+        cancelledCount: Number(row.cancelled_count ?? 0),
         totalItemsCount: Number(row.total_items_count ?? 0),
       });
     } catch (err) {
@@ -339,7 +470,7 @@ export class SqliteRunRepository implements RunRepository {
         row.stop_reason !== null;
 
       return Promise.resolve({
-        ...(row.adapter_version !== null ? { adapterVersion: row.adapter_version } : {}),
+        adapterVersion: row.adapter_version,
         ...(hasMetrics
           ? {
               metrics: {
@@ -358,7 +489,9 @@ export class SqliteRunRepository implements RunRepository {
                 ...(row.rejected_items_count !== null
                   ? { rejectedItemsCount: Number(row.rejected_items_count) }
                   : {}),
-                ...(row.stop_reason !== null ? { stopReason: row.stop_reason } : {}),
+                ...(row.stop_reason !== null
+                  ? { stopReason: row.stop_reason as SourceRunStopReason }
+                  : {}),
               },
             }
           : {}),

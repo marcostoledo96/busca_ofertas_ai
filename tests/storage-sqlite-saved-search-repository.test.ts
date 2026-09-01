@@ -4,7 +4,7 @@ import {
   openSqliteDatabase,
   SqliteSavedSearchRepository,
   StorageCorruptionError,
-  REDACTED_PLACEHOLDER,
+  SensitiveDataDetectedError,
 } from '@busca-ofertas-ai/storage-sqlite';
 import {
   createTempDatabaseContext,
@@ -220,7 +220,7 @@ describe('SqliteSavedSearchRepository (BOAI-011)', () => {
     });
   });
 
-  it('maintains append-only configuration revisions when a search is updated', async () => {
+  it('maintains append-only configuration revisions preserving full historical snapshots (Finding 3)', async () => {
     await withTempDatabase(async (db) => {
       db.migrate();
       const repo = new SqliteSavedSearchRepository(db);
@@ -230,92 +230,204 @@ describe('SqliteSavedSearchRepository (BOAI-011)', () => {
         ...minimalSearch,
         id: 'search-rev-test',
         name: 'Initial Name',
+        category: 'PRODUCT',
+        enabled: true,
         evaluation: { matchThreshold: 70, reviewThreshold: 30 },
+        createdAt: new Date('2026-08-30T10:00:00.000Z'),
         updatedAt: new Date('2026-08-30T10:00:00.000Z'),
       });
       await repo.save(v1);
 
-      // Revision 2: updated evaluation threshold
+      // Revision 2: updated name, category, and evaluation threshold
       const v2 = createSavedSearch({
         ...v1,
         name: 'Updated Name',
+        category: 'VEHICLE',
+        enabled: false,
         evaluation: { matchThreshold: 85, reviewThreshold: 45 },
         updatedAt: new Date('2026-08-30T11:00:00.000Z'),
       });
       await repo.save(v2);
 
-      // Revision 3: added query term
-      const v3 = createSavedSearch({
-        ...v2,
-        query: { terms: ['nintendo switch lite', 'switch oled'] },
-        updatedAt: new Date('2026-08-30T12:00:00.000Z'),
-      });
-      await repo.save(v3);
-
-      // Current state matches v3
+      // Current state matches v2
       const current = await repo.getById('search-rev-test');
       expect(current).not.toBeNull();
       expect(current!.name).toBe('Updated Name');
-      expect(current!.query.terms).toEqual(['nintendo switch lite', 'switch oled']);
+      expect(current!.category).toBe('VEHICLE');
+      expect(current!.enabled).toBe(false);
       expect(current!.evaluation.matchThreshold).toBe(85);
 
-      // Revisions history contains all 3 revisions in ascending order
+      // Revisions history contains both complete historical snapshots
       const revisions = await repo.listRevisions('search-rev-test');
-      expect(revisions.length).toBe(3);
+      expect(revisions.length).toBe(2);
 
-      expect(revisions[0]!.revisionNumber).toBe(1);
-      expect(revisions[0]!.savedSearchId).toBe('search-rev-test');
-      expect(revisions[0]!.recordedAt.toISOString()).toBe('2026-08-30T10:00:00.000Z');
+      // Revision 1 still reconstructs name = 'Initial Name', category = 'PRODUCT', enabled = true
+      const rev1 = revisions[0]!;
+      expect(rev1.revisionNumber).toBe(1);
+      expect(rev1.savedSearchId).toBe('search-rev-test');
+      expect(rev1.recordedAt).toEqual(new Date('2026-08-30T10:00:00.000Z'));
+      expect(rev1.snapshot.name).toBe('Initial Name');
+      expect(rev1.snapshot.category).toBe('PRODUCT');
+      expect(rev1.snapshot.enabled).toBe(true);
+      expect(rev1.snapshot.evaluation.matchThreshold).toBe(70);
+      expect(rev1.snapshot.createdAt).toBeInstanceOf(Date);
+      expect(rev1.snapshot.updatedAt).toBeInstanceOf(Date);
 
-      expect(revisions[1]!.revisionNumber).toBe(2);
-      expect(revisions[1]!.recordedAt.toISOString()).toBe('2026-08-30T11:00:00.000Z');
-
-      expect(revisions[2]!.revisionNumber).toBe(3);
-      expect(revisions[2]!.recordedAt.toISOString()).toBe('2026-08-30T12:00:00.000Z');
+      // Revision 2 reconstructs updated state
+      const rev2 = revisions[1]!;
+      expect(rev2.revisionNumber).toBe(2);
+      expect(rev2.recordedAt).toEqual(new Date('2026-08-30T11:00:00.000Z'));
+      expect(rev2.snapshot.name).toBe('Updated Name');
+      expect(rev2.snapshot.category).toBe('VEHICLE');
+      expect(rev2.snapshot.enabled).toBe(false);
+      expect(rev2.snapshot.evaluation.matchThreshold).toBe(85);
     });
   });
 
-  it('redacts sensitive secrets in options before persisting', async () => {
+  it('fails closed with StorageCorruptionError when revision JSON, date, or snapshot is corrupted (Finding 3)', async () => {
     await withTempDatabase(async (db) => {
       db.migrate();
       const repo = new SqliteSavedSearchRepository(db);
 
-      const searchWithSecrets = createSavedSearch({
+      const search = createSavedSearch({
         ...minimalSearch,
-        id: 'search-with-secrets',
+        id: 'search-corrupt-rev',
+        name: 'Valid Search',
+      });
+      await repo.save(search);
+
+      // 1. Corrupt revision JSON
+      db.prepare(
+        `UPDATE saved_search_revisions SET snapshot = '{CORRUPT_JSON' WHERE saved_search_id = ?`,
+      ).run('search-corrupt-rev');
+
+      await expect(repo.listRevisions('search-corrupt-rev')).rejects.toThrow(
+        StorageCorruptionError,
+      );
+
+      // 2. Corrupt recorded_at date
+      db.prepare(
+        `UPDATE saved_search_revisions SET snapshot = '{}', recorded_at = 'NOT_A_DATE' WHERE saved_search_id = ?`,
+      ).run('search-corrupt-rev');
+
+      await expect(repo.listRevisions('search-corrupt-rev')).rejects.toThrow(
+        StorageCorruptionError,
+      );
+
+      // 3. Corrupt historical domain invariants (matchThreshold < reviewThreshold)
+      db.prepare(
+        `UPDATE saved_search_revisions
+         SET snapshot = '{"id":"search-corrupt-rev","name":"S","schemaVersion":1,"enabled":true,"category":"PRODUCT","sourceConfigs":[{"id":"fb","enabled":true,"queries":["test"]}],"query":{"terms":["test"]},"evaluation":{"matchThreshold":20,"reviewThreshold":80},"ai":{"enabled":false,"evaluateOnlyReview":true,"requireConfirmation":true,"maxEvaluationsPerRun":10},"retention":{"rawArtifacts":"NONE","rawDataDays":10},"createdAt":"2026-08-30T10:00:00.000Z","updatedAt":"2026-08-30T10:00:00.000Z"}',
+             recorded_at = '2026-08-30T10:00:00.000Z'
+         WHERE saved_search_id = ?`,
+      ).run('search-corrupt-rev');
+
+      await expect(repo.listRevisions('search-corrupt-rev')).rejects.toThrow(
+        StorageCorruptionError,
+      );
+    });
+  });
+
+  it('preserves exact semantic round-trip for legitimate options without silent modification (Finding 4)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const repo = new SqliteSavedSearchRepository(db);
+
+      const legitimateSearch = createSavedSearch({
+        ...minimalSearch,
+        id: 'search-legit-options',
         sourceConfigs: [
           {
             id: 'fb-marketplace',
             enabled: true,
-            queries: ['nintendo switch lite'],
+            queries: ['nintendo switch'],
             options: {
-              safeField: 'normal value',
-              apiKey: 'test-key-123',
+              authMode: 'interactive',
+              sessionRequired: true,
+              authenticationStrategy: 'manual',
               nested: {
-                auth_token: 'test-token-456',
-                cookieHeader: 'session=xyz',
-                password: 'test-password-789',
+                deepSetting: 42,
+                allowedFlag: true,
               },
             },
-            sessionRef: 'opaque-session-pointer-id',
+            sessionRef: 'opaque-session-ref-id',
           },
         ],
       });
 
-      await repo.save(searchWithSecrets);
+      await repo.save(legitimateSearch);
 
-      // Raw SQL payload inspection
-      const row = db
-        .prepare<{ payload: string }, [string]>('SELECT payload FROM saved_searches WHERE id = ?')
-        .get('search-with-secrets');
+      const retrieved = await repo.getById('search-legit-options');
+      expect(retrieved).not.toBeNull();
+      const options = retrieved!.sourceConfigs[0]!.options;
 
-      expect(row).toBeDefined();
-      expect(row!.payload).not.toContain('super-secret-api-key-12345');
-      expect(row!.payload).not.toContain('plain_password');
-      expect(row!.payload).toContain(REDACTED_PLACEHOLDER);
+      // MUST NOT be mutated or replaced with [REDACTED]
+      expect(options).toEqual({
+        authMode: 'interactive',
+        sessionRequired: true,
+        authenticationStrategy: 'manual',
+        nested: {
+          deepSetting: 42,
+          allowedFlag: true,
+        },
+      });
 
-      // Opaque sessionRef is preserved
-      expect(row!.payload).toContain('opaque-session-pointer-id');
+      // sessionRef is preserved as opaque pointer
+      expect(retrieved!.sourceConfigs[0]!.sessionRef).toBe('opaque-session-ref-id');
+    });
+  });
+
+  it('detects forbidden secrets in options, throws SensitiveDataDetectedError, and writes 0 rows (Finding 4)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const repo = new SqliteSavedSearchRepository(db);
+
+      const forbiddenConfigs = [
+        {
+          desc: 'forbidden password',
+          options: { password: 'test-user-pass' },
+        },
+        {
+          desc: 'forbidden apiKey',
+          options: { apiKey: 'test-api-key' },
+        },
+        {
+          desc: 'forbidden authToken',
+          options: { nested: { auth_token: 'test-token' } },
+        },
+        {
+          desc: 'forbidden cookieHeader',
+          options: { cookieHeader: 'session=xyz' },
+        },
+      ];
+
+      for (let i = 0; i < forbiddenConfigs.length; i++) {
+        const item = forbiddenConfigs[i]!;
+        const searchId = `search-secret-${i}`;
+        const searchWithSecret = createSavedSearch({
+          ...minimalSearch,
+          id: searchId,
+          sourceConfigs: [
+            {
+              id: 'fb-marketplace',
+              enabled: true,
+              queries: ['test'],
+              options: item.options,
+            },
+          ],
+        });
+
+        await expect(repo.save(searchWithSecret)).rejects.toThrow(SensitiveDataDetectedError);
+
+        // Verify 0 rows in saved_searches and 0 rows in saved_search_revisions
+        const searchRow = db.prepare('SELECT id FROM saved_searches WHERE id = ?').get(searchId);
+        expect(searchRow).toBeUndefined();
+
+        const revRow = db
+          .prepare('SELECT id FROM saved_search_revisions WHERE saved_search_id = ?')
+          .get(searchId);
+        expect(revRow).toBeUndefined();
+      }
     });
   });
 
@@ -344,7 +456,7 @@ describe('SqliteSavedSearchRepository (BOAI-011)', () => {
         ) VALUES (
           'corrupt-search-2', 1, 'Invalid Invariants Search', 'PRODUCT', 1,
           '2026-08-30T10:00:00.000Z', '2026-08-30T10:00:00.000Z',
-          '{"sourceConfigs":[{"id":"fb","enabled":true,"queries":["test"]}],"query":{"terms":["test"]},"evaluation":{"matchThreshold":30,"reviewThreshold":80},"ai":{"enabled":false,"evaluateOnlyReview":true,"requireConfirmation":true,"maxEvaluationsPerRun":10},"retention":{"rawArtifacts":"NONE","rawDataDays":10}}'
+          '{"id":"corrupt-search-2","schemaVersion":1,"name":"Invalid Invariants Search","enabled":true,"category":"PRODUCT","sourceConfigs":[{"id":"fb","enabled":true,"queries":["test"]}],"query":{"terms":["test"]},"evaluation":{"matchThreshold":30,"reviewThreshold":80},"ai":{"enabled":false,"evaluateOnlyReview":true,"requireConfirmation":true,"maxEvaluationsPerRun":10},"retention":{"rawArtifacts":"NONE","rawDataDays":10},"createdAt":"2026-08-30T10:00:00.000Z","updatedAt":"2026-08-30T10:00:00.000Z"}'
         );
       `);
 
@@ -362,7 +474,7 @@ describe('SqliteSavedSearchRepository (BOAI-011)', () => {
         ) VALUES (
           'corrupt-date-search', 1, 'Corrupt Date', 'PRODUCT', 1,
           'NOT_A_DATE', '2026-08-30T10:00:00.000Z',
-          '{"sourceConfigs":[{"id":"fb","enabled":true,"queries":["test"]}],"query":{"terms":["test"]},"evaluation":{"matchThreshold":80,"reviewThreshold":40},"ai":{"enabled":false,"evaluateOnlyReview":true,"requireConfirmation":true,"maxEvaluationsPerRun":10},"retention":{"rawArtifacts":"NONE","rawDataDays":10}}'
+          '{"id":"corrupt-date-search","schemaVersion":1,"name":"Corrupt Date","enabled":true,"category":"PRODUCT","sourceConfigs":[{"id":"fb","enabled":true,"queries":["test"]}],"query":{"terms":["test"]},"evaluation":{"matchThreshold":80,"reviewThreshold":40},"ai":{"enabled":false,"evaluateOnlyReview":true,"requireConfirmation":true,"maxEvaluationsPerRun":10},"retention":{"rawArtifacts":"NONE","rawDataDays":10},"createdAt":"2026-08-30T10:00:00.000Z","updatedAt":"2026-08-30T10:00:00.000Z"}'
         );
       `);
 

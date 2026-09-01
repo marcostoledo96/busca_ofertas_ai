@@ -6,6 +6,8 @@ export {
   type TransactionErrorCode,
   type ExecutionLockHeldDetails,
   type ListingIdentityCollisionDetails,
+  type RunIdentityCollisionDetails,
+  type SourceRunIdentityCollisionDetails,
   SqliteStorageError,
   DatabaseOpenFailedError,
   DatabaseClosedError,
@@ -21,6 +23,8 @@ export {
   ExecutionLockHeldError,
   ExecutionLockReleaseError,
   ListingIdentityCollisionError,
+  RunIdentityCollisionError,
+  SourceRunIdentityCollisionError,
   SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './storage-errors.js';

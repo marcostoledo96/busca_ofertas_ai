@@ -7,7 +7,7 @@ import {
 } from '@busca-ofertas-ai/core';
 import type { SqliteDatabase } from '../database/types.js';
 import { StorageCorruptionError } from '../errors/storage-errors.js';
-import { sanitizeObject } from '../sanitization/sanitizer.js';
+import { validateNoSensitiveData } from '../sanitization/secret-detector.js';
 
 interface SavedSearchRow {
   readonly id: string;
@@ -29,16 +29,23 @@ interface SavedSearchRevisionRow {
   readonly recorded_at: string;
 }
 
-interface SavedSearchPayloadShape {
+interface CanonicalSavedSearchSnapshot {
+  readonly id?: string;
+  readonly schemaVersion?: number;
+  readonly name?: string;
+  readonly enabled?: boolean;
+  readonly category?: SavedSearch['category'];
   readonly sourceConfigs?: SavedSearch['sourceConfigs'];
   readonly query?: SavedSearch['query'];
-  readonly price?: SavedSearch['price'];
-  readonly location?: SavedSearch['location'];
-  readonly condition?: SavedSearch['condition'];
+  readonly price?: SavedSearch['price'] | null;
+  readonly location?: SavedSearch['location'] | null;
+  readonly condition?: SavedSearch['condition'] | null;
   readonly rules?: SavedSearch['rules'];
   readonly evaluation?: SavedSearch['evaluation'];
   readonly ai?: SavedSearch['ai'];
   readonly retention?: SavedSearch['retention'];
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
 }
 
 function toError(err: unknown): Error {
@@ -48,68 +55,126 @@ function toError(err: unknown): Error {
 function parseIsoDate(isoString: unknown, fieldName: string, id: string): Date {
   if (typeof isoString !== 'string') {
     throw new StorageCorruptionError(
-      `Corrupted persisted SavedSearch '${id}': '${fieldName}' must be a string, got ${typeof isoString}`,
+      `Corrupted persisted SavedSearch in '${id}': '${fieldName}' must be a string, got ${typeof isoString}`,
     );
   }
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) {
     throw new StorageCorruptionError(
-      `Corrupted persisted SavedSearch '${id}': '${fieldName}' is not a valid ISO date ('${isoString}')`,
+      `Corrupted persisted SavedSearch in '${id}': '${fieldName}' is not a valid ISO date ('${isoString}')`,
     );
   }
   return date;
 }
 
-function rehydrateSavedSearch(row: SavedSearchRow): SavedSearch {
-  let parsedPayload: unknown;
+function serializeSavedSearch(savedSearch: SavedSearch): string {
+  const snapshot: CanonicalSavedSearchSnapshot = {
+    id: savedSearch.id,
+    schemaVersion: savedSearch.schemaVersion,
+    name: savedSearch.name,
+    enabled: savedSearch.enabled,
+    category: savedSearch.category,
+    sourceConfigs: savedSearch.sourceConfigs,
+    query: savedSearch.query,
+    price: savedSearch.price ?? null,
+    location: savedSearch.location ?? null,
+    condition: savedSearch.condition ?? null,
+    rules: savedSearch.rules ?? [],
+    evaluation: savedSearch.evaluation,
+    ai: savedSearch.ai,
+    retention: savedSearch.retention,
+    createdAt: savedSearch.createdAt.toISOString(),
+    updatedAt: savedSearch.updatedAt.toISOString(),
+  };
+  return JSON.stringify(snapshot);
+}
+
+function rehydrateSavedSearchFromSnapshot(
+  rawJson: string,
+  entityContext: string,
+  fallbackRow?: SavedSearchRow,
+): SavedSearch {
+  let parsed: unknown;
   try {
-    parsedPayload = JSON.parse(row.payload);
+    parsed = JSON.parse(rawJson);
   } catch (err) {
     throw new StorageCorruptionError(
-      `Corrupted persisted SavedSearch '${row.id}': invalid JSON payload`,
+      `Corrupted persisted SavedSearch in '${entityContext}': invalid JSON payload`,
       { cause: err },
     );
   }
 
-  if (typeof parsedPayload !== 'object' || parsedPayload === null) {
+  if (typeof parsed !== 'object' || parsed === null) {
     throw new StorageCorruptionError(
-      `Corrupted persisted SavedSearch '${row.id}': JSON payload is not an object`,
+      `Corrupted persisted SavedSearch in '${entityContext}': snapshot is not an object`,
     );
   }
 
-  const payload = parsedPayload as SavedSearchPayloadShape;
+  const data = parsed as CanonicalSavedSearchSnapshot;
 
   try {
-    const createdAt = parseIsoDate(row.created_at, 'created_at', row.id);
-    const updatedAt = parseIsoDate(row.updated_at, 'updated_at', row.id);
+    const id =
+      typeof data.id === 'string'
+        ? data.id
+        : (fallbackRow?.id ?? entityContext.replace(/^revision:/, ''));
+
+    if (fallbackRow) {
+      parseIsoDate(fallbackRow.created_at, 'created_at', id);
+      parseIsoDate(fallbackRow.updated_at, 'updated_at', id);
+    }
+
+    const rawCreatedAt = data.createdAt ?? fallbackRow?.created_at;
+    const rawUpdatedAt = data.updatedAt ?? fallbackRow?.updated_at;
+
+    const createdAt = parseIsoDate(rawCreatedAt, 'createdAt', id);
+    const updatedAt = parseIsoDate(rawUpdatedAt, 'updatedAt', id);
+
+    const schemaVersion =
+      typeof data.schemaVersion === 'number'
+        ? data.schemaVersion
+        : (fallbackRow?.schema_version ?? 1);
+
+    const name = typeof data.name === 'string' ? data.name : (fallbackRow?.name ?? '');
+
+    const enabled =
+      typeof data.enabled === 'boolean'
+        ? data.enabled
+        : fallbackRow
+          ? fallbackRow.enabled === 1
+          : true;
+
+    const category = (
+      typeof data.category === 'string' ? data.category : (fallbackRow?.category ?? 'PRODUCT')
+    ) as SavedSearch['category'];
 
     if (
-      !payload.sourceConfigs ||
-      !payload.query ||
-      !payload.evaluation ||
-      !payload.ai ||
-      !payload.retention
+      !data.sourceConfigs ||
+      !data.query ||
+      !data.evaluation ||
+      !data.ai ||
+      !data.retention ||
+      !name
     ) {
       throw new StorageCorruptionError(
-        `Corrupted persisted SavedSearch '${row.id}': missing required payload fields`,
+        `Corrupted persisted SavedSearch in '${entityContext}': missing required domain fields`,
       );
     }
 
     const params: CreateSavedSearchParams = {
-      id: row.id,
-      schemaVersion: row.schema_version,
-      name: row.name,
-      enabled: row.enabled === 1,
-      category: row.category as SavedSearch['category'],
-      sourceConfigs: payload.sourceConfigs,
-      query: payload.query,
-      price: payload.price ?? null,
-      location: payload.location ?? null,
-      condition: payload.condition ?? null,
-      rules: payload.rules ?? [],
-      evaluation: payload.evaluation,
-      ai: payload.ai,
-      retention: payload.retention,
+      id,
+      schemaVersion,
+      name,
+      enabled,
+      category,
+      sourceConfigs: data.sourceConfigs,
+      query: data.query,
+      price: data.price ?? null,
+      location: data.location ?? null,
+      condition: data.condition ?? null,
+      rules: data.rules ?? [],
+      evaluation: data.evaluation,
+      ai: data.ai,
+      retention: data.retention,
       createdAt,
       updatedAt,
     };
@@ -120,7 +185,7 @@ function rehydrateSavedSearch(row: SavedSearchRow): SavedSearch {
       throw err;
     }
     throw new StorageCorruptionError(
-      `Corrupted persisted SavedSearch '${row.id}': domain rehydration failed: ${err instanceof Error ? err.message : String(err)}`,
+      `Corrupted persisted SavedSearch in '${entityContext}': domain invariant violation: ${err instanceof Error ? err.message : String(err)}`,
       { cause: err },
     );
   }
@@ -140,7 +205,7 @@ export class SqliteSavedSearchRepository implements SavedSearchRepository {
       if (!row) {
         return Promise.resolve(null);
       }
-      return Promise.resolve(rehydrateSavedSearch(row));
+      return Promise.resolve(rehydrateSavedSearchFromSnapshot(row.payload, row.id, row));
     } catch (err) {
       return Promise.reject(toError(err));
     }
@@ -155,7 +220,9 @@ export class SqliteSavedSearchRepository implements SavedSearchRepository {
          ORDER BY created_at ASC, id ASC`,
       );
       const rows = stmt.all();
-      return Promise.resolve(rows.map((row) => rehydrateSavedSearch(row)));
+      return Promise.resolve(
+        rows.map((row) => rehydrateSavedSearchFromSnapshot(row.payload, row.id, row)),
+      );
     } catch (err) {
       return Promise.reject(toError(err));
     }
@@ -163,34 +230,22 @@ export class SqliteSavedSearchRepository implements SavedSearchRepository {
 
   save(savedSearch: SavedSearch): Promise<void> {
     try {
-      // Defense-in-depth: sanitize any sensitive option fields before serialization
-      const sanitizedSourceConfigs = savedSearch.sourceConfigs.map((cfg) => ({
-        id: cfg.id,
-        enabled: cfg.enabled,
-        queries: [...cfg.queries],
-        ...(cfg.options !== undefined ? { options: sanitizeObject(cfg.options) } : {}),
-        ...(cfg.sessionRef !== undefined ? { sessionRef: cfg.sessionRef } : {}),
-      }));
+      // 1. Defensively inspect options before opening the transaction or writing rows.
+      // If any sensitive secret data is present, throw SensitiveDataDetectedError (fail-closed, 0 mutations).
+      for (const cfg of savedSearch.sourceConfigs) {
+        if (cfg.options !== undefined) {
+          validateNoSensitiveData(cfg.options, `sourceConfigs.${cfg.id}.options`);
+        }
+      }
 
-      const payloadObj = {
-        sourceConfigs: sanitizedSourceConfigs,
-        query: savedSearch.query,
-        price: savedSearch.price,
-        location: savedSearch.location,
-        condition: savedSearch.condition,
-        rules: savedSearch.rules,
-        evaluation: savedSearch.evaluation,
-        ai: savedSearch.ai,
-        retention: savedSearch.retention,
-      };
-
-      const payloadJson = JSON.stringify(payloadObj);
+      // 2. Canonical serialization of the complete SavedSearch (exact semantic round-trip).
+      const payloadJson = serializeSavedSearch(savedSearch);
       const createdAtIso = savedSearch.createdAt.toISOString();
       const updatedAtIso = savedSearch.updatedAt.toISOString();
       const enabledInt = savedSearch.enabled ? 1 : 0;
 
       this.db.transaction((tx) => {
-        // 1. Upsert into saved_searches
+        // 3. Upsert into saved_searches
         const upsertStmt = tx.prepare(
           `INSERT INTO saved_searches (
             id, schema_version, name, category, enabled, created_at, updated_at, payload
@@ -214,7 +269,7 @@ export class SqliteSavedSearchRepository implements SavedSearchRepository {
           payloadJson,
         );
 
-        // 2. Query next revision number
+        // 4. Query next revision number
         const maxRevStmt = tx.prepare<{ max_rev: number }, [string]>(
           `SELECT COALESCE(MAX(revision_number), 0) AS max_rev
            FROM saved_search_revisions
@@ -224,7 +279,7 @@ export class SqliteSavedSearchRepository implements SavedSearchRepository {
         const nextRevNumber = (maxRevRow ? Number(maxRevRow.max_rev) : 0) + 1;
         const revisionId = `${savedSearch.id}_rev_${nextRevNumber}`;
 
-        // 3. Insert append-only revision record
+        // 5. Insert complete append-only revision record
         const revisionInsertStmt = tx.prepare(
           `INSERT INTO saved_search_revisions (
             id, saved_search_id, revision_number, schema_version, snapshot, recorded_at
@@ -256,20 +311,17 @@ export class SqliteSavedSearchRepository implements SavedSearchRepository {
       );
       const rows = stmt.all(savedSearchId);
 
-      const mapped = rows.map((row) => {
-        let snapshotParsed: unknown;
-        try {
-          snapshotParsed = JSON.parse(row.snapshot);
-        } catch {
-          snapshotParsed = row.snapshot;
-        }
+      const mapped: SavedSearchRevisionRecord[] = rows.map((row) => {
+        const recordedAt = parseIsoDate(row.recorded_at, 'recorded_at', row.id);
+        const snapshot = rehydrateSavedSearchFromSnapshot(row.snapshot, `revision:${row.id}`);
+
         return {
           id: row.id,
           savedSearchId: row.saved_search_id,
           revisionNumber: Number(row.revision_number),
           schemaVersion: Number(row.schema_version),
-          recordedAt: new Date(row.recorded_at),
-          snapshot: snapshotParsed,
+          recordedAt,
+          snapshot,
         };
       });
 

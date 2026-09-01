@@ -14,6 +14,8 @@ export {
   type TransactionErrorCode,
   type ExecutionLockHeldDetails,
   type ListingIdentityCollisionDetails,
+  type RunIdentityCollisionDetails,
+  type SourceRunIdentityCollisionDetails,
   SqliteStorageError,
   DatabaseOpenFailedError,
   DatabaseClosedError,
@@ -29,6 +31,8 @@ export {
   ExecutionLockHeldError,
   ExecutionLockReleaseError,
   ListingIdentityCollisionError,
+  RunIdentityCollisionError,
+  SourceRunIdentityCollisionError,
   SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './errors/index.js';
@@ -66,6 +70,7 @@ export {
   sanitizeErrorMessage,
   sanitizeObject,
 } from './sanitization/sanitizer.js';
+export { validateNoSensitiveData } from './sanitization/secret-detector.js';
 
 // Repositories and concurrency control
 export {

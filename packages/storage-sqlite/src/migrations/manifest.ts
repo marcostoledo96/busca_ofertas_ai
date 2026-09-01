@@ -74,7 +74,7 @@ const prodMigration002: Migration = Object.freeze({
         run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE RESTRICT,
         source_id TEXT NOT NULL,
         collector_id TEXT,
-        adapter_version TEXT,
+        adapter_version TEXT NOT NULL CHECK(length(trim(adapter_version)) > 0),
         status TEXT NOT NULL CHECK(status IN (
           'PENDING',
           'RUNNING',
@@ -101,6 +101,14 @@ const prodMigration002: Migration = Object.freeze({
         parsed_items_count INTEGER,
         rejected_items_count INTEGER,
         stop_reason TEXT,
+        CONSTRAINT chk_source_runs_metrics CHECK (
+          (pages_requested IS NULL OR (pages_requested >= 0 AND pages_requested = round(pages_requested))) AND
+          (pages_completed IS NULL OR (pages_completed >= 0 AND pages_completed = round(pages_completed))) AND
+          (raw_items_count IS NULL OR (raw_items_count >= 0 AND raw_items_count = round(raw_items_count))) AND
+          (parsed_items_count IS NULL OR (parsed_items_count >= 0 AND parsed_items_count = round(parsed_items_count))) AND
+          (rejected_items_count IS NULL OR (rejected_items_count >= 0 AND rejected_items_count = round(rejected_items_count))) AND
+          (stop_reason IS NULL OR stop_reason IN ('COMPLETED', 'PAGES_LIMIT_REACHED', 'ITEMS_LIMIT_REACHED', 'EMPTY_PAGE', 'STOP_REQUESTED', 'RATE_LIMITED', 'ERROR'))
+        ),
         CONSTRAINT chk_source_runs_status_consistency CHECK (
           (status IN ('PENDING', 'RUNNING') AND finished_at IS NULL AND items_count IS NULL AND error IS NULL) OR
           (status = 'SUCCESS' AND finished_at IS NOT NULL AND items_count IS NOT NULL AND items_count >= 0 AND error IS NULL) OR
@@ -141,8 +149,10 @@ const prodMigration002: Migration = Object.freeze({
       CREATE TABLE IF NOT EXISTS execution_lock (
         lock_key TEXT PRIMARY KEY,
         holder_id TEXT NOT NULL,
+        lock_token TEXT NOT NULL,
         acquired_at TEXT NOT NULL,
-        metadata TEXT
+        metadata TEXT,
+        CONSTRAINT chk_execution_lock_singleton CHECK (lock_key = 'EXECUTION_LOCK')
       );
     `);
   },
