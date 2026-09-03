@@ -32,6 +32,7 @@
     "@busca-ofertas-ai/cli": "workspace:*",
     "@busca-ofertas-ai/configuration": "workspace:*",
     "@busca-ofertas-ai/core": "workspace:*",
+    "@busca-ofertas-ai/report-html": "workspace:*",
     "@busca-ofertas-ai/storage-sqlite": "workspace:*",
     "@eslint/js": "^9.21.0",
     "@types/node": "^22.13.5",

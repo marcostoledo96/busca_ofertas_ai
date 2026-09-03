@@ -169,4 +169,18 @@ export {
   NodeXdgReportOpener,
   type FakeReportOpenerOptions,
   FakeReportOpener,
+  PRIVATE_REPORT_FILE_MODE,
+  type PersistReportHtmlOptions,
+  type PersistedReportLocation,
+  generateSearchSlug,
+  sanitizeShortRunId,
+  formatRunTimestamp,
+  persistReportHtml,
 } from './platform/index.js';
+
+// Reporting Orchestration
+export {
+  type GenerateAndOpenReportOptions,
+  type GenerateAndOpenReportResult,
+  generateAndOpenReport,
+} from './reporting/index.js';

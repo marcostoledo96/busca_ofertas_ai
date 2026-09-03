@@ -23,6 +23,9 @@ importers:
       '@busca-ofertas-ai/core':
         specifier: workspace:*
         version: link:packages/core
+      '@busca-ofertas-ai/report-html':
+        specifier: workspace:*
+        version: link:packages/report-html
       '@busca-ofertas-ai/storage-sqlite':
         specifier: workspace:*
         version: link:packages/storage-sqlite
@@ -74,6 +77,9 @@ importers:
       '@busca-ofertas-ai/configuration':
         specifier: workspace:*
         version: link:../../packages/configuration
+      '@busca-ofertas-ai/report-html':
+        specifier: workspace:*
+        version: link:../../packages/report-html
 
   packages/adapter-sdk:
     dependencies:
@@ -101,6 +107,8 @@ importers:
         version: 3.25.76
 
   packages/core: {}
+
+  packages/report-html: {}
 
   packages/storage-sqlite:
     dependencies:
