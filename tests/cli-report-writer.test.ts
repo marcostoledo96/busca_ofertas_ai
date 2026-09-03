@@ -48,11 +48,11 @@ describe('apps/cli — Report Persistence and Reporting Service', () => {
       expect(generateSearchSlug('!!!///???')).toBe('busqueda');
     });
 
-    it('derives deterministic, unique run ID segments incorporating digest of full ID', () => {
+    it('derives deterministic, cryptographically collision-resistant run ID segments incorporating full 64-hex SHA-256 digest', () => {
       const id1 = sanitizeShortRunId('run-12345');
       const id2 = sanitizeShortRunId('run-12345');
       expect(id1).toBe(id2);
-      expect(id1).toMatch(/^run-12345-[a-f0-9]{8}$/);
+      expect(id1).toMatch(/^run-12345-[a-f0-9]{64}$/);
 
       // Distinct IDs sharing the same first 16 safe chars produce DIFFERENT segments
       const runA = sanitizeShortRunId('run-aaaaaaaaaaaa-111');
@@ -68,10 +68,10 @@ describe('apps/cli — Report Persistence and Reporting Service', () => {
       const traversal = sanitizeShortRunId('../../etc/passwd');
       expect(traversal).not.toContain('/');
       expect(traversal).not.toContain('..');
-      expect(traversal).toMatch(/^etc_passwd-[a-f0-9]{8}$/);
+      expect(traversal).toMatch(/^etc_passwd-[a-f0-9]{64}$/);
 
-      expect(sanitizeShortRunId('')).toMatch(/^run-[a-f0-9]{8}$/);
-      expect(sanitizeShortRunId('   ')).toMatch(/^run-[a-f0-9]{8}$/);
+      expect(sanitizeShortRunId('')).toMatch(/^run-[a-f0-9]{64}$/);
+      expect(sanitizeShortRunId('   ')).toMatch(/^run-[a-f0-9]{64}$/);
     });
 
     it('formats timestamps deterministically in UTC as YYYY-MM-DD_HH-mm-ss', () => {
@@ -205,6 +205,34 @@ describe('apps/cli — Report Persistence and Reporting Service', () => {
         htmlContent: '<h1>Run Norm 2</h1>',
       });
       expect(resNorm1.reportDirectory).not.toBe(resNorm2.reportDirectory);
+    });
+
+    it('prevents 32-bit digest collision between run-collision-132593 and run-collision-142896', async () => {
+      const a = 'run-collision-132593';
+      const b = 'run-collision-142896';
+
+      expect(sanitizeShortRunId(a)).not.toBe(sanitizeShortRunId(b));
+
+      const resA = await persistReportHtml({
+        reportsDir: tempReportsDir,
+        searchName: 'Nintendo Switch Lite',
+        runId: a,
+        startedAt: '2026-09-03T12:00:00.000Z',
+        htmlContent: '<h1>Report A</h1>',
+      });
+
+      const resB = await persistReportHtml({
+        reportsDir: tempReportsDir,
+        searchName: 'Nintendo Switch Lite',
+        runId: b,
+        startedAt: '2026-09-03T12:00:00.000Z',
+        htmlContent: '<h1>Report B</h1>',
+      });
+
+      expect(resA.reportDirectory).not.toBe(resB.reportDirectory);
+      expect(resA.reportPath).not.toBe(resB.reportPath);
+      expect(await fs.promises.readFile(resA.reportPath, 'utf-8')).toBe('<h1>Report A</h1>');
+      expect(await fs.promises.readFile(resB.reportPath, 'utf-8')).toBe('<h1>Report B</h1>');
     });
 
     it('rejects persistReportHtml with invalid startedAt and creates zero report files', async () => {

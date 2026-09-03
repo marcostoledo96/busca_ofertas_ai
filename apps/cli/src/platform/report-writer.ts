@@ -46,12 +46,12 @@ export function generateSearchSlug(searchName: string): string {
 
 /**
  * Derives a deterministic, filesystem-safe run ID segment from the complete original runId.
- * Incorporates a human-readable safe prefix and a stable SHA-256 digest of the entire ID,
- * preventing collisions between different IDs sharing prefixes or normalizing identically.
+ * Incorporates a human-readable safe prefix and the complete 64-hex SHA-256 digest of the entire ID,
+ * providing deterministic cryptographic collision resistance while preserving a readable safe prefix.
  */
 export function sanitizeShortRunId(runId: string): string {
   if (!runId || typeof runId !== 'string') {
-    return 'run-e3b0c442';
+    return 'run-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
   }
 
   const safePrefix = runId
@@ -60,7 +60,7 @@ export function sanitizeShortRunId(runId: string): string {
     .slice(0, 12);
 
   const prefix = safePrefix.length > 0 ? safePrefix : 'run';
-  const digest = crypto.createHash('sha256').update(runId, 'utf8').digest('hex').slice(0, 8);
+  const digest = crypto.createHash('sha256').update(runId, 'utf8').digest('hex');
   return `${prefix}-${digest}`;
 }
 
