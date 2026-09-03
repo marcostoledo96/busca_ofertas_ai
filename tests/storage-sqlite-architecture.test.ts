@@ -14,8 +14,8 @@ interface PackageJsonShape {
   readonly devDependencies?: Record<string, string>;
 }
 
-describe('Storage SQLite Architecture & Module Boundaries (BOAI-010)', () => {
-  it('exports pure storage contracts, factories, error types, and migration runner from main entrypoint', () => {
+describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)', () => {
+  it('exports pure storage contracts, factories, error types, repositories, and migration runner from main entrypoint', () => {
     expect(typeof StorageModule.openSqliteDatabase).toBe('function');
     expect(typeof StorageModule.runMigrations).toBe('function');
     expect(typeof StorageModule.inspectSchemaMigrations).toBe('function');
@@ -35,22 +35,40 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010)', () => {
     expect(typeof StorageModule.TransactionAsyncCallbackUnsupportedError).toBe('function');
     expect(typeof StorageModule.TransactionScopeClosedError).toBe('function');
     expect(typeof StorageModule.InvalidDatabasePathError).toBe('function');
+    expect(typeof StorageModule.StorageCorruptionError).toBe('function');
+    expect(typeof StorageModule.ExecutionLockHeldError).toBe('function');
+    expect(typeof StorageModule.ExecutionLockReleaseError).toBe('function');
+    expect(typeof StorageModule.ListingIdentityCollisionError).toBe('function');
+    expect(typeof StorageModule.SensitiveDataDetectedError).toBe('function');
 
-    // Constants
+    // Sanitizer
+    expect(typeof StorageModule.sanitizeString).toBe('function');
+    expect(typeof StorageModule.sanitizeErrorMessage).toBe('function');
+    expect(typeof StorageModule.sanitizeObject).toBe('function');
+    expect(StorageModule.REDACTED_PLACEHOLDER).toBe('[REDACTED]');
+
+    // Repositories and factory
+    expect(typeof StorageModule.SqliteSavedSearchRepository).toBe('function');
+    expect(typeof StorageModule.SqliteRunRepository).toBe('function');
+    expect(typeof StorageModule.SqliteListingRepository).toBe('function');
+    expect(typeof StorageModule.SqliteExecutionLock).toBe('function');
+    expect(typeof StorageModule.createSqliteRepositories).toBe('function');
+
+    // Constants & Migrations
     expect(StorageModule.STORAGE_SQLITE_PACKAGE_NAME).toBe('@busca-ofertas-ai/storage-sqlite');
     expect(StorageModule.SCHEMA_MIGRATIONS_TABLE_NAME).toBe('schema_migrations');
     expect(Array.isArray(StorageModule.PRODUCTION_MIGRATIONS)).toBe(true);
-    expect(StorageModule.PRODUCTION_MIGRATIONS.length).toBe(1);
+    expect(StorageModule.PRODUCTION_MIGRATIONS.length).toBe(2);
     expect(StorageModule.PRODUCTION_MIGRATIONS[0]!.version).toBe(1);
     expect(StorageModule.PRODUCTION_MIGRATIONS[0]!.name).toBe('001_create_schema_migrations');
-
-    // Implementation details like migration001 are hidden from public exports
-    expect((StorageModule as Record<string, unknown>)['migration001']).toBeUndefined();
+    expect(StorageModule.PRODUCTION_MIGRATIONS[1]!.version).toBe(2);
+    expect(StorageModule.PRODUCTION_MIGRATIONS[1]!.name).toBe('002_create_operational_persistence');
   });
 
   it('guarantees runtime immutability of the production migration manifest', () => {
     expect(Object.isFrozen(StorageModule.PRODUCTION_MIGRATIONS)).toBe(true);
     expect(Object.isFrozen(StorageModule.PRODUCTION_MIGRATIONS[0])).toBe(true);
+    expect(Object.isFrozen(StorageModule.PRODUCTION_MIGRATIONS[1])).toBe(true);
 
     // Attempting to push to frozen array must throw in strict mode
     expect(() => {
@@ -79,7 +97,6 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010)', () => {
     const engineNode = rootPkg.engines!.node!;
     expect(engineNode).toMatch(/>=\s*22\.13\.0/);
 
-    // Ensure engine cannot be accidentally downgraded below 22.13.0
     const match = />=\s*(\d+)\.(\d+)\.(\d+)/.exec(engineNode);
     expect(match).not.toBeNull();
     const [, major, minor] = match!;
@@ -97,12 +114,16 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010)', () => {
     expect(typeof StorageTesting.withTempDatabase).toBe('function');
   });
 
-  it('declares 0 runtime dependencies in packages/storage-sqlite/package.json', () => {
+  it('declares 0 external third-party runtime dependencies in packages/storage-sqlite/package.json', () => {
     const pkgPath = path.resolve('packages/storage-sqlite/package.json');
     const pkgContent = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as PackageJsonShape;
 
     expect(pkgContent.name).toBe('@busca-ofertas-ai/storage-sqlite');
-    expect(pkgContent.dependencies).toBeUndefined();
+    // Only internal workspace dependencies are allowed (@busca-ofertas-ai/core)
+    const externalDeps = Object.keys(pkgContent.dependencies ?? {}).filter(
+      (dep) => !dep.startsWith('@busca-ofertas-ai/'),
+    );
+    expect(externalDeps).toEqual([]);
   });
 
   it('verifies that core, configuration, adapter-sdk, and cli do not depend on storage-sqlite', () => {

@@ -37,20 +37,45 @@ export function withTempDatabase<T>(
 ): T {
   const context = createTempDatabaseContext();
   let db: SqliteDatabase | null = null;
+  let isAsync = false;
+
   try {
     db = openSqliteDatabase({
       databasePath: context.databasePath,
       ...options,
     });
-    return fn(db, context);
-  } finally {
-    if (db && db.isOpen) {
-      try {
-        db.close();
-      } catch {
-        // ignore close error
-      }
+    const result = fn(db, context);
+
+    if (
+      typeof result === 'object' &&
+      result !== null &&
+      typeof (result as { then?: unknown }).then === 'function'
+    ) {
+      isAsync = true;
+      const activeDb = db;
+      return (result as unknown as Promise<unknown>).finally(() => {
+        if (activeDb && activeDb.isOpen) {
+          try {
+            activeDb.close();
+          } catch {
+            // ignore close error
+          }
+        }
+        context.cleanup();
+      }) as T;
     }
-    context.cleanup();
+
+    return result;
+  } finally {
+    if (!isAsync) {
+      if (db && db.isOpen) {
+        try {
+          db.close();
+        } catch {
+          // ignore close error
+        }
+      }
+      context.cleanup();
+    }
   }
 }

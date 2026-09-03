@@ -2,7 +2,7 @@
 
 Aplicación **local-first** para buscar, normalizar, evaluar y revisar oportunidades provenientes de múltiples fuentes. El primer caso de uso será encontrar **Nintendo Switch Lite en Facebook Marketplace dentro de AMBA**, pero el núcleo se diseña para admitir otros productos, precios, monedas, sitios, inmuebles y vehículos sin modificar la lógica central.
 
-> Estado actual: **adaptador sintético y escenario demo offline (`BOAI-009`); launcher de Ubuntu y directorios XDG (`BOAI-008`); wizard interactivo de configuración (`BOAI-007`); shell CLI (`BOAI-006`), lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
+> Estado actual: **persistencia operativa de búsquedas, revisiones, runs, source runs, publicaciones y lock de ejecución en SQLite (`BOAI-011`); foundation SQLite y migraciones (`BOAI-010`); adaptador sintético y escenario demo offline (`BOAI-009`); launcher de Ubuntu y directorios XDG (`BOAI-008`); wizard interactivo de configuración (`BOAI-007`); shell CLI (`BOAI-006`), lógica de dominio (`BOAI-002`), configuración (`BOAI-004`) y quality gates locales (`BOAI-001`) están integrados en el monorepo**.
 
 ## Requisitos
 
@@ -106,7 +106,7 @@ Busca Ofertas AI sigue estrictamente la especificación **XDG Base Directory**:
 
 - **Regla XDG estricta**: Si una variable de entorno XDG contiene una ruta relativa, se ignora por completo y se utiliza el fallback estándar bajo `$HOME`.
 - **Apertura de reportes**: La aplicación incluye el seam `ReportOpenerPort` que abre reportes locales mediante `xdg-open` sin invocar shells. Si el navegador no puede abrirse (ej. entorno sin display), la CLI presenta la ruta sanitizada del reporte sin marcar la ejecución como fallida.
-- **Persistencia en SQLite**: BOAI-010 inicializa el almacenamiento fundacional de SQLite y migraciones; la persistencia operativa e historial pertenecen a BOAI-011 y BOAI-012; BOAI-008 únicamente reserva y resuelve de forma determinista su ubicación en `dataRoot`.
+- **Persistencia en SQLite**: BOAI-010 y BOAI-011 inicializan el almacenamiento SQLite, migraciones y repositorios operativos (`SavedSearch`, revisiones, `Run`, `SourceRun`, `Listing`, lock de ejecución); el historial de observaciones y detección de novedades pertenecen a BOAI-012; BOAI-008 únicamente reserva y resuelve de forma determinista su ubicación en `dataRoot`.
 
 #### Tabla de Códigos de Salida (Exit Codes)
 

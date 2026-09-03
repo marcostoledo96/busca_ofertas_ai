@@ -9,7 +9,15 @@ export type SqliteStorageErrorCode =
   | 'TRANSACTION_ALREADY_ACTIVE'
   | 'TRANSACTION_ASYNC_CALLBACK_UNSUPPORTED'
   | 'TRANSACTION_SCOPE_CLOSED'
-  | 'INVALID_DATABASE_PATH';
+  | 'INVALID_DATABASE_PATH'
+  | 'STORAGE_CORRUPTION'
+  | 'EXECUTION_LOCK_HELD'
+  | 'EXECUTION_LOCK_RELEASE_FAILED'
+  | 'LISTING_IDENTITY_COLLISION'
+  | 'RUN_IDENTITY_COLLISION'
+  | 'SOURCE_RUN_IDENTITY_COLLISION'
+  | 'SAVED_SEARCH_IDENTITY_COLLISION'
+  | 'SENSITIVE_DATA_DETECTED';
 
 export interface SqliteStorageErrorOptions {
   readonly cause?: unknown;
@@ -148,6 +156,192 @@ export class InvalidDatabasePathError extends SqliteStorageError {
   constructor(message: string, options?: SqliteStorageErrorOptions) {
     super(message, 'INVALID_DATABASE_PATH', options);
     this.name = 'InvalidDatabasePathError';
+  }
+}
+
+export class StorageCorruptionError extends SqliteStorageError {
+  constructor(message: string, options?: SqliteStorageErrorOptions) {
+    super(message, 'STORAGE_CORRUPTION', options);
+    this.name = 'StorageCorruptionError';
+  }
+}
+
+export interface ExecutionLockHeldDetails {
+  readonly holderId: string;
+  readonly acquiredAt: Date;
+}
+
+export class ExecutionLockHeldError extends SqliteStorageError {
+  readonly holderId: string;
+  readonly acquiredAt: Date;
+
+  constructor(
+    details: ExecutionLockHeldDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Execution lock is currently held by '${details.holderId}' (acquired at ${details.acquiredAt.toISOString()}). Concurrent execution rejected.`;
+    super(msg, 'EXECUTION_LOCK_HELD', options);
+    this.name = 'ExecutionLockHeldError';
+    this.holderId = details.holderId;
+    this.acquiredAt = details.acquiredAt;
+  }
+}
+
+export class ExecutionLockReleaseError extends SqliteStorageError {
+  constructor(message: string, options?: SqliteStorageErrorOptions) {
+    super(message, 'EXECUTION_LOCK_RELEASE_FAILED', options);
+    this.name = 'ExecutionLockReleaseError';
+  }
+}
+
+export interface ListingIdentityCollisionDetails {
+  readonly sourceId: string;
+  readonly externalId: string;
+  readonly existingId: string;
+  readonly attemptingId: string;
+}
+
+export class ListingIdentityCollisionError extends SqliteStorageError {
+  readonly sourceId: string;
+  readonly externalId: string;
+  readonly existingId: string;
+  readonly attemptingId: string;
+
+  constructor(
+    details: ListingIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Listing identity conflict on source '${details.sourceId}' and external ID '${details.externalId}': existing record ID '${details.existingId}' cannot be overwritten with new ID '${details.attemptingId}'.`;
+    super(msg, 'LISTING_IDENTITY_COLLISION', options);
+    this.name = 'ListingIdentityCollisionError';
+    this.sourceId = details.sourceId;
+    this.externalId = details.externalId;
+    this.existingId = details.existingId;
+    this.attemptingId = details.attemptingId;
+  }
+}
+
+export interface RunIdentityCollisionDetails {
+  readonly runId: string;
+  readonly existingSavedSearchId: string;
+  readonly attemptingSavedSearchId: string;
+  readonly existingStartedAt: Date;
+  readonly attemptingStartedAt: Date;
+}
+
+export class RunIdentityCollisionError extends SqliteStorageError {
+  readonly runId: string;
+  readonly existingSavedSearchId: string;
+  readonly attemptingSavedSearchId: string;
+  readonly existingStartedAt: Date;
+  readonly attemptingStartedAt: Date;
+
+  constructor(
+    details: RunIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Run identity collision on run ID '${details.runId}': existing record (savedSearchId='${details.existingSavedSearchId}', startedAt='${details.existingStartedAt.toISOString()}') cannot be modified to (savedSearchId='${details.attemptingSavedSearchId}', startedAt='${details.attemptingStartedAt.toISOString()}').`;
+    super(msg, 'RUN_IDENTITY_COLLISION', options);
+    this.name = 'RunIdentityCollisionError';
+    this.runId = details.runId;
+    this.existingSavedSearchId = details.existingSavedSearchId;
+    this.attemptingSavedSearchId = details.attemptingSavedSearchId;
+    this.existingStartedAt = details.existingStartedAt;
+    this.attemptingStartedAt = details.attemptingStartedAt;
+  }
+}
+
+export interface SourceRunIdentityCollisionDetails {
+  readonly sourceRunId: string;
+  readonly existingRunId?: string | undefined;
+  readonly attemptingRunId?: string | undefined;
+  readonly existingSourceId?: string | undefined;
+  readonly attemptingSourceId?: string | undefined;
+  readonly existingStartedAt?: Date | undefined;
+  readonly attemptingStartedAt?: Date | undefined;
+  readonly existingAdapterVersion?: string | undefined;
+  readonly attemptingAdapterVersion?: string | undefined;
+  readonly existingCollectorId?: string | null | undefined;
+  readonly attemptingCollectorId?: string | null | undefined;
+}
+
+export class SourceRunIdentityCollisionError extends SqliteStorageError {
+  readonly sourceRunId: string;
+  readonly existingRunId?: string | undefined;
+  readonly attemptingRunId?: string | undefined;
+  readonly existingSourceId?: string | undefined;
+  readonly attemptingSourceId?: string | undefined;
+  readonly existingStartedAt?: Date | undefined;
+  readonly attemptingStartedAt?: Date | undefined;
+  readonly existingAdapterVersion?: string | undefined;
+  readonly attemptingAdapterVersion?: string | undefined;
+  readonly existingCollectorId?: string | null | undefined;
+  readonly attemptingCollectorId?: string | null | undefined;
+
+  constructor(
+    details: SourceRunIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `SourceRun identity collision on ID '${details.sourceRunId}': existing record cannot be modified to incoming record.`;
+    super(msg, 'SOURCE_RUN_IDENTITY_COLLISION', options);
+    this.name = 'SourceRunIdentityCollisionError';
+    this.sourceRunId = details.sourceRunId;
+    this.existingRunId = details.existingRunId;
+    this.attemptingRunId = details.attemptingRunId;
+    this.existingSourceId = details.existingSourceId;
+    this.attemptingSourceId = details.attemptingSourceId;
+    this.existingStartedAt = details.existingStartedAt;
+    this.attemptingStartedAt = details.attemptingStartedAt;
+    this.existingAdapterVersion = details.existingAdapterVersion;
+    this.attemptingAdapterVersion = details.attemptingAdapterVersion;
+    this.existingCollectorId = details.existingCollectorId;
+    this.attemptingCollectorId = details.attemptingCollectorId;
+  }
+}
+
+export interface SavedSearchIdentityCollisionDetails {
+  readonly savedSearchId: string;
+  readonly existingCreatedAt: Date;
+  readonly attemptingCreatedAt: Date;
+}
+
+export class SavedSearchIdentityCollisionError extends SqliteStorageError {
+  readonly savedSearchId: string;
+  readonly existingCreatedAt: Date;
+  readonly attemptingCreatedAt: Date;
+
+  constructor(
+    details: SavedSearchIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `SavedSearch identity collision on ID '${details.savedSearchId}': existing record (createdAt='${details.existingCreatedAt.toISOString()}') cannot be modified to (createdAt='${details.attemptingCreatedAt.toISOString()}').`;
+    super(msg, 'SAVED_SEARCH_IDENTITY_COLLISION', options);
+    this.name = 'SavedSearchIdentityCollisionError';
+    this.savedSearchId = details.savedSearchId;
+    this.existingCreatedAt = details.existingCreatedAt;
+    this.attemptingCreatedAt = details.attemptingCreatedAt;
+  }
+}
+
+export class SensitiveDataDetectedError extends SqliteStorageError {
+  constructor(message: string, options?: SqliteStorageErrorOptions) {
+    super(message, 'SENSITIVE_DATA_DETECTED', options);
+    this.name = 'SensitiveDataDetectedError';
   }
 }
 

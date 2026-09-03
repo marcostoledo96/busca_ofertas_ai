@@ -102,7 +102,11 @@ importers:
 
   packages/core: {}
 
-  packages/storage-sqlite: {}
+  packages/storage-sqlite:
+    dependencies:
+      '@busca-ofertas-ai/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

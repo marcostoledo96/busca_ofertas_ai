@@ -6,10 +6,20 @@ import { Feedback } from '../domain/opportunity/feedback.js';
 import { Run } from '../domain/run/run.js';
 import { SourceRun } from '../domain/run/source-run.js';
 
+export interface SavedSearchRevisionRecord {
+  readonly id: string;
+  readonly savedSearchId: string;
+  readonly revisionNumber: number;
+  readonly schemaVersion: number;
+  readonly recordedAt: Date;
+  readonly snapshot: SavedSearch;
+}
+
 export interface SavedSearchRepository {
   getById(id: string): Promise<SavedSearch | null>;
   listEnabled(): Promise<readonly SavedSearch[]>;
   save(savedSearch: SavedSearch): Promise<void>;
+  listRevisions(savedSearchId: string): Promise<readonly SavedSearchRevisionRecord[]>;
 }
 
 export interface ListingRepository {
@@ -36,9 +46,54 @@ export interface FeedbackRepository {
   save(feedback: Feedback): Promise<void>;
 }
 
+export interface RunSummary {
+  readonly runId: string;
+  readonly totalSourceRuns: number;
+  readonly successCount: number;
+  readonly zeroResultsCount: number;
+  readonly failedCount: number;
+  readonly cancelledCount: number;
+  readonly totalItemsCount: number;
+}
+
+export type SourceRunStopReason =
+  | 'ALL_PAGES_FETCHED'
+  | 'MAX_PAGES_REACHED'
+  | 'MAX_ITEMS_REACHED'
+  | 'NO_MORE_RESULTS'
+  | 'RATE_LIMIT_STOP'
+  | 'USER_ABORTED'
+  | 'DEADLINE_EXCEEDED';
+
+export interface SourceRunMetrics {
+  readonly pagesRequested?: number;
+  readonly pagesCompleted?: number;
+  readonly rawItemsCount?: number;
+  readonly parsedItemsCount?: number;
+  readonly rejectedItemsCount?: number;
+  readonly stopReason?: SourceRunStopReason;
+}
+
+export interface CompleteSourceRunMetrics {
+  readonly pagesRequested: number;
+  readonly pagesCompleted: number;
+  readonly rawItemsCount: number;
+  readonly parsedItemsCount: number;
+  readonly rejectedItemsCount: number;
+  readonly stopReason: SourceRunStopReason;
+}
+
+export interface SourceRunExecutionMetadata {
+  readonly adapterVersion: string;
+  readonly collectorId?: string;
+  readonly metrics?: SourceRunMetrics;
+}
+
 export interface RunRepository {
   getById(id: string): Promise<Run | null>;
   save(run: Run): Promise<void>;
-  saveSourceRun(sourceRun: SourceRun): Promise<void>;
+  saveSourceRun(sourceRun: SourceRun, metadata: SourceRunExecutionMetadata): Promise<void>;
   listSourceRunsByRunId(runId: string): Promise<readonly SourceRun[]>;
+  getSummaryByRunId(runId: string): Promise<RunSummary | null>;
+  getSourceRunMetadata(sourceRunId: string): Promise<SourceRunExecutionMetadata | null>;
 }

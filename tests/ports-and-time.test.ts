@@ -3,11 +3,14 @@ import {
   type Clock,
   type IdGenerator,
   type SavedSearchRepository,
+  type SavedSearchRevisionRecord,
   type ListingRepository,
   type ObservationRepository,
   type OpportunityRepository,
   type FeedbackRepository,
   type RunRepository,
+  type RunSummary,
+  type SourceRunExecutionMetadata,
   type SavedSearch,
   type Listing,
   type Observation,
@@ -105,6 +108,7 @@ class InMemoryObservationRepository implements ObservationRepository {
 
 class InMemorySavedSearchRepository implements SavedSearchRepository {
   private readonly searches = new Map<string, SavedSearch>();
+  private readonly revisions = new Map<string, SavedSearchRevisionRecord[]>();
 
   public getById(id: string): Promise<SavedSearch | null> {
     return Promise.resolve(this.searches.get(id) ?? null);
@@ -122,7 +126,22 @@ class InMemorySavedSearchRepository implements SavedSearchRepository {
 
   public save(savedSearch: SavedSearch): Promise<void> {
     this.searches.set(savedSearch.id, savedSearch);
+    const existingRevs = this.revisions.get(savedSearch.id) ?? [];
+    const nextRevNumber = existingRevs.length + 1;
+    const record: SavedSearchRevisionRecord = {
+      id: `${savedSearch.id}_rev_${nextRevNumber}`,
+      savedSearchId: savedSearch.id,
+      revisionNumber: nextRevNumber,
+      schemaVersion: savedSearch.schemaVersion,
+      recordedAt: savedSearch.updatedAt,
+      snapshot: savedSearch,
+    };
+    this.revisions.set(savedSearch.id, [...existingRevs, record]);
     return Promise.resolve();
+  }
+
+  public listRevisions(savedSearchId: string): Promise<readonly SavedSearchRevisionRecord[]> {
+    return Promise.resolve(this.revisions.get(savedSearchId) ?? []);
   }
 }
 
@@ -175,6 +194,7 @@ class InMemoryFeedbackRepository implements FeedbackRepository {
 class InMemoryRunRepository implements RunRepository {
   private readonly runs = new Map<string, Run>();
   private readonly sourceRuns: SourceRun[] = [];
+  private readonly metadataMap = new Map<string, SourceRunExecutionMetadata>();
 
   public getById(id: string): Promise<Run | null> {
     return Promise.resolve(this.runs.get(id) ?? null);
@@ -185,13 +205,48 @@ class InMemoryRunRepository implements RunRepository {
     return Promise.resolve();
   }
 
-  public saveSourceRun(sourceRun: SourceRun): Promise<void> {
+  public saveSourceRun(sourceRun: SourceRun, metadata: SourceRunExecutionMetadata): Promise<void> {
     this.sourceRuns.push(sourceRun);
+    this.metadataMap.set(sourceRun.id, metadata);
     return Promise.resolve();
   }
 
   public listSourceRunsByRunId(runId: string): Promise<readonly SourceRun[]> {
     return Promise.resolve(this.sourceRuns.filter((sr) => sr.runId === runId));
+  }
+
+  public getSourceRunMetadata(sourceRunId: string): Promise<SourceRunExecutionMetadata | null> {
+    return Promise.resolve(this.metadataMap.get(sourceRunId) ?? null);
+  }
+
+  public getSummaryByRunId(runId: string): Promise<RunSummary | null> {
+    if (!this.runs.has(runId)) {
+      return Promise.resolve(null);
+    }
+    const matching = this.sourceRuns.filter((sr) => sr.runId === runId);
+    const successCount = matching.filter((sr) => sr.status === 'SUCCESS').length;
+    const zeroResultsCount = matching.filter((sr) => sr.status === 'ZERO_RESULTS_CONFIRMED').length;
+    const cancelledCount = matching.filter((sr) => sr.status === 'CANCELLED').length;
+    const failedCount = matching.filter(
+      (sr) =>
+        !['PENDING', 'RUNNING', 'SUCCESS', 'ZERO_RESULTS_CONFIRMED', 'CANCELLED'].includes(
+          sr.status,
+        ),
+    ).length;
+    const totalItemsCount = matching.reduce(
+      (acc, sr) =>
+        acc + ('itemsCount' in sr && typeof sr.itemsCount === 'number' ? sr.itemsCount : 0),
+      0,
+    );
+    return Promise.resolve({
+      runId,
+      totalSourceRuns: matching.length,
+      successCount,
+      zeroResultsCount,
+      failedCount,
+      cancelledCount,
+      totalItemsCount,
+    });
   }
 }
 
@@ -315,8 +370,15 @@ describe('Domain Ports, Clock and IdGenerator Injectability (BOAI-002)', () => {
       finishedAt: baseDate,
       itemsCount: 1,
     });
-    await runRepo.saveSourceRun(sourceRun);
+    await runRepo.saveSourceRun(sourceRun, { adapterVersion: '1.0.0' });
     const srs = await runRepo.listSourceRunsByRunId('run-1');
     expect(srs).toHaveLength(1);
+
+    const srMeta = await runRepo.getSourceRunMetadata('sr-1');
+    expect(srMeta?.adapterVersion).toBe('1.0.0');
+
+    const revs = await searchRepo.listRevisions(search.id);
+    expect(revs).toHaveLength(1);
+    expect(revs[0]!.snapshot.name).toBe(search.name);
   });
 });
