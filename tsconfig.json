@@ -6,6 +6,7 @@
     { "path": "./packages/configuration" },
     { "path": "./packages/storage-sqlite" },
     { "path": "./packages/report-html" },
+    { "path": "./packages/run-export" },
     { "path": "./adapters/synthetic" },
     { "path": "./apps/cli" },
     { "path": "./tests" }

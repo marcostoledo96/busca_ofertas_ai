@@ -7,10 +7,5 @@
     "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*"],
-  "references": [
-    { "path": "../../packages/configuration" },
-    { "path": "../../packages/report-html" },
-    { "path": "../../packages/run-export" },
-    { "path": "../../adapters/synthetic" }
-  ]
+  "references": [{ "path": "../core" }]
 }

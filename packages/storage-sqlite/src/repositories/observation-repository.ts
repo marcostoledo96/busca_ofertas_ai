@@ -571,6 +571,21 @@ export class SqliteObservationRepository implements ObservationRepository {
     }
   }
 
+  listBySourceRunId(sourceRunId: string): Promise<readonly Observation[]> {
+    try {
+      const stmt = this.db.prepare<ObservationRow, [string]>(
+        `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
+         FROM observations
+         WHERE source_run_id = ?
+         ORDER BY observed_at ASC, id ASC`,
+      );
+      const rows = stmt.all(sourceRunId);
+      return Promise.resolve(rows.map(rehydrateObservation));
+    } catch (err) {
+      return Promise.reject(toError(err));
+    }
+  }
+
   save(observation: Observation): Promise<void> {
     try {
       this.db.transaction((tx) => {

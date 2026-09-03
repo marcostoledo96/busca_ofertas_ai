@@ -132,12 +132,34 @@ module.exports = {
     {
       name: 'report-html-forbidden-dependencies',
       comment:
-        'packages/report-html es un renderer puro y no debe depender de storage-sqlite, apps/cli, node:fs, node:path, node:child_process ni playwright.',
+        'packages/report-html es un renderer puro y no debe depender de storage-sqlite, run-export, apps/cli, node:fs, node:path, node:child_process ni playwright.',
       severity: 'error',
       from: { path: '^packages/report-html/' },
       to: {
         path: [
           '^packages/storage-sqlite',
+          '^packages/run-export',
+          '^apps/cli',
+          'playwright',
+          '^node:fs$',
+          '^node:path$',
+          '^node:child_process$',
+          '^fs$',
+          '^path$',
+          '^child_process$',
+        ],
+      },
+    },
+    {
+      name: 'run-export-forbidden-dependencies',
+      comment:
+        'packages/run-export no debe depender de storage-sqlite, report-html, apps/cli, node:fs, node:path, node:child_process ni playwright.',
+      severity: 'error',
+      from: { path: '^packages/run-export/' },
+      to: {
+        path: [
+          '^packages/storage-sqlite',
+          '^packages/report-html',
           '^apps/cli',
           'playwright',
           '^node:fs$',

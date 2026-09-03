@@ -100,6 +100,21 @@ class InMemoryObservationRepository implements ObservationRepository {
     return Promise.resolve(list);
   }
 
+  public listBySourceRunId(sourceRunId: string): Promise<readonly Observation[]> {
+    const list: Observation[] = [];
+    for (const obs of this.observations.values()) {
+      if (obs.sourceRunId === sourceRunId) {
+        list.push(obs);
+      }
+    }
+    list.sort((a, b) => {
+      const timeDiff = a.observedAt.getTime() - b.observedAt.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+    return Promise.resolve(list);
+  }
+
   public save(observation: Observation): Promise<void> {
     this.observations.set(observation.id, observation);
     return Promise.resolve();

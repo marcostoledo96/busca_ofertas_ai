@@ -7,6 +7,13 @@ import { EXIT_CODES } from '../runtime/exit-codes.js';
 export const PRIVATE_DIRECTORY_MODE = 0o700;
 export const PRIVATE_REPORT_FILE_MODE = 0o600;
 
+export interface ResolveRunOutputDirectoryOptions {
+  readonly reportsDir: string;
+  readonly searchName: string;
+  readonly runId: string;
+  readonly startedAt: string | Date;
+}
+
 export interface PersistReportHtmlOptions {
   readonly reportsDir: string;
   readonly searchName: string;
@@ -19,6 +26,24 @@ export interface PersistReportHtmlOptions {
 export interface PersistedReportLocation {
   readonly reportDirectory: string;
   readonly reportPath: string;
+}
+
+export interface PersistRunExportsOptions {
+  readonly reportsDir: string;
+  readonly searchName: string;
+  readonly runId: string;
+  readonly startedAt: string | Date;
+  readonly jsonContent: string;
+  readonly csvContent: string;
+  readonly signal?: AbortSignal | undefined;
+  readonly _testCommitHook?:
+    ((stage: 'before_csv_commit' | 'after_json_commit') => void | Promise<void>) | undefined;
+}
+
+export interface PersistedRunExportsLocation {
+  readonly exportDirectory: string;
+  readonly jsonPath: string;
+  readonly csvPath: string;
 }
 
 /**
@@ -108,25 +133,13 @@ async function safeChmod(targetPath: string, mode: number): Promise<void> {
 }
 
 /**
- * Persists report.html inside a run-specific private directory under reportsDir.
+ * Resolves the deterministic run output directory under reportsDir.
  *
- * Guarantees:
- * - Deterministic directory name: <timestamp>_<search-slug>_<short-run-id>
- * - Strict containment within reportsDir (defends against path traversal attacks).
- * - Run directory created with mode 0700.
- * - report.html created with mode 0600.
- * - Atomic write via temporary file and rename; temporary files cleaned up on failure.
+ * Preserves the exact BOAI-013 directory naming and containment contract:
+ * <timestamp>_<search-slug>_<safe-prefix-sha256>
  */
-export async function persistReportHtml(
-  options: PersistReportHtmlOptions,
-): Promise<PersistedReportLocation> {
-  const { reportsDir, searchName, runId, startedAt, htmlContent, signal } = options;
-
-  if (signal?.aborted) {
-    const abortError = new Error('This operation was aborted');
-    abortError.name = 'AbortError';
-    throw abortError;
-  }
+export function resolveRunOutputDirectory(options: ResolveRunOutputDirectoryOptions): string {
+  const { reportsDir, searchName, runId, startedAt } = options;
 
   const timestampPart = formatRunTimestamp(startedAt);
   const slugPart = generateSearchSlug(searchName);
@@ -149,6 +162,37 @@ export async function persistReportHtml(
       exitCode: EXIT_CODES.INVALID_CONFIGURATION,
     });
   }
+
+  return resolvedDir;
+}
+
+/**
+ * Persists report.html inside a run-specific private directory under reportsDir.
+ *
+ * Guarantees:
+ * - Deterministic directory name: <timestamp>_<search-slug>_<short-run-id>
+ * - Strict containment within reportsDir (defends against path traversal attacks).
+ * - Run directory created with mode 0700.
+ * - report.html created with mode 0600.
+ * - Atomic write via temporary file and rename; temporary files cleaned up on failure.
+ */
+export async function persistReportHtml(
+  options: PersistReportHtmlOptions,
+): Promise<PersistedReportLocation> {
+  const { reportsDir, searchName, runId, startedAt, htmlContent, signal } = options;
+
+  if (signal?.aborted) {
+    const abortError = new Error('This operation was aborted');
+    abortError.name = 'AbortError';
+    throw abortError;
+  }
+
+  const resolvedDir = resolveRunOutputDirectory({
+    reportsDir,
+    searchName,
+    runId,
+    startedAt,
+  });
 
   const resolvedFile = path.resolve(resolvedDir, 'report.html');
   if (!resolvedFile.startsWith(resolvedDir + path.sep)) {
@@ -204,6 +248,198 @@ export async function persistReportHtml(
     } catch {
       // Suppress temp unlink error
     }
+    throw err;
+  }
+}
+
+/**
+ * Persists results.json and results.csv as an atomic pair with controlled-failure pair consistency.
+ *
+ * Guarantees:
+ * - Shares the exact same directory as report.html.
+ * - Enforces mode 0700 on directory and mode 0600 on both export files.
+ * - Both temp files are completely written before commit begins.
+ * - Controlled-failure recovery: if commit fails mid-way, previous export pair is restored
+ *   or partial fresh files are removed. No intermediate broken state (JSON V2 + CSV V1).
+ * - Does not modify or overwrite report.html.
+ */
+export async function persistRunExports(
+  options: PersistRunExportsOptions,
+): Promise<PersistedRunExportsLocation> {
+  const {
+    reportsDir,
+    searchName,
+    runId,
+    startedAt,
+    jsonContent,
+    csvContent,
+    signal,
+    _testCommitHook,
+  } = options;
+
+  if (signal?.aborted) {
+    const abortError = new Error('This operation was aborted');
+    abortError.name = 'AbortError';
+    throw abortError;
+  }
+
+  const exportDirectory = resolveRunOutputDirectory({
+    reportsDir,
+    searchName,
+    runId,
+    startedAt,
+  });
+
+  const jsonPath = path.resolve(exportDirectory, 'results.json');
+  if (!jsonPath.startsWith(exportDirectory + path.sep)) {
+    throw new CliError({
+      code: 'PATH_TRAVERSAL_DETECTED',
+      userMessage: 'La ruta de destino del archivo JSON escapa del directorio seguro de ejecución.',
+      suggestedAction: 'Verificá los parámetros de búsqueda e identificador de ejecución.',
+      exitCode: EXIT_CODES.INVALID_CONFIGURATION,
+    });
+  }
+
+  const csvPath = path.resolve(exportDirectory, 'results.csv');
+  if (!csvPath.startsWith(exportDirectory + path.sep)) {
+    throw new CliError({
+      code: 'PATH_TRAVERSAL_DETECTED',
+      userMessage: 'La ruta de destino del archivo CSV escapa del directorio seguro de ejecución.',
+      suggestedAction: 'Verificá los parámetros de búsqueda e identificador de ejecución.',
+      exitCode: EXIT_CODES.INVALID_CONFIGURATION,
+    });
+  }
+
+  // Ensure target directory with 0700
+  await fs.promises.mkdir(exportDirectory, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  await safeChmod(exportDirectory, PRIVATE_DIRECTORY_MODE);
+
+  if (signal?.aborted) {
+    const abortError = new Error('This operation was aborted');
+    abortError.name = 'AbortError';
+    throw abortError;
+  }
+
+  const randSuffix = Math.random().toString(36).slice(2, 10);
+  const now = Date.now();
+  const jsonTempPath = path.join(exportDirectory, `results.json.tmp.${now}.${randSuffix}`);
+  const csvTempPath = path.join(exportDirectory, `results.csv.tmp.${now}.${randSuffix}`);
+
+  const jsonBackupPath = path.join(exportDirectory, `results.json.bak.${now}.${randSuffix}`);
+  const csvBackupPath = path.join(exportDirectory, `results.csv.bak.${now}.${randSuffix}`);
+
+  let jsonBackedUp = false;
+  let csvBackedUp = false;
+  let jsonCommitted = false;
+  let csvCommitted = false;
+
+  try {
+    // 1. Write JSON temp with 0600
+    await fs.promises.writeFile(jsonTempPath, jsonContent, {
+      encoding: 'utf-8',
+      mode: PRIVATE_REPORT_FILE_MODE,
+      signal,
+    });
+    await safeChmod(jsonTempPath, PRIVATE_REPORT_FILE_MODE);
+
+    if (signal?.aborted) {
+      const abortError = new Error('This operation was aborted');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
+
+    // 2. Write CSV temp with 0600
+    await fs.promises.writeFile(csvTempPath, csvContent, {
+      encoding: 'utf-8',
+      mode: PRIVATE_REPORT_FILE_MODE,
+      signal,
+    });
+    await safeChmod(csvTempPath, PRIVATE_REPORT_FILE_MODE);
+
+    if (signal?.aborted) {
+      const abortError = new Error('This operation was aborted');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
+
+    // 3. Backup existing files if present
+    if (fs.existsSync(jsonPath)) {
+      await fs.promises.rename(jsonPath, jsonBackupPath);
+      jsonBackedUp = true;
+    }
+    if (fs.existsSync(csvPath)) {
+      await fs.promises.rename(csvPath, csvBackupPath);
+      csvBackedUp = true;
+    }
+
+    // 4. Commit JSON
+    await fs.promises.rename(jsonTempPath, jsonPath);
+    await safeChmod(jsonPath, PRIVATE_REPORT_FILE_MODE);
+    jsonCommitted = true;
+
+    if (_testCommitHook) {
+      await _testCommitHook('after_json_commit');
+    }
+
+    if (signal?.aborted) {
+      const abortError = new Error('This operation was aborted');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
+
+    if (_testCommitHook) {
+      await _testCommitHook('before_csv_commit');
+    }
+
+    // 5. Commit CSV
+    await fs.promises.rename(csvTempPath, csvPath);
+    await safeChmod(csvPath, PRIVATE_REPORT_FILE_MODE);
+    csvCommitted = true;
+
+    // 6. Cleanup backups on success
+    if (jsonBackedUp && fs.existsSync(jsonBackupPath)) {
+      await fs.promises.unlink(jsonBackupPath);
+    }
+    if (csvBackedUp && fs.existsSync(csvBackupPath)) {
+      await fs.promises.unlink(csvBackupPath);
+    }
+
+    return {
+      exportDirectory,
+      jsonPath,
+      csvPath,
+    };
+  } catch (err) {
+    // Controlled failure recovery
+    try {
+      // Remove newly committed partial JSON if CSV commit failed
+      if (jsonCommitted && !csvCommitted) {
+        if (fs.existsSync(jsonPath)) {
+          await fs.promises.unlink(jsonPath);
+        }
+      }
+
+      // Restore old backups if they existed
+      if (jsonBackedUp && fs.existsSync(jsonBackupPath)) {
+        await fs.promises.rename(jsonBackupPath, jsonPath);
+        await safeChmod(jsonPath, PRIVATE_REPORT_FILE_MODE);
+      }
+      if (csvBackedUp && fs.existsSync(csvBackupPath)) {
+        await fs.promises.rename(csvBackupPath, csvPath);
+        await safeChmod(csvPath, PRIVATE_REPORT_FILE_MODE);
+      }
+
+      // Cleanup remaining temp files
+      if (fs.existsSync(jsonTempPath)) {
+        await fs.promises.unlink(jsonTempPath);
+      }
+      if (fs.existsSync(csvTempPath)) {
+        await fs.promises.unlink(csvTempPath);
+      }
+    } catch {
+      // Best-effort cleanup
+    }
+
     throw err;
   }
 }
