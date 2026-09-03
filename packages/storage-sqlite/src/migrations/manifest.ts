@@ -177,9 +177,39 @@ const prodMigration002: Migration = Object.freeze({
   },
 });
 
+const prodMigration003: Migration = Object.freeze({
+  version: 3,
+  name: '003_create_observation_history',
+  up(context: MigrationContext): void {
+    context.exec(`
+      -- observations: Immutable historical observation records
+      CREATE TABLE IF NOT EXISTS observations (
+        id TEXT PRIMARY KEY,
+        listing_id TEXT NOT NULL REFERENCES listings(id) ON DELETE RESTRICT,
+        source_run_id TEXT NOT NULL REFERENCES source_runs(id) ON DELETE RESTRICT,
+        observed_at TEXT NOT NULL,
+        title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+        description TEXT,
+        price TEXT,
+        location TEXT,
+        condition TEXT CHECK(condition IS NULL OR condition IN ('NEW', 'LIKE_NEW', 'GOOD', 'FAIR', 'FOR_PARTS', 'UNKNOWN')),
+        availability TEXT NOT NULL CHECK(availability IN ('AVAILABLE', 'PENDING', 'SOLD', 'REMOVED', 'UNKNOWN')),
+        image_urls TEXT NOT NULL CHECK(json_valid(image_urls)),
+        published_at TEXT,
+        raw_fingerprint TEXT NOT NULL CHECK(length(trim(raw_fingerprint)) > 0),
+        CONSTRAINT uq_observations_listing_run_fingerprint UNIQUE(listing_id, source_run_id, raw_fingerprint)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_observations_listing_observed_at ON observations(listing_id, observed_at);
+      CREATE INDEX IF NOT EXISTS idx_observations_source_run_id ON observations(source_run_id);
+    `);
+  },
+});
+
 export const PRODUCTION_MIGRATIONS: readonly Migration[] = Object.freeze([
   prodMigration001,
   prodMigration002,
+  prodMigration003,
 ]);
 
 export function validateMigrationManifest(migrations: readonly Migration[]): readonly Migration[] {

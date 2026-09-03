@@ -52,7 +52,13 @@ interface Listing {
 }
 ```
 
-La identidad estable es `(sourceId, externalId)`. La URL canónica actúa como respaldo y diagnóstico, no como única identidad cuando existe un ID externo confiable.
+#### Identidad canónica y fallback seguro
+
+1. **Identidad primaria**: el par natural `(sourceId, externalId)` es la clave única y estable de una `Listing`.
+2. **Identidad de fallback**: cuando una fuente externa no expone un identificador nativo estable, se deriva un `externalId` sintético con el namespace reservado `urn:boai:fallback:url:<sha256(canonicalUrl)>`.
+3. **Precondición de hash**: el hash SHA-256 se calcula estrictamente sobre la `canonicalUrl` normalizada (sin parámetros de tracking ni fragmentos y con query params ordenados), nunca sobre la URL cruda.
+4. **Aislamiento por fuente**: la identidad compuesta `(sourceId, externalId)` garantiza que el mismo fallback hash en fuentes distintas no se mezcle.
+5. **Detección de colisiones (fail-closed)**: si una publicación entrante con fallback externalId colisiona con una `Listing` existente que posee una `canonicalUrl` distinta, el sistema rechaza la mutación emitiendo `ListingIdentityCollisionError` y preservando el registro original.
 
 ### Observation
 
@@ -74,7 +80,34 @@ interface Observation {
 }
 ```
 
-No se sobrescribe el historial: cada cambio relevante produce una nueva Observation. Se puede deduplicar una observación idéntica dentro del mismo run.
+#### Fingerprint determinístico de Observation
+
+- **Representación**: hash SHA-256 sobre la serialización canónica JSON de los datos semánticos observables.
+- **Campos incluidos**: `title` (normalizado en espacios), `description`, `price` (`amount`, `currency`, `kind`), `location` (`rawText`, `region`, `city`, `neighborhood`, `coordinates` redondeadas a 5 decimales), `condition`, `availability`, `imageUrls` (deduplicadas y ordenadas lexicográficamente) y `publishedAt`.
+- **Campos excluidos**: metadatos de infraestructura y variables por ejecución (`id`, `listingId`, `sourceRunId`, `observedAt`).
+- **Invariante de contenido**: un fingerprint idéntico actúa como acelerador de equivalencia pero **no autoriza** a descartar contenido contradictorio. Si dos observaciones bajo la misma `(listingId, sourceRunId, rawFingerprint)` poseen payloads semánticos dispares, se emite un error tipado de colisión (`ObservationFingerprintCollisionError`) con mutación cero.
+
+#### Inmutabilidad e historial de observaciones
+
+- Toda `Observation` persistida es estrictamente **inmutable**. Guardar un `Observation.id` existente solo es una operación idempotente si el contenido completo persistido es idéntico. Cualquier divergencia emite `ObservationIdentityCollisionError`.
+- **Deduplicación intra-run**: si en el mismo `sourceRunId` se observa la misma `Listing` con idéntico payload y fingerprint, se actualiza `lastSeenAt` de la `Listing` y no se inserta una fila redundante (`isNewObservation = false`).
+- **Monotonicidad temporal de Listing**:
+  - `Listing.lastSeenAt = max(persisted.lastSeenAt, incoming.lastSeenAt, incomingObservation.observedAt)`: el avistamiento de una publicación siempre actualiza su presencia más reciente, incluso cuando la observación es deduplicada.
+  - `Listing.firstSeenAt = min(persisted.firstSeenAt, incoming.firstSeenAt, incomingObservation.observedAt)`: la fecha de primer avistamiento jamás puede ser posterior a ninguna observación registrada para esa publicación.
+- **Formato canónico de timestamps UTC**: todo timestamp persistido debe ser exactamente el formato producido por `Date.prototype.toISOString()`: `YYYY-MM-DDTHH:mm:ss.sssZ` (longitud fija de 24 caracteres con 3 dígitos de milisegundos y terminación en `Z`), validado contra round-trip exacto (`parsed.toISOString() === value`). Esto garantiza que el ordenamiento textual en SQLite (`ORDER BY observed_at`) equivalga estrictamente al orden cronológico (`lexicographic order == chronological order`). Formas de ancho variable (sin milisegundos `2026-08-30T10:00:00Z`, con 1 o 4 dígitos de milisegundos) o con offsets numéricos se rechazan estrictamente con `StorageCorruptionError` sin reparación silenciosa.
+- **Formas JSON persistidas estrictas**: el JSON persistido se trata como `unknown`. Un campo opcional ausente se permite; si la clave está presente, el valor debe pertenecer al tipo exacto del dominio. Si el dominio no admite `null` (por ejemplo `price.converted`, `location.region`, `city`, `neighborhood` o `coordinates`), la presencia de `null` se rechaza con `StorageCorruptionError`.
+
+#### Clasificación de novedad (`changeKind`)
+
+La clasificación de cambios durante `recordObservation` evalúa la transición respecto de la última observación cronológica de la publicación:
+
+1. `NEW`: primera observación registrada para la publicación en el sistema (`isNewObservation = true`).
+2. `REAPPEARED`: la publicación estaba previamente en estado `SOLD` o `REMOVED` y ahora vuelve a observarse en estado `AVAILABLE` o `PENDING` (`isNewObservation = true`).
+3. `PRICE_CHANGED`: el precio resolvió un importe, moneda o tipo diferente respecto de la última observación (`isNewObservation = true`).
+4. `UNCHANGED`: no ocurrió un cambio de precio ni una reaparición ni es un nuevo ítem.
+   - **Semántica crítica**: `UNCHANGED != no new Observation`. Si cambian atributos no relacionados al precio (título, descripción, ubicación, condición), se persiste una nueva `Observation` en el historial (`isNewObservation = true`) mientras que `changeKind` permanece `UNCHANGED`. Solo cuando el fingerprint semántico es idéntico dentro del mismo run se concluye `isNewObservation = false`.
+5. **Política cronológica y defensiva ante observaciones desordenadas**: para garantizar resultados deterministas e impedir calcular novedades o deduplicar anacrónicamente, el chequeo cronológico (`incoming.observedAt < latestPersisted.observedAt`) precede estrictamente a cualquier retorno por deduplicación o inserción. Si una observación entrante posee un `observedAt` anterior a la última observación ya persistida para la misma publicación, se rechaza la operación fail-closed con `RecordObservationCoherenceError` (`OUT_OF_ORDER_OBSERVED_AT`) con rollback transaccional total y mutación cero (recuento de observaciones y estado de la publicación intactos).
+6. **Política de reaparición**: la transición a `REAPPEARED` requiere evidencia positiva de disponibilidad (`AVAILABLE`/`PENDING`) posterior a un estado terminal explícito (`SOLD`/`REMOVED`). La mera ausencia en los resultados de una búsqueda **no** se infiere como eliminación ni autoriza a declarar reaparición.
 
 ### Opportunity
 

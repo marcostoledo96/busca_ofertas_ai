@@ -13,6 +13,8 @@ export {
   type IdGenerator,
 } from './domain/common/index.js';
 
+export { type Hasher } from './domain/common/hasher.js';
+
 // Price & Currency Value Objects
 export {
   type PriceCurrency,
@@ -59,6 +61,22 @@ export {
   type CreateObservationParams,
   createObservation,
 } from './domain/listing/observation.js';
+
+export {
+  FALLBACK_EXTERNAL_ID_NAMESPACE,
+  isFallbackExternalId,
+  createFallbackExternalId,
+  type NormalizeGenericUrlOptions,
+  normalizeGenericUrl,
+  type SourceUrlCanonicalizer,
+  UrlCanonicalizerRegistry,
+} from './domain/listing/url-canonicalizer.js';
+
+export {
+  type ObservationFingerprintParams,
+  buildCanonicalObservationPayload,
+  computeObservationFingerprint,
+} from './domain/listing/fingerprint.js';
 
 // Opportunity & Feedback
 export {
@@ -140,6 +158,9 @@ export {
   type SavedSearchRevisionRecord,
   type SavedSearchRepository,
   type ListingRepository,
+  type ObservationChangeKind,
+  type RecordObservationParams,
+  type RecordObservationResult,
   type ObservationRepository,
   type OpportunityRepository,
   type FeedbackRepository,

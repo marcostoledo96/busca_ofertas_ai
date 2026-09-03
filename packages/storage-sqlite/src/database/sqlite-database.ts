@@ -119,8 +119,12 @@ class SqliteDatabaseImpl implements SqliteDatabase {
     });
   }
 
-  transaction<T>(fn: (tx: SqliteTransaction) => T): T {
+  transaction<T>(
+    fn: (tx: SqliteTransaction) => T,
+    mode: 'DEFERRED' | 'IMMEDIATE' | 'EXCLUSIVE' = 'DEFERRED',
+  ): T {
     const db = this.ensureOpen();
+
     if (this.inTransaction) {
       throw new TransactionFailedError(
         'A transaction is already active on this database handle',
@@ -129,7 +133,7 @@ class SqliteDatabaseImpl implements SqliteDatabase {
     }
 
     try {
-      db.exec('BEGIN');
+      db.exec(`BEGIN ${mode}`);
     } catch (err) {
       this.inTransaction = false;
       throw new TransactionFailedError(
@@ -307,9 +311,10 @@ export function openSqliteDatabase(options: OpenSqliteDatabaseOptions): SqliteDa
     }
   }
 
-  // Configure and verify PRAGMA foreign_keys = ON
+  // Configure and verify PRAGMA foreign_keys = ON and busy_timeout = 5000
   try {
     rawDb.exec('PRAGMA foreign_keys = ON;');
+    rawDb.exec('PRAGMA busy_timeout = 5000;');
     const stmt = rawDb.prepare('PRAGMA foreign_keys;');
     const result = stmt.get() as { foreign_keys?: number | bigint } | undefined;
     if (!result || Number(result.foreign_keys) !== 1) {

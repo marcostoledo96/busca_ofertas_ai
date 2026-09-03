@@ -33,7 +33,10 @@ export interface SqliteDatabase {
   prepare<TResult = Record<string, unknown>, TParams extends unknown[] = unknown[]>(
     sql: string,
   ): SqlitePreparedStatement<TResult, TParams>;
-  transaction<T>(fn: (tx: SqliteTransaction) => T): T;
+  transaction<T>(
+    fn: (tx: SqliteTransaction) => T,
+    mode?: 'DEFERRED' | 'IMMEDIATE' | 'EXCLUSIVE',
+  ): T;
   migrate(options?: MigrateOptions): MigrationRunResult;
   getCurrentSchemaVersion(): number;
   getAppliedMigrations(): readonly AppliedMigration[];

@@ -32,6 +32,7 @@ export {
 export { SYNTHETIC_FIXTURES } from './fixtures/synthetic-fixtures.js';
 
 export { SyntheticAdapter } from './synthetic-adapter.js';
+export { SyntheticUrlCanonicalizer } from './synthetic-canonicalizer.js';
 
 import { SYNTHETIC_ADAPTER_PACKAGE_NAME, SYNTHETIC_ADAPTER_VERSION } from './types.js';
 import { SyntheticAdapter } from './synthetic-adapter.js';

@@ -104,6 +104,23 @@ class InMemoryObservationRepository implements ObservationRepository {
     this.observations.set(observation.id, observation);
     return Promise.resolve();
   }
+
+  public recordObservation(
+    params: import('@busca-ofertas-ai/core').RecordObservationParams,
+  ): Promise<import('@busca-ofertas-ai/core').RecordObservationResult> {
+    const existing = Array.from(this.observations.values()).filter(
+      (o) => o.listingId === params.listing.id,
+    );
+    const changeKind: import('@busca-ofertas-ai/core').ObservationChangeKind =
+      existing.length === 0 ? 'NEW' : 'UNCHANGED';
+    this.observations.set(params.observation.id, params.observation);
+    return Promise.resolve({
+      listing: params.listing,
+      observation: params.observation,
+      changeKind,
+      isNewObservation: true,
+    });
+  }
 }
 
 class InMemorySavedSearchRepository implements SavedSearchRepository {

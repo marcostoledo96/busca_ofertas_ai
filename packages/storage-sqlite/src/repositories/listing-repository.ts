@@ -20,14 +20,16 @@ function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
+const EXACT_CANONICAL_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
 function parseIsoDate(isoString: string, fieldName: string, entityId: string): Date {
-  if (typeof isoString !== 'string') {
+  if (typeof isoString !== 'string' || !EXACT_CANONICAL_UTC_REGEX.test(isoString)) {
     throw new StorageCorruptionError(
-      `Corrupted persisted Listing '${entityId}': '${fieldName}' must be a string, got ${typeof isoString}`,
+      `Corrupted persisted Listing '${entityId}': '${fieldName}' must be a canonical ISO UTC date string in 'YYYY-MM-DDTHH:mm:ss.sssZ' format, got '${String(isoString)}'`,
     );
   }
   const date = new Date(isoString);
-  if (Number.isNaN(date.getTime())) {
+  if (Number.isNaN(date.getTime()) || date.toISOString() !== isoString) {
     throw new StorageCorruptionError(
       `Corrupted persisted Listing '${entityId}': '${fieldName}' is not a valid ISO date ('${isoString}')`,
     );
