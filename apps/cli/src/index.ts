@@ -78,6 +78,8 @@ export {
   CreateSearchActionHandler,
   EditSearchActionHandler,
   ConfigurationActionHandler,
+  type ReviewListingsActionHandlerParams,
+  ReviewListingsActionHandler,
   NotImplementedActionHandler,
   ExitActionHandler,
 } from './shell/menu-actions.js';
@@ -196,3 +198,11 @@ export {
   type GenerateRunExportsResult,
   generateRunExports,
 } from './exporting/index.js';
+
+// Questionable Listings Review & Manual Feedback (BOAI-015)
+export {
+  type NodeExternalUrlOpenerParams,
+  NodeExternalUrlOpener,
+} from './platform/node-external-url-opener.js';
+
+export { ReviewPresenter, stripAnsi } from './presentation/review-presenter.js';

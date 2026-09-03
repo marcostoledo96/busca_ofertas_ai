@@ -16,13 +16,22 @@ import { DiagnosticLogger, SanitizedDiagnosticLogger } from './runtime/diagnosti
 import { ErrorPresenter } from './runtime/errors.js';
 import { MenuFormatter, CONTRACTUAL_MENU_OPTIONS } from './presentation/menu-formatter.js';
 import {
+  ReviewQueueService,
+  RecordReviewFeedbackUseCase,
+  SystemClock,
+  UuidIdGenerator,
+  type ExternalUrlOpenerPort,
+} from '@busca-ofertas-ai/core';
+import {
   type MenuAction,
   CreateSearchActionHandler,
   EditSearchActionHandler,
   ConfigurationActionHandler,
+  ReviewListingsActionHandler,
   NotImplementedActionHandler,
   ExitActionHandler,
 } from './shell/menu-actions.js';
+import { NodeExternalUrlOpener } from './platform/node-external-url-opener.js';
 import { CliShell } from './shell/cli-shell.js';
 import {
   type SavedSearchConfigStore,
@@ -42,6 +51,9 @@ export interface CliApplicationOptions {
   readonly configStore?: SavedSearchConfigStore;
   readonly textFilePort?: TextFilePort;
   readonly searchConfigDirectory?: string;
+  readonly reviewQueueService?: ReviewQueueService;
+  readonly recordFeedbackUseCase?: RecordReviewFeedbackUseCase;
+  readonly externalUrlOpener?: ExternalUrlOpenerPort;
 }
 
 export interface CliApplication {
@@ -85,6 +97,68 @@ export function createDefaultSourceRegistry(): SourceRegistry {
   return registry;
 }
 
+class DefaultFallbackOpportunityRepo {
+  getById(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  listBySavedSearchId(): Promise<[]> {
+    return Promise.resolve([]);
+  }
+  listByRunId(): Promise<[]> {
+    return Promise.resolve([]);
+  }
+  save(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+class DefaultFallbackEvaluationRepo {
+  getById(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  save(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+class DefaultFallbackObservationRepo {
+  getById(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  listByListingId(): Promise<[]> {
+    return Promise.resolve([]);
+  }
+  listBySourceRunId(): Promise<[]> {
+    return Promise.resolve([]);
+  }
+  save(): Promise<void> {
+    return Promise.resolve();
+  }
+  recordObservation(): Promise<never> {
+    throw new Error('Not supported');
+  }
+}
+class DefaultFallbackListingRepo {
+  getById(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  getBySourceAndExternalId(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  save(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+class DefaultFallbackFeedbackRepo {
+  getById(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  listByOpportunityId(): Promise<[]> {
+    return Promise.resolve([]);
+  }
+  save(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 /**
  * Creates default menu action handlers for the 8 contractual options.
  */
@@ -97,6 +171,9 @@ export function createDefaultMenuActions(
         configStore?: SavedSearchConfigStore | undefined;
         textFilePort?: TextFilePort | undefined;
         searchConfigDirectory?: string | undefined;
+        reviewQueueService?: ReviewQueueService | undefined;
+        recordFeedbackUseCase?: RecordReviewFeedbackUseCase | undefined;
+        externalUrlOpener?: ExternalUrlOpenerPort | undefined;
       },
 ): MenuAction[] {
   const actions: MenuAction[] = [];
@@ -117,6 +194,33 @@ export function createDefaultMenuActions(
       ? new NodeTextFileAdapter()
       : (param?.textFilePort ?? new NodeTextFileAdapter());
 
+  const reviewQueue = param instanceof MenuFormatter ? undefined : param?.reviewQueueService;
+  const recordFeedback = param instanceof MenuFormatter ? undefined : param?.recordFeedbackUseCase;
+  const urlOpener =
+    param instanceof MenuFormatter
+      ? new NodeExternalUrlOpener()
+      : (param?.externalUrlOpener ?? new NodeExternalUrlOpener());
+
+  const resolvedReviewQueue =
+    reviewQueue ??
+    new ReviewQueueService({
+      opportunityRepo: new DefaultFallbackOpportunityRepo(),
+      evaluationRepo: new DefaultFallbackEvaluationRepo(),
+      observationRepo: new DefaultFallbackObservationRepo(),
+      listingRepo: new DefaultFallbackListingRepo(),
+      feedbackRepo: new DefaultFallbackFeedbackRepo(),
+    });
+
+  const resolvedRecordFeedback =
+    recordFeedback ??
+    new RecordReviewFeedbackUseCase({
+      opportunityRepo: new DefaultFallbackOpportunityRepo(),
+      evaluationRepo: new DefaultFallbackEvaluationRepo(),
+      feedbackRepo: new DefaultFallbackFeedbackRepo(),
+      clock: new SystemClock(),
+      idGenerator: new UuidIdGenerator(),
+    });
+
   for (const item of CONTRACTUAL_MENU_OPTIONS) {
     if (item.optionNumber === 8) {
       actions.push(new ExitActionHandler(fmt));
@@ -134,6 +238,14 @@ export function createDefaultMenuActions(
           configStore: store,
         }),
       );
+    } else if (item.optionNumber === 5) {
+      actions.push(
+        new ReviewListingsActionHandler({
+          reviewQueueService: resolvedReviewQueue,
+          recordFeedbackUseCase: resolvedRecordFeedback,
+          externalUrlOpener: urlOpener,
+        }),
+      );
     } else if (item.optionNumber === 7) {
       actions.push(
         new ConfigurationActionHandler({
@@ -146,7 +258,6 @@ export function createDefaultMenuActions(
       const idMap: Record<number, string> = {
         1: 'run-search',
         4: 'view-history',
-        5: 'review-listings',
         6: 'source-errors',
       };
       actions.push(
@@ -189,6 +300,9 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
       configStore,
       textFilePort,
       searchConfigDirectory: options?.searchConfigDirectory,
+      reviewQueueService: options?.reviewQueueService,
+      recordFeedbackUseCase: options?.recordFeedbackUseCase,
+      externalUrlOpener: options?.externalUrlOpener,
     });
 
   // Connect terminal interrupt to central SignalManager and capture unsubscription

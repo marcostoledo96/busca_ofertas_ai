@@ -206,10 +206,75 @@ const prodMigration003: Migration = Object.freeze({
   },
 });
 
+const prodMigration004: Migration = Object.freeze({
+  version: 4,
+  name: '004_create_review_feedback_persistence',
+  up(context: MigrationContext): void {
+    context.exec(`
+      -- evaluations: Historical evaluation records
+      CREATE TABLE IF NOT EXISTS evaluations (
+        id TEXT PRIMARY KEY,
+        decision TEXT NOT NULL CHECK(decision IN ('MATCH', 'REVIEW', 'REJECT')),
+        score REAL NOT NULL CHECK(score >= 0.0 AND score <= 100.0),
+        reasons TEXT NOT NULL CHECK(json_valid(reasons)),
+        evaluated_by TEXT NOT NULL CHECK(json_valid(evaluated_by)),
+        policy_version TEXT NOT NULL CHECK(length(trim(policy_version)) > 0),
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_evaluations_decision ON evaluations(decision);
+
+      -- opportunities: Business opportunities linking search, observation and evaluation
+      CREATE TABLE IF NOT EXISTS opportunities (
+        id TEXT PRIMARY KEY,
+        saved_search_id TEXT NOT NULL REFERENCES saved_searches(id) ON DELETE RESTRICT,
+        observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE RESTRICT,
+        evaluation_id TEXT NOT NULL REFERENCES evaluations(id) ON DELETE RESTRICT,
+        novelty TEXT NOT NULL CHECK(novelty IN ('NEW', 'UNCHANGED', 'PRICE_CHANGED', 'REAPPEARED')),
+        created_at TEXT NOT NULL,
+        CONSTRAINT uq_opportunities_id_evaluation UNIQUE(id, evaluation_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_opportunities_saved_search_id ON opportunities(saved_search_id);
+      CREATE INDEX IF NOT EXISTS idx_opportunities_observation_id ON opportunities(observation_id);
+      CREATE INDEX IF NOT EXISTS idx_opportunities_evaluation_id ON opportunities(evaluation_id);
+
+      -- feedback: Append-only user review feedback
+      CREATE TABLE IF NOT EXISTS feedback (
+        id TEXT PRIMARY KEY,
+        opportunity_id TEXT NOT NULL,
+        previous_evaluation_id TEXT NOT NULL,
+        actor TEXT NOT NULL CHECK(actor = 'LOCAL_USER'),
+        decision TEXT NOT NULL CHECK(decision IN ('CONFIRMED_MATCH', 'FALSE_POSITIVE', 'PRICE_INCORRECT', 'NOT_INTERESTED', 'OTHER')),
+        notes TEXT CHECK(notes IS NULL OR length(notes) <= 2000),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (opportunity_id, previous_evaluation_id) REFERENCES opportunities(id, evaluation_id) ON DELETE RESTRICT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_feedback_opportunity_created ON feedback(opportunity_id, created_at ASC, id ASC);
+      CREATE INDEX IF NOT EXISTS idx_feedback_decision ON feedback(decision);
+
+      -- Triggers enforcing append-only immutability even against direct SQL
+      CREATE TRIGGER IF NOT EXISTS trg_feedback_no_update
+      BEFORE UPDATE ON feedback
+      BEGIN
+        SELECT RAISE(ABORT, 'Feedback records are append-only and cannot be updated');
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS trg_feedback_no_delete
+      BEFORE DELETE ON feedback
+      BEGIN
+        SELECT RAISE(ABORT, 'Feedback records are append-only and cannot be deleted');
+      END;
+    `);
+  },
+});
+
 export const PRODUCTION_MIGRATIONS: readonly Migration[] = Object.freeze([
   prodMigration001,
   prodMigration002,
   prodMigration003,
+  prodMigration004,
 ]);
 
 export function validateMigrationManifest(migrations: readonly Migration[]): readonly Migration[] {

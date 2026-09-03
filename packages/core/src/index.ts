@@ -11,6 +11,8 @@ export {
   InvariantViolationError,
   type Clock,
   type IdGenerator,
+  SystemClock,
+  UuidIdGenerator,
 } from './domain/common/index.js';
 
 export { type Hasher } from './domain/common/hasher.js';
@@ -88,6 +90,7 @@ export {
 
 export {
   type FeedbackDecision,
+  type FeedbackActor,
   type Feedback,
   type CreateFeedbackParams,
   createFeedback,
@@ -162,6 +165,7 @@ export {
   type RecordObservationParams,
   type RecordObservationResult,
   type ObservationRepository,
+  type EvaluationRepository,
   type OpportunityRepository,
   type FeedbackRepository,
   type RunSummary,
@@ -177,6 +181,11 @@ export {
   type ExecutionLockHandle,
   type ExecutionLockPort,
 } from './ports/execution-lock.js';
+
+export { type ExternalUrlOpenerPort } from './ports/external-url-opener.js';
+
+// Review Use Cases, Queue Services & Rule Suggestions
+export * from './review/index.js';
 
 // Package Metadata
 export const CORE_PACKAGE_NAME = '@busca-ofertas-ai/core' as const;

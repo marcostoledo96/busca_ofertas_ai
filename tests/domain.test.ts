@@ -164,6 +164,8 @@ describe('Domain Construction & Value Objects (BOAI-002)', () => {
     const feedback = createFeedback({
       id: 'fb-1',
       opportunityId: 'opp-1',
+      previousEvaluationId: 'eval-1',
+      actor: 'LOCAL_USER',
       decision: 'CONFIRMED_MATCH',
       notes: 'Excellent deal, purchased.',
       createdAt: baseDate,
@@ -171,6 +173,8 @@ describe('Domain Construction & Value Objects (BOAI-002)', () => {
 
     expect(feedback.id).toBe('fb-1');
     expect(feedback.opportunityId).toBe('opp-1');
+    expect(feedback.previousEvaluationId).toBe('eval-1');
+    expect(feedback.actor).toBe('LOCAL_USER');
     expect(feedback.decision).toBe('CONFIRMED_MATCH');
     expect(feedback.notes).toBe('Excellent deal, purchased.');
   });

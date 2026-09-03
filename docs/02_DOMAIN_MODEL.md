@@ -147,6 +147,38 @@ interface EvaluationReason {
 
 Un motivo `HARD` rechazado por reglas no puede ser revertido por IA.
 
+### Feedback
+
+Representa una decisión o corrección humana explícita registrada por el usuario sobre una oportunidad evaluada.
+
+```typescript
+type FeedbackActor = 'LOCAL_USER';
+
+type FeedbackDecision =
+  | 'CONFIRMED_MATCH'
+  | 'FALSE_POSITIVE'
+  | 'PRICE_INCORRECT'
+  | 'NOT_INTERESTED'
+  | 'OTHER';
+
+interface Feedback {
+  readonly id: string;
+  readonly opportunityId: string;
+  readonly previousEvaluationId: string;
+  readonly actor: FeedbackActor;
+  readonly decision: FeedbackDecision;
+  readonly notes?: string;
+  readonly createdAt: Date;
+}
+```
+
+Invariantes de Feedback:
+- Inmutable y append-only: nunca se actualiza ni se elimina una fila de feedback previa. Protegido por triggers `BEFORE UPDATE` y `BEFORE DELETE` en base de datos.
+- Preservación de decisiones contradictorias: si el usuario cambia de opinión en el tiempo (ej. marca inicialmente `CONFIRMED_MATCH` y más adelante `FALSE_POSITIVE`), todas las decisiones sobreviven en orden cronológico en SQLite.
+- Integridad referencial: la clave foránea compuesta `(opportunity_id, previous_evaluation_id)` asegura consistencia con la evaluación evaluada.
+- Longitud máxima de `notes`: 2000 caracteres UTF-8.
+- Privacidad local-first: el feedback se almacena únicamente en la base de datos local SQLite (`storage-sqlite`) y jamás en memoria de proveedores de IA ni en memorias de agentes (Gentle AI / Engram).
+
 ## Value objects
 
 ### ResolvedPrice
@@ -220,3 +252,4 @@ TIMEOUT
 8. Los datos crudos nunca contienen secretos de sesión.
 9. La eliminación por retención no borra el historial normalizado necesario para auditoría.
 10. Una fuente puede implementar capacidades parciales y debe declararlas explícitamente.
+11. El feedback humano es estrictamente append-only e inmutable, sin alterar jamás observaciones ni evaluaciones previas.

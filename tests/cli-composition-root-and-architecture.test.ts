@@ -176,7 +176,6 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
     };
 
     const forbiddenPackages = [
-      '@busca-ofertas-ai/core',
       '@busca-ofertas-ai/storage-sqlite',
       'playwright',
       'puppeteer',
@@ -197,6 +196,7 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
     expect(Object.keys(pkgContent.dependencies ?? {}).sort()).toEqual([
       '@busca-ofertas-ai/adapter-synthetic',
       '@busca-ofertas-ai/configuration',
+      '@busca-ofertas-ai/core',
       '@busca-ofertas-ai/report-html',
       '@busca-ofertas-ai/run-export',
     ]);
