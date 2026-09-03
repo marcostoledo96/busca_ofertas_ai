@@ -148,7 +148,7 @@ function renderSourcesSection(sources: readonly ReportSourceSummary[]): string {
           <td><strong>${escapeHtml(src.sourceId)}</strong></td>
           <td>${escapeHtml(src.collector ?? 'N/A')}</td>
           <td><span class="badge badge-status-${escapeHtml(src.sourceStatus === 'SUCCESS' ? 'SUCCESS' : src.sourceStatus === 'ZERO_RESULTS_CONFIRMED' ? 'SUCCESS' : 'FAILED')}">${escapeHtml(src.sourceStatus)}</span></td>
-          <td>${escapeHtml(src.itemsCount ?? 0)}</td>
+          <td>${escapeHtml(src.itemsCount !== undefined ? src.itemsCount : 'No disponible')}</td>
         </tr>`,
     )
     .join('\n');
@@ -221,7 +221,42 @@ function renderItemCard(item: ReportItem): string {
   const scoreText = item.score !== undefined ? `${item.score}` : 'No disponible';
   const rawPriceText = item.rawPrice !== undefined ? item.rawPrice : 'No disponible';
   const resolvedPriceText = item.resolvedPrice ? item.resolvedPrice.display : 'No disponible';
+  const resolvedCurrencyText = item.resolvedPrice ? item.resolvedPrice.currency : 'No disponible';
   const conversionText = item.conversionArs ? item.conversionArs.display : null;
+
+  const cardDetails: string[] = [
+    `<div class="card-detail-item"><strong>Fuente:</strong> ${escapeHtml(item.source)}</div>`,
+    `<div class="card-detail-item"><strong>Precio crudo:</strong> ${escapeHtml(rawPriceText)}</div>`,
+    `<div class="card-detail-item"><strong>Precio resuelto:</strong> ${escapeHtml(resolvedPriceText)}</div>`,
+    `<div class="card-detail-item"><strong>Moneda resuelta:</strong> ${escapeHtml(resolvedCurrencyText)}</div>`,
+  ];
+
+  if (conversionText !== null) {
+    cardDetails.push(
+      `<div class="card-detail-item"><strong>Conversión ARS:</strong> ${escapeHtml(conversionText)}</div>`,
+    );
+  }
+
+  cardDetails.push(
+    `<div class="card-detail-item"><strong>Puntaje (score):</strong> ${escapeHtml(scoreText)}</div>`,
+    `<div class="card-detail-item"><strong>Ubicación:</strong> ${escapeHtml(item.location ?? 'No disponible')}</div>`,
+    `<div class="card-detail-item"><strong>Condición:</strong> ${escapeHtml(item.condition ?? 'No disponible')}</div>`,
+    `<div class="card-detail-item"><strong>Publicada:</strong> ${escapeHtml(item.publishedAt ?? 'No disponible')}</div>`,
+  );
+
+  if (item.observedAt !== undefined) {
+    cardDetails.push(
+      `<div class="card-detail-item"><strong>Observada:</strong> ${escapeHtml(item.observedAt)}</div>`,
+    );
+  }
+
+  cardDetails.push(`<div class="card-detail-item"><strong>Enlace:</strong> ${urlLink}</div>`);
+
+  if (imageLink !== '') {
+    cardDetails.push(`<div class="card-detail-item"><strong>Imagen:</strong> ${imageLink}</div>`);
+  }
+
+  const detailsHtml = cardDetails.map((detail) => `        ${detail}`).join('\n');
 
   return `
     <article class="item-card card-${escapeHtml(item.decision)}" id="item-${escapeHtml(item.id)}">
@@ -234,46 +269,7 @@ function renderItemCard(item: ReportItem): string {
       </div>
 
       <div class="card-details-grid">
-        <div class="card-detail-item">
-          <strong>Fuente:</strong> ${escapeHtml(item.source)}
-        </div>
-        <div class="card-detail-item">
-          <strong>Precio crudo:</strong> ${escapeHtml(rawPriceText)}
-        </div>
-        <div class="card-detail-item">
-          <strong>Precio resuelto:</strong> ${escapeHtml(resolvedPriceText)}
-        </div>
-        ${
-          conversionText !== null
-            ? `
-        <div class="card-detail-item">
-          <strong>Conversión ARS:</strong> ${escapeHtml(conversionText)}
-        </div>`
-            : ''
-        }
-        <div class="card-detail-item">
-          <strong>Puntaje (score):</strong> ${escapeHtml(scoreText)}
-        </div>
-        <div class="card-detail-item">
-          <strong>Ubicación:</strong> ${escapeHtml(item.location ?? 'No disponible')}
-        </div>
-        <div class="card-detail-item">
-          <strong>Condición:</strong> ${escapeHtml(item.condition ?? 'No disponible')}
-        </div>
-        <div class="card-detail-item">
-          <strong>Publicada:</strong> ${escapeHtml(item.publishedAt ?? 'No disponible')}
-        </div>
-        <div class="card-detail-item">
-          <strong>Enlace:</strong> ${urlLink}
-        </div>
-        ${
-          imageLink !== ''
-            ? `
-        <div class="card-detail-item">
-          <strong>Imagen:</strong> ${imageLink}
-        </div>`
-            : ''
-        }
+${detailsHtml}
       </div>
 
       ${renderReasons(item.reasons)}
@@ -350,6 +346,9 @@ function renderErrorsSection(errors: readonly ReportSourceError[]): string {
           </div>
           <span class="badge badge-status-FAILED">${escapeHtml(err.errorCode)}</span>
         </div>
+        <div class="error-status" style="margin-top: 0.25rem; font-size: 0.9rem;">
+          <strong>Estado:</strong> ${escapeHtml(err.sourceStatus)}
+        </div>
         <div class="error-message">
           <strong>Explicación:</strong> ${escapeHtml(err.message)}
         </div>
@@ -401,9 +400,7 @@ export function renderReport(viewModel: ReportViewModel): string {
     viewModel.items.length === 0 &&
     sortedErrors.length === 0 &&
     sortedSources.length > 0 &&
-    sortedSources.every(
-      (s) => s.sourceStatus === 'ZERO_RESULTS_CONFIRMED' || s.sourceStatus === 'SUCCESS',
-    );
+    sortedSources.every((s) => s.sourceStatus === 'ZERO_RESULTS_CONFIRMED');
 
   const zeroResultsBanner = isLegitimateZeroResults
     ? `

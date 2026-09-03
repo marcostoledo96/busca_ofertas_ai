@@ -28,8 +28,8 @@ export const REPORT_CSS = `
   --color-match-text: #1b5e20;
 
   --color-review-bg: #fff8e1;
-  --color-review-border: #f57f17;
-  --color-review-text: #e65100;
+  --color-review-border: #b45309;
+  --color-review-text: #78350f;
 
   --color-reject-bg: #fbe9e7;
   --color-reject-border: #d32f2f;
@@ -39,7 +39,7 @@ export const REPORT_CSS = `
   --color-info-border: #0288d1;
   --color-info-text: #01579b;
 
-  --color-focus: #0969da;
+  --color-focus: #0550ae;
 }
 
 body {
@@ -151,7 +151,7 @@ h3 {
 .badge-status-CANCELLED {
   background: #eeeeee;
   border-color: #757575;
-  color: #424242;
+  color: #212529;
 }
 
 .badge-decision-MATCH {

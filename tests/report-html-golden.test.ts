@@ -81,6 +81,7 @@ export const GOLDEN_STANDARD_VM: ReportViewModel = {
       novelty: 'NEW',
       decision: 'MATCH',
       score: 92,
+      effectivePriceSortKey: 234000,
       reasons: [
         {
           code: 'PRICE_IN_RANGE',
@@ -109,6 +110,7 @@ export const GOLDEN_STANDARD_VM: ReportViewModel = {
       novelty: 'UNCHANGED',
       decision: 'REVIEW',
       score: 65,
+      effectivePriceSortKey: 280000,
       reasons: [
         {
           code: 'MODEL_AMBIGUOUS',
@@ -155,7 +157,7 @@ describe('packages/report-html — Golden Report Snapshots', () => {
     const fixturePath = path.join(fixturesDir, 'zero-results.html');
     const generatedHtml = renderReport(GOLDEN_ZERO_RESULTS_VM);
 
-    if (!fs.existsSync(fixturePath)) {
+    if (process.env['UPDATE_GOLDEN'] === '1' || !fs.existsSync(fixturePath)) {
       await fs.promises.mkdir(fixturesDir, { recursive: true });
       await fs.promises.writeFile(fixturePath, generatedHtml, 'utf-8');
     }
@@ -168,7 +170,7 @@ describe('packages/report-html — Golden Report Snapshots', () => {
     const fixturePath = path.join(fixturesDir, 'standard-report.html');
     const generatedHtml = renderReport(GOLDEN_STANDARD_VM);
 
-    if (!fs.existsSync(fixturePath)) {
+    if (process.env['UPDATE_GOLDEN'] === '1' || !fs.existsSync(fixturePath)) {
       await fs.promises.mkdir(fixturesDir, { recursive: true });
       await fs.promises.writeFile(fixturePath, generatedHtml, 'utf-8');
     }

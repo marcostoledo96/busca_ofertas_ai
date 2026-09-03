@@ -90,7 +90,7 @@ export interface ReportItem {
   readonly score?: number | undefined;
   readonly reasons: readonly ReportReason[];
   readonly imageUrl?: string | undefined;
-  readonly sortKey?: string | number | undefined;
+  readonly effectivePriceSortKey?: number | undefined;
 }
 
 export interface ReportRunSummary {

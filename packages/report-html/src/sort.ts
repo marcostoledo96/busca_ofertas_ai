@@ -34,18 +34,16 @@ export function sortMatchItems(items: readonly ReportItem[]): ReportItem[] {
       return aNoveltyRank - bNoveltyRank;
     }
 
-    // 3. Price / sortKey ascending
-    const aPrice =
-      a.resolvedPrice?.amount ?? (typeof a.sortKey === 'number' ? a.sortKey : undefined);
-    const bPrice =
-      b.resolvedPrice?.amount ?? (typeof b.sortKey === 'number' ? b.sortKey : undefined);
-    if (aPrice !== undefined && bPrice !== undefined) {
-      if (aPrice !== bPrice) {
-        return aPrice - bPrice;
+    // 3. Effective price ascending (provided by upstream, undefined last)
+    const aEffective = a.effectivePriceSortKey;
+    const bEffective = b.effectivePriceSortKey;
+    if (aEffective !== undefined && bEffective !== undefined) {
+      if (aEffective !== bEffective) {
+        return aEffective - bEffective;
       }
-    } else if (aPrice !== undefined && bPrice === undefined) {
+    } else if (aEffective !== undefined && bEffective === undefined) {
       return -1;
-    } else if (aPrice === undefined && bPrice !== undefined) {
+    } else if (aEffective === undefined && bEffective !== undefined) {
       return 1;
     }
 

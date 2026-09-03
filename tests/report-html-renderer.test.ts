@@ -450,7 +450,7 @@ describe('packages/report-html — Renderer and Security', () => {
   });
 
   describe('Deterministic Ordering and Pure Rendering', () => {
-    it('strictly orders MATCH items by score desc (undefined last), novelty ranking, price asc, and id', () => {
+    it('strictly orders MATCH items by score desc (undefined last), novelty ranking, effectivePriceSortKey asc, and id', () => {
       const items: ReportItem[] = [
         {
           id: 'item-c',
@@ -509,26 +509,340 @@ describe('packages/report-html — Renderer and Security', () => {
       expect(posD).toBeGreaterThan(posC);
     });
 
-    it('guarantees render(vm) === render(vm) (pure and deterministic output)', () => {
+    it('orders by effectivePriceSortKey without comparing raw amounts of mixed currencies (Finding 2)', () => {
+      const itemA: ReportItem = {
+        id: 'item-a',
+        title: 'Switch Lite USD (A)',
+        source: 'src-a',
+        score: 90,
+        novelty: 'NEW',
+        decision: 'MATCH',
+        resolvedPrice: { amount: 300, currency: 'USD', display: 'USD 300' },
+        effectivePriceSortKey: 390000,
+        reasons: [],
+      };
+      const itemB: ReportItem = {
+        id: 'item-b',
+        title: 'Switch Lite ARS (B)',
+        source: 'src-b',
+        score: 90,
+        novelty: 'NEW',
+        decision: 'MATCH',
+        resolvedPrice: { amount: 250000, currency: 'ARS', display: 'ARS 250.000' },
+        effectivePriceSortKey: 250000,
+        reasons: [],
+      };
+
+      // Even though raw amount 250000 > 300, effectivePriceSortKey 250000 < 390000.
+      // Expected order: B before A!
+      const vm = createMinimalViewModel({ items: [itemA, itemB] });
+      const html = renderReport(vm);
+
+      const posB = html.indexOf('id="item-item-b"');
+      const posA = html.indexOf('id="item-item-a"');
+      expect(posB).toBeGreaterThan(0);
+      expect(posA).toBeGreaterThan(posB);
+    });
+
+    it('places items with undefined effectivePriceSortKey after items with effectivePriceSortKey, and breaks ties by id', () => {
+      const item1: ReportItem = {
+        id: 'item-with-key',
+        title: 'With Key',
+        source: 'src',
+        score: 90,
+        novelty: 'NEW',
+        decision: 'MATCH',
+        effectivePriceSortKey: 50000,
+        reasons: [],
+      };
+      const item2: ReportItem = {
+        id: 'item-no-key',
+        title: 'No Key',
+        source: 'src',
+        score: 90,
+        novelty: 'NEW',
+        decision: 'MATCH',
+        effectivePriceSortKey: undefined,
+        reasons: [],
+      };
+      const item3: ReportItem = {
+        id: 'item-tie-a',
+        title: 'Tie A',
+        source: 'src',
+        score: 90,
+        novelty: 'NEW',
+        decision: 'MATCH',
+        effectivePriceSortKey: 50000,
+        reasons: [],
+      };
+
+      const vm = createMinimalViewModel({ items: [item2, item3, item1] });
+      const html = renderReport(vm);
+
+      const posTieA = html.indexOf('id="item-item-tie-a"');
+      const posWithKey = html.indexOf('id="item-item-with-key"');
+      const posNoKey = html.indexOf('id="item-item-no-key"');
+
+      // item-tie-a and item-with-key have same effectivePriceSortKey (50000), tie broken by id ('item-tie-a' < 'item-with-key')
+      expect(posTieA).toBeGreaterThan(0);
+      expect(posWithKey).toBeGreaterThan(posTieA);
+      // undefined key is last
+      expect(posNoKey).toBeGreaterThan(posWithKey);
+    });
+
+    it('guarantees render(vm) === render(vm) regardless of initial input order', () => {
+      const itemA: ReportItem = {
+        id: 'item-a',
+        title: 'Item A',
+        source: 'src',
+        score: 80,
+        novelty: 'NEW',
+        decision: 'MATCH',
+        effectivePriceSortKey: 100,
+        reasons: [],
+      };
+      const itemB: ReportItem = {
+        id: 'item-b',
+        title: 'Item B',
+        source: 'src',
+        score: 90,
+        novelty: 'NEW',
+        decision: 'MATCH',
+        effectivePriceSortKey: 200,
+        reasons: [],
+      };
+
+      const htmlOrder1 = renderReport(createMinimalViewModel({ items: [itemA, itemB] }));
+      const htmlOrder2 = renderReport(createMinimalViewModel({ items: [itemB, itemA] }));
+
+      expect(htmlOrder1).toBe(htmlOrder2);
+    });
+  });
+
+  describe('WCAG 2.x AA Color Contrast Automated Verification (Finding 1)', () => {
+    function hexToRgb(hex: string): [number, number, number] {
+      const clean = hex.replace('#', '');
+      return [
+        parseInt(clean.slice(0, 2), 16) / 255,
+        parseInt(clean.slice(2, 4), 16) / 255,
+        parseInt(clean.slice(4, 6), 16) / 255,
+      ];
+    }
+
+    function channelLinear(val: number): number {
+      return val <= 0.04045 ? val / 12.92 : Math.pow((val + 0.055) / 1.055, 2.4);
+    }
+
+    function relativeLuminance(hex: string): number {
+      const [r, g, b] = hexToRgb(hex);
+      return 0.2126 * channelLinear(r) + 0.7152 * channelLinear(g) + 0.0722 * channelLinear(b);
+    }
+
+    function calculateContrastRatio(hexBg: string, hexFg: string): number {
+      const l1 = relativeLuminance(hexBg);
+      const l2 = relativeLuminance(hexFg);
+      const lighter = Math.max(l1, l2);
+      const darker = Math.min(l1, l2);
+      return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    const normalTextPairs = [
+      { name: 'MATCH badge', bg: '#e6f4ea', fg: '#1b5e20' },
+      { name: 'REVIEW badge / status PARTIAL_SUCCESS', bg: '#fff8e1', fg: '#78350f' },
+      { name: 'REJECT badge / status FAILED', bg: '#fbe9e7', fg: '#b71c1c' },
+      { name: 'INFO badge / ZERO_RESULTS banner', bg: '#e3f2fd', fg: '#01579b' },
+      { name: 'SOFT reason badge', bg: '#fff8e1', fg: '#78350f' },
+      { name: 'HARD reason badge', bg: '#fbe9e7', fg: '#b71c1c' },
+      { name: 'SUCCESS status badge', bg: '#e6f4ea', fg: '#1b5e20' },
+      { name: 'CANCELLED status badge', bg: '#eeeeee', fg: '#212529' },
+      { name: 'WARNINGS banner', bg: '#fff8e1', fg: '#78350f' },
+      { name: 'NOVELTY badge', bg: '#ede7f6', fg: '#4527a0' },
+      { name: 'Body text', bg: '#f8f9fa', fg: '#212529' },
+      { name: 'Surface text', bg: '#ffffff', fg: '#212529' },
+      { name: 'Muted text on surface', bg: '#ffffff', fg: '#595959' },
+      { name: 'Link on surface', bg: '#ffffff', fg: '#0550ae' },
+      { name: 'Link on body', bg: '#f8f9fa', fg: '#0550ae' },
+    ];
+
+    it.each(normalTextPairs)(
+      'ensures $name ($fg on $bg) has contrast ratio >= 4.5:1 for normal text',
+      ({ bg, fg }) => {
+        const ratio = calculateContrastRatio(bg, fg);
+        expect(ratio).toBeGreaterThanOrEqual(4.5);
+      },
+    );
+  });
+
+  describe('Explicit Moneda Resuelta, ObservedAt, and ItemsCount (Finding 2, 3 & Completeness)', () => {
+    it('explicitly displays Moneda resuelta even when display is formatted', () => {
       const vm = createMinimalViewModel({
         items: [
           {
-            id: 'item-1',
-            title: 'Nintendo Switch Lite 🎮 Hurlingham Ñandú “Edición Especial”',
+            id: 'item-curr-1',
+            title: 'Nintendo Switch Lite Coral',
             source: 'fb',
-            decision: 'MATCH',
             novelty: 'NEW',
-            score: 88,
-            reasons: [{ code: 'OK', message: 'Buen estado', severity: 'INFO' }],
+            decision: 'MATCH',
+            resolvedPrice: { amount: 180, currency: 'USD', display: '180,00' },
+            reasons: [],
           },
         ],
       });
 
-      const html1 = renderReport(vm);
-      const html2 = renderReport(vm);
+      const html = renderReport(vm);
+      expect(html).toContain('<strong>Precio resuelto:</strong> 180,00');
+      expect(html).toContain('<strong>Moneda resuelta:</strong> USD');
+    });
 
-      expect(html1).toBe(html2);
-      expect(html1).toContain('Nintendo Switch Lite 🎮 Hurlingham Ñandú “Edición Especial”');
+    it('renders "No disponible" for Moneda resuelta when resolvedPrice is absent', () => {
+      const vm = createMinimalViewModel({
+        items: [
+          {
+            id: 'item-curr-none',
+            title: 'Sin precio resuelto',
+            source: 'fb',
+            novelty: 'NEW',
+            decision: 'MATCH',
+            resolvedPrice: undefined,
+            reasons: [],
+          },
+        ],
+      });
+
+      const html = renderReport(vm);
+      expect(html).toContain('<strong>Moneda resuelta:</strong> No disponible');
+    });
+
+    it('renders Observada: when observedAt is available on ReportItem without fabricating publishedAt', () => {
+      const vm = createMinimalViewModel({
+        items: [
+          {
+            id: 'item-obs-1',
+            title: 'Nintendo Switch Lite Turquesa',
+            source: 'fb',
+            novelty: 'NEW',
+            decision: 'MATCH',
+            observedAt: '2026-09-03T11:45:00.000Z',
+            publishedAt: undefined,
+            reasons: [],
+          },
+        ],
+      });
+
+      const html = renderReport(vm);
+      expect(html).toContain('<strong>Observada:</strong> 2026-09-03T11:45:00.000Z');
+      expect(html).toContain('<strong>Publicada:</strong> No disponible');
+    });
+
+    it('renders "No disponible" when source itemsCount is undefined (does not invent 0)', () => {
+      const vm = createMinimalViewModel({
+        run: {
+          ...createMinimalViewModel().run,
+          sources: [
+            {
+              sourceId: 'fb-source',
+              sourceStatus: 'SUCCESS',
+              itemsCount: undefined,
+            },
+          ],
+        },
+      });
+
+      const html = renderReport(vm);
+      expect(html).toContain('<td>No disponible</td>');
+    });
+
+    it('renders explicit sourceStatus in the error card', () => {
+      const vm = createMinimalViewModel({
+        sourceErrors: [
+          {
+            sourceId: 'mercadolibre',
+            sourceStatus: 'NETWORK_ERROR',
+            errorCode: 'TIMEOUT',
+            message: 'Conexión agotada',
+            suggestedAction: 'Reintentar',
+          },
+        ],
+      });
+
+      const html = renderReport(vm);
+      expect(html).toContain('<strong>Estado:</strong> NETWORK_ERROR');
+      expect(html).toContain('TIMEOUT');
+    });
+  });
+
+  describe('Zero Results Confirmed Strict Semantics (Finding 3)', () => {
+    it('Case A: SUCCESS global + 1 source ZERO_RESULTS_CONFIRMED + 0 items + 0 errors -> banner PRESENT', () => {
+      const vm = createMinimalViewModel({
+        run: {
+          ...createMinimalViewModel().run,
+          globalStatus: 'SUCCESS',
+          sources: [{ sourceId: 'fb', sourceStatus: 'ZERO_RESULTS_CONFIRMED' }],
+        },
+        items: [],
+        sourceErrors: [],
+      });
+
+      const html = renderReport(vm);
+      expect(html).toContain('Cero resultados confirmados en las fuentes consultadas.');
+    });
+
+    it('Case B: SUCCESS global + 1 source SUCCESS + 0 items + 0 errors -> banner ABSENT', () => {
+      const vm = createMinimalViewModel({
+        run: {
+          ...createMinimalViewModel().run,
+          globalStatus: 'SUCCESS',
+          sources: [{ sourceId: 'fb', sourceStatus: 'SUCCESS', itemsCount: 0 }],
+        },
+        items: [],
+        sourceErrors: [],
+      });
+
+      const html = renderReport(vm);
+      expect(html).not.toContain('Cero resultados confirmados');
+    });
+
+    it('Case C: SUCCESS global + ZERO_RESULTS_CONFIRMED and SUCCESS sources + 0 items + 0 errors -> banner ABSENT', () => {
+      const vm = createMinimalViewModel({
+        run: {
+          ...createMinimalViewModel().run,
+          globalStatus: 'SUCCESS',
+          sources: [
+            { sourceId: 'fb', sourceStatus: 'ZERO_RESULTS_CONFIRMED' },
+            { sourceId: 'ml', sourceStatus: 'SUCCESS', itemsCount: 0 },
+          ],
+        },
+        items: [],
+        sourceErrors: [],
+      });
+
+      const html = renderReport(vm);
+      expect(html).not.toContain('Cero resultados confirmados');
+    });
+
+    it('Case D: FAILED/PARTIAL_SUCCESS + 0 items + error present -> banner ABSENT and error visible', () => {
+      const vm = createMinimalViewModel({
+        run: {
+          ...createMinimalViewModel().run,
+          globalStatus: 'FAILED',
+          sources: [{ sourceId: 'fb', sourceStatus: 'SOURCE_UNAVAILABLE' }],
+        },
+        items: [],
+        sourceErrors: [
+          {
+            sourceId: 'fb',
+            sourceStatus: 'SOURCE_UNAVAILABLE',
+            errorCode: 'DOWN',
+            message: 'Servicio no disponible',
+            suggestedAction: 'Esperar',
+          },
+        ],
+      });
+
+      const html = renderReport(vm);
+      expect(html).not.toContain('Cero resultados confirmados');
+      expect(html).toContain('Errores de Fuente (1)');
+      expect(html).toContain('Servicio no disponible');
     });
   });
 });

@@ -48,17 +48,45 @@ describe('apps/cli — Report Persistence and Reporting Service', () => {
       expect(generateSearchSlug('!!!///???')).toBe('busqueda');
     });
 
-    it('sanitizes short run IDs to alphanumeric with underscore/hyphen', () => {
-      expect(sanitizeShortRunId('run-12345')).toBe('run-12345');
-      expect(sanitizeShortRunId('../../etc/passwd')).toBe('etc_passwd');
-      expect(sanitizeShortRunId('')).toBe('run');
-      expect(sanitizeShortRunId('   ')).toBe('run');
+    it('derives deterministic, unique run ID segments incorporating digest of full ID', () => {
+      const id1 = sanitizeShortRunId('run-12345');
+      const id2 = sanitizeShortRunId('run-12345');
+      expect(id1).toBe(id2);
+      expect(id1).toMatch(/^run-12345-[a-f0-9]{8}$/);
+
+      // Distinct IDs sharing the same first 16 safe chars produce DIFFERENT segments
+      const runA = sanitizeShortRunId('run-aaaaaaaaaaaa-111');
+      const runB = sanitizeShortRunId('run-aaaaaaaaaaaa-222');
+      expect(runA).not.toBe(runB);
+
+      // Distinct IDs that would normalize to the same characters produce DIFFERENT segments
+      const norm1 = sanitizeShortRunId('run/1');
+      const norm2 = sanitizeShortRunId('run_1');
+      expect(norm1).not.toBe(norm2);
+
+      // Traversal payloads stripped of traversal chars
+      const traversal = sanitizeShortRunId('../../etc/passwd');
+      expect(traversal).not.toContain('/');
+      expect(traversal).not.toContain('..');
+      expect(traversal).toMatch(/^etc_passwd-[a-f0-9]{8}$/);
+
+      expect(sanitizeShortRunId('')).toMatch(/^run-[a-f0-9]{8}$/);
+      expect(sanitizeShortRunId('   ')).toMatch(/^run-[a-f0-9]{8}$/);
     });
 
     it('formats timestamps deterministically in UTC as YYYY-MM-DD_HH-mm-ss', () => {
       const fixedDate = new Date('2026-09-03T15:30:45.000Z');
       expect(formatRunTimestamp(fixedDate)).toBe('2026-09-03_15-30-45');
       expect(formatRunTimestamp('2026-08-30T19:40:00.000Z')).toBe('2026-08-30_19-40-00');
+    });
+
+    it('rejects invalid or unparseable startedAt dates with typed CliError without writing', () => {
+      expect(() => formatRunTimestamp('invalid-date')).toThrowError(
+        /Fecha de inicio de ejecución inválida/,
+      );
+      expect(() => formatRunTimestamp(new Date('invalid'))).toThrowError(
+        /Fecha de inicio de ejecución inválida/,
+      );
     });
   });
 
@@ -136,6 +164,62 @@ describe('apps/cli — Report Persistence and Reporting Service', () => {
       // Direct traversal test through manual dir validation
       const resolvedTarget = path.resolve(tempReportsDir, '2026-09-03_12-00-00_tmp_etc_shadow');
       expect(resolvedTarget.startsWith(tempReportsDir)).toBe(true);
+    });
+
+    it('ensures different runs with the same prefix or normalizing characters produce distinct directories', async () => {
+      const optionsA = {
+        reportsDir: tempReportsDir,
+        searchName: 'Switch Lite',
+        runId: 'run-aaaaaaaaaaaa-111',
+        startedAt: '2026-09-03T12:00:00.000Z',
+        htmlContent: '<h1>Run A</h1>',
+      };
+      const optionsB = {
+        reportsDir: tempReportsDir,
+        searchName: 'Switch Lite',
+        runId: 'run-aaaaaaaaaaaa-222',
+        startedAt: '2026-09-03T12:00:00.000Z',
+        htmlContent: '<h1>Run B</h1>',
+      };
+
+      const resA = await persistReportHtml(optionsA);
+      const resB = await persistReportHtml(optionsB);
+
+      expect(resA.reportDirectory).not.toBe(resB.reportDirectory);
+      expect(await fs.promises.readFile(resA.reportPath, 'utf-8')).toBe('<h1>Run A</h1>');
+      expect(await fs.promises.readFile(resB.reportPath, 'utf-8')).toBe('<h1>Run B</h1>');
+
+      // Also verify distinct runs that would normalize to same chars
+      const resNorm1 = await persistReportHtml({
+        reportsDir: tempReportsDir,
+        searchName: 'Switch Lite',
+        runId: 'run/1',
+        startedAt: '2026-09-03T12:00:00.000Z',
+        htmlContent: '<h1>Run Norm 1</h1>',
+      });
+      const resNorm2 = await persistReportHtml({
+        reportsDir: tempReportsDir,
+        searchName: 'Switch Lite',
+        runId: 'run_1',
+        startedAt: '2026-09-03T12:00:00.000Z',
+        htmlContent: '<h1>Run Norm 2</h1>',
+      });
+      expect(resNorm1.reportDirectory).not.toBe(resNorm2.reportDirectory);
+    });
+
+    it('rejects persistReportHtml with invalid startedAt and creates zero report files', async () => {
+      await expect(
+        persistReportHtml({
+          reportsDir: tempReportsDir,
+          searchName: 'Test',
+          runId: 'run-invalid-date',
+          startedAt: 'invalid-timestamp',
+          htmlContent: '<h1>No write</h1>',
+        }),
+      ).rejects.toThrow(/Fecha de inicio de ejecución inválida/);
+
+      const entries = await fs.promises.readdir(tempReportsDir);
+      expect(entries).toEqual([]);
     });
 
     it('rejects immediately when AbortSignal is aborted', async () => {

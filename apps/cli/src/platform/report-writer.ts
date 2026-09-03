@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { CliError } from '../runtime/errors.js';
@@ -44,28 +45,39 @@ export function generateSearchSlug(searchName: string): string {
 }
 
 /**
- * Sanitizes a run ID to produce a safe directory suffix.
+ * Derives a deterministic, filesystem-safe run ID segment from the complete original runId.
+ * Incorporates a human-readable safe prefix and a stable SHA-256 digest of the entire ID,
+ * preventing collisions between different IDs sharing prefixes or normalizing identically.
  */
 export function sanitizeShortRunId(runId: string): string {
   if (!runId || typeof runId !== 'string') {
-    return 'run';
+    return 'run-e3b0c442';
   }
 
-  const sanitized = runId
+  const safePrefix = runId
     .replace(/[^a-zA-Z0-9_-]+/g, '_')
     .replace(/^[-_]+|[-_]+$/g, '')
-    .slice(0, 16);
-  return sanitized.length > 0 ? sanitized : 'run';
+    .slice(0, 12);
+
+  const prefix = safePrefix.length > 0 ? safePrefix : 'run';
+  const digest = crypto.createHash('sha256').update(runId, 'utf8').digest('hex').slice(0, 8);
+  return `${prefix}-${digest}`;
 }
 
 /**
  * Formats a Date or ISO timestamp string deterministically as YYYY-MM-DD_HH-mm-ss in UTC.
+ * Throws CliError if startedAt is missing, unparseable or represents an invalid Date.
  */
 export function formatRunTimestamp(startedAt: string | Date): string {
   const date = typeof startedAt === 'string' ? new Date(startedAt) : startedAt;
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-    // If unparseable date, fallback to standard deterministic epoch
-    return '1970-01-01_00-00-00';
+    throw new CliError({
+      code: 'INVALID_STARTED_AT',
+      userMessage: `Fecha de inicio de ejecución inválida para generar reporte: '${String(startedAt)}'`,
+      suggestedAction:
+        'Verificá que el timestamp de inicio de la ejecución sea una fecha ISO válida.',
+      exitCode: EXIT_CODES.INVALID_CONFIGURATION,
+    });
   }
 
   const year = date.getUTCFullYear();
