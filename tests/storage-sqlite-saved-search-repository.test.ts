@@ -854,4 +854,122 @@ describe('SqliteSavedSearchRepository (BOAI-011 / Findings B & C)', () => {
       }
     });
   });
+
+  it('fails closed with StorageCorruptionError when canonical snapshot structures have invalid runtime shapes (Wave 4 Finding Único)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const repo = new SqliteSavedSearchRepository(db);
+
+      const search = createSavedSearch({
+        ...minimalSearch,
+        id: 'search-structural-test',
+        name: 'Valid Search',
+      });
+      await repo.save(search);
+
+      const invalidShapeCases: readonly {
+        desc: string;
+        mutate: (payload: Record<string, unknown>) => void;
+      }[] = [
+        {
+          desc: 'price = "CORRUPT"',
+          mutate: (p) => {
+            p['price'] = 'CORRUPT';
+          },
+        },
+        {
+          desc: 'location = 42',
+          mutate: (p) => {
+            p['location'] = 42;
+          },
+        },
+        {
+          desc: 'retention = {}',
+          mutate: (p) => {
+            p['retention'] = {};
+          },
+        },
+        {
+          desc: 'ai = {}',
+          mutate: (p) => {
+            p['ai'] = {};
+          },
+        },
+        {
+          desc: 'sourceConfigs = [{ id: 123, enabled: "yes", queries: [] }]',
+          mutate: (p) => {
+            p['sourceConfigs'] = [{ id: 123, enabled: 'yes', queries: [] }];
+          },
+        },
+        {
+          desc: 'query.terms = [123]',
+          mutate: (p) => {
+            p['query'] = { terms: [123] };
+          },
+        },
+        {
+          desc: 'rules = [{ id: 123, type: false }]',
+          mutate: (p) => {
+            p['rules'] = [{ id: 123, type: false }];
+          },
+        },
+      ];
+
+      for (const item of invalidShapeCases) {
+        // 1. Current payload test
+        const originalCurrent = JSON.parse(
+          (
+            db
+              .prepare('SELECT payload FROM saved_searches WHERE id = ?')
+              .get('search-structural-test') as { payload: string }
+          ).payload,
+        ) as Record<string, unknown>;
+
+        const corruptCurrent: Record<string, unknown> = { ...originalCurrent };
+        item.mutate(corruptCurrent);
+
+        db.prepare('UPDATE saved_searches SET payload = ? WHERE id = ?').run(
+          JSON.stringify(corruptCurrent),
+          'search-structural-test',
+        );
+
+        await expect(repo.getById('search-structural-test')).rejects.toThrow(
+          StorageCorruptionError,
+        );
+
+        // Restore current payload
+        db.prepare('UPDATE saved_searches SET payload = ? WHERE id = ?').run(
+          JSON.stringify(originalCurrent),
+          'search-structural-test',
+        );
+
+        // 2. Revision snapshot test
+        const originalSnapshot = JSON.parse(
+          (
+            db
+              .prepare('SELECT snapshot FROM saved_search_revisions WHERE saved_search_id = ?')
+              .get('search-structural-test') as { snapshot: string }
+          ).snapshot,
+        ) as Record<string, unknown>;
+
+        const corruptSnapshot: Record<string, unknown> = { ...originalSnapshot };
+        item.mutate(corruptSnapshot);
+
+        db.prepare('UPDATE saved_search_revisions SET snapshot = ? WHERE saved_search_id = ?').run(
+          JSON.stringify(corruptSnapshot),
+          'search-structural-test',
+        );
+
+        await expect(repo.listRevisions('search-structural-test')).rejects.toThrow(
+          StorageCorruptionError,
+        );
+
+        // Restore revision snapshot
+        db.prepare('UPDATE saved_search_revisions SET snapshot = ? WHERE saved_search_id = ?').run(
+          JSON.stringify(originalSnapshot),
+          'search-structural-test',
+        );
+      }
+    });
+  });
 });

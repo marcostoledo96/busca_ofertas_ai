@@ -3,6 +3,17 @@ import {
   type SavedSearchRepository,
   type SavedSearchRevisionRecord,
   type CreateSavedSearchParams,
+  type SourceSearchConfig,
+  type QueryPolicy,
+  type PricePolicy,
+  type LocationPolicy,
+  type ConditionPolicy,
+  type RuleExpression,
+  type EvaluationPolicy,
+  type AiPolicy,
+  type RetentionPolicy,
+  type PriceCurrency,
+  type ListingCondition,
   createSavedSearch,
 } from '@busca-ofertas-ai/core';
 import type { SqliteDatabase } from '../database/types.js';
@@ -52,6 +63,396 @@ function parseIsoDate(isoString: unknown, fieldName: string, entityId: string): 
 }
 
 const VALID_CATEGORIES: ReadonlySet<string> = new Set(['PRODUCT', 'REAL_ESTATE', 'VEHICLE']);
+const VALID_CURRENCIES: ReadonlySet<string> = new Set(['ARS', 'USD', 'UNKNOWN']);
+const VALID_FOREIGN_MODES: ReadonlySet<string> = new Set(['MANUAL_RATE', 'IGNORE', 'STRICT']);
+const VALID_ON_UNKNOWN: ReadonlySet<string> = new Set(['REVIEW', 'REJECT']);
+const VALID_LOCATION_MODES: ReadonlySet<string> = new Set(['REGION', 'RADIUS', 'CUSTOM']);
+const VALID_CONDITIONS: ReadonlySet<string> = new Set([
+  'NEW',
+  'LIKE_NEW',
+  'GOOD',
+  'FAIR',
+  'FOR_PARTS',
+  'UNKNOWN',
+]);
+const VALID_PRECISION_PROFILES: ReadonlySet<string> = new Set([
+  'STRICT',
+  'BALANCED',
+  'PERMISSIVE',
+  'MIXED',
+]);
+const VALID_RAW_ARTIFACTS: ReadonlySet<string> = new Set(['ERRORS_AND_REVIEW', 'ALL', 'NONE']);
+
+function isRecord(val: unknown): val is Record<string, unknown> {
+  return typeof val === 'object' && val !== null && !Array.isArray(val);
+}
+
+function validateSourceConfigs(val: unknown, entityContext: string): SourceSearchConfig[] {
+  if (!Array.isArray(val) || val.length === 0) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': 'sourceConfigs' must be a non-empty array`,
+    );
+  }
+  return val.map((item, idx) => {
+    if (!isRecord(item)) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': sourceConfigs[${idx}] must be an object`,
+      );
+    }
+    if (typeof item['id'] !== 'string' || item['id'].trim().length === 0) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': sourceConfigs[${idx}].id must be a non-empty string`,
+      );
+    }
+    if (typeof item['enabled'] !== 'boolean') {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': sourceConfigs[${idx}].enabled must be a boolean`,
+      );
+    }
+    if (!Array.isArray(item['queries']) || !item['queries'].every((q) => typeof q === 'string')) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': sourceConfigs[${idx}].queries must be an array of strings`,
+      );
+    }
+    if (item['options'] !== undefined && !isRecord(item['options'])) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': sourceConfigs[${idx}].options must be an object/record if present`,
+      );
+    }
+    if (item['sessionRef'] !== undefined && typeof item['sessionRef'] !== 'string') {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': sourceConfigs[${idx}].sessionRef must be a string if present`,
+      );
+    }
+    return {
+      id: item['id'],
+      enabled: item['enabled'],
+      queries: item['queries'],
+      ...(item['options'] !== undefined ? { options: item['options'] } : {}),
+      ...(item['sessionRef'] !== undefined ? { sessionRef: item['sessionRef'] } : {}),
+    };
+  });
+}
+
+function validateQuery(val: unknown, entityContext: string): QueryPolicy {
+  if (!isRecord(val)) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': 'query' must be an object`,
+    );
+  }
+  if (!Array.isArray(val['terms']) || !val['terms'].every((t) => typeof t === 'string')) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': query.terms must be an array of strings`,
+    );
+  }
+  if (
+    val['excludedTerms'] !== undefined &&
+    (!Array.isArray(val['excludedTerms']) ||
+      !val['excludedTerms'].every((t) => typeof t === 'string'))
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': query.excludedTerms must be an array of strings if present`,
+    );
+  }
+  return {
+    terms: val['terms'],
+    ...(val['excludedTerms'] !== undefined ? { excludedTerms: val['excludedTerms'] } : {}),
+  };
+}
+
+function validatePrice(val: unknown, entityContext: string): PricePolicy | null {
+  if (val === null) return null;
+  if (!isRecord(val)) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': 'price' must be null or an object`,
+    );
+  }
+  if (typeof val['targetCurrency'] !== 'string' || !VALID_CURRENCIES.has(val['targetCurrency'])) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': price.targetCurrency must be a valid PriceCurrency`,
+    );
+  }
+  const maximum = val['maximum'];
+  if (
+    maximum !== undefined &&
+    maximum !== null &&
+    (typeof maximum !== 'number' || !Number.isFinite(maximum))
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': price.maximum must be null or a finite number`,
+    );
+  }
+  const minimumPlausible = val['minimumPlausible'];
+  if (
+    minimumPlausible !== undefined &&
+    minimumPlausible !== null &&
+    (typeof minimumPlausible !== 'number' || !Number.isFinite(minimumPlausible))
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': price.minimumPlausible must be null or a finite number`,
+    );
+  }
+
+  let foreignCurrency: PricePolicy['foreignCurrency'];
+  if (val['foreignCurrency'] !== undefined) {
+    const fc = val['foreignCurrency'];
+    if (!isRecord(fc)) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': price.foreignCurrency must be an object if present`,
+      );
+    }
+    if (typeof fc['mode'] !== 'string' || !VALID_FOREIGN_MODES.has(fc['mode'])) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': price.foreignCurrency.mode is invalid`,
+      );
+    }
+    if (typeof fc['onUnknown'] !== 'string' || !VALID_ON_UNKNOWN.has(fc['onUnknown'])) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': price.foreignCurrency.onUnknown is invalid`,
+      );
+    }
+    foreignCurrency = {
+      mode: fc['mode'] as 'MANUAL_RATE' | 'IGNORE' | 'STRICT',
+      onUnknown: fc['onUnknown'] as 'REVIEW' | 'REJECT',
+    };
+  }
+
+  return {
+    targetCurrency: val['targetCurrency'] as PriceCurrency,
+    ...(maximum !== undefined ? { maximum: maximum } : {}),
+    ...(minimumPlausible !== undefined ? { minimumPlausible: minimumPlausible } : {}),
+    ...(foreignCurrency !== undefined ? { foreignCurrency } : {}),
+  };
+}
+
+function validateLocation(val: unknown, entityContext: string): LocationPolicy | null {
+  if (val === null) return null;
+  if (!isRecord(val)) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': 'location' must be null or an object`,
+    );
+  }
+  if (typeof val['mode'] !== 'string' || !VALID_LOCATION_MODES.has(val['mode'])) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': location.mode is invalid`,
+    );
+  }
+  if (val['region'] !== undefined && typeof val['region'] !== 'string') {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': location.region must be a string if present`,
+    );
+  }
+  if (
+    val['radiusKm'] !== undefined &&
+    (typeof val['radiusKm'] !== 'number' || !Number.isFinite(val['radiusKm']))
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': location.radiusKm must be a finite number if present`,
+    );
+  }
+  let coordinates: LocationPolicy['coordinates'];
+  if (val['coordinates'] !== undefined) {
+    const coords = val['coordinates'];
+    if (!isRecord(coords)) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': location.coordinates must be an object if present`,
+      );
+    }
+    if (
+      typeof coords['latitude'] !== 'number' ||
+      !Number.isFinite(coords['latitude']) ||
+      typeof coords['longitude'] !== 'number' ||
+      !Number.isFinite(coords['longitude'])
+    ) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': location.coordinates latitude/longitude must be finite numbers`,
+      );
+    }
+    coordinates = {
+      latitude: coords['latitude'],
+      longitude: coords['longitude'],
+    };
+  }
+
+  return {
+    mode: val['mode'] as 'REGION' | 'RADIUS' | 'CUSTOM',
+    ...(val['region'] !== undefined ? { region: val['region'] } : {}),
+    ...(val['radiusKm'] !== undefined ? { radiusKm: val['radiusKm'] } : {}),
+    ...(coordinates !== undefined ? { coordinates } : {}),
+  };
+}
+
+function validateCondition(val: unknown, entityContext: string): ConditionPolicy | null {
+  if (val === null) return null;
+  if (!isRecord(val)) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': 'condition' must be null or an object`,
+    );
+  }
+  if (
+    !Array.isArray(val['accepted']) ||
+    !val['accepted'].every((c) => typeof c === 'string' && VALID_CONDITIONS.has(c))
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': condition.accepted must be an array of valid ListingCondition`,
+    );
+  }
+  return {
+    accepted: val['accepted'] as ListingCondition[],
+  };
+}
+
+function validateRules(val: unknown, entityContext: string): RuleExpression[] {
+  if (!Array.isArray(val)) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': 'rules' must be an array`,
+    );
+  }
+  return val.map((rule, idx) => {
+    if (!isRecord(rule)) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': rules[${idx}] must be an object`,
+      );
+    }
+    if (typeof rule['id'] !== 'string' || rule['id'].trim().length === 0) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': rules[${idx}].id must be a non-empty string`,
+      );
+    }
+    if (typeof rule['type'] !== 'string' || rule['type'].trim().length === 0) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': rules[${idx}].type must be a non-empty string`,
+      );
+    }
+    if (rule['params'] !== undefined && !isRecord(rule['params'])) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': rules[${idx}].params must be an object if present`,
+      );
+    }
+    return {
+      id: rule['id'],
+      type: rule['type'],
+      ...(rule['params'] !== undefined ? { params: rule['params'] } : {}),
+    };
+  });
+}
+
+function validateEvaluation(val: unknown, entityContext: string): EvaluationPolicy {
+  if (!isRecord(val)) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': 'evaluation' must be an object`,
+    );
+  }
+  if (
+    typeof val['matchThreshold'] !== 'number' ||
+    !Number.isFinite(val['matchThreshold']) ||
+    val['matchThreshold'] < 0 ||
+    val['matchThreshold'] > 100
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': evaluation.matchThreshold must be a number between 0 and 100`,
+    );
+  }
+  if (
+    typeof val['reviewThreshold'] !== 'number' ||
+    !Number.isFinite(val['reviewThreshold']) ||
+    val['reviewThreshold'] < 0 ||
+    val['reviewThreshold'] > 100
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': evaluation.reviewThreshold must be a number between 0 and 100`,
+    );
+  }
+  if (
+    val['precisionProfile'] !== undefined &&
+    (typeof val['precisionProfile'] !== 'string' ||
+      !VALID_PRECISION_PROFILES.has(val['precisionProfile']))
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': evaluation.precisionProfile is invalid`,
+    );
+  }
+  return {
+    matchThreshold: val['matchThreshold'],
+    reviewThreshold: val['reviewThreshold'],
+    ...(val['precisionProfile'] !== undefined
+      ? {
+          precisionProfile: val['precisionProfile'] as
+            'STRICT' | 'BALANCED' | 'PERMISSIVE' | 'MIXED',
+        }
+      : {}),
+  };
+}
+
+function validateAi(val: unknown, entityContext: string): AiPolicy {
+  if (!isRecord(val)) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': 'ai' must be an object`,
+    );
+  }
+  if (typeof val['enabled'] !== 'boolean') {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': ai.enabled must be a boolean`,
+    );
+  }
+  if (typeof val['evaluateOnlyReview'] !== 'boolean') {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': ai.evaluateOnlyReview must be a boolean`,
+    );
+  }
+  if (val['provider'] !== undefined && typeof val['provider'] !== 'string') {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': ai.provider must be a string if present`,
+    );
+  }
+  if (typeof val['requireConfirmation'] !== 'boolean') {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': ai.requireConfirmation must be a boolean`,
+    );
+  }
+  if (
+    typeof val['maxEvaluationsPerRun'] !== 'number' ||
+    !Number.isInteger(val['maxEvaluationsPerRun']) ||
+    val['maxEvaluationsPerRun'] < 0
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': ai.maxEvaluationsPerRun must be an integer >= 0`,
+    );
+  }
+  return {
+    enabled: val['enabled'],
+    evaluateOnlyReview: val['evaluateOnlyReview'],
+    ...(val['provider'] !== undefined ? { provider: val['provider'] } : {}),
+    requireConfirmation: val['requireConfirmation'],
+    maxEvaluationsPerRun: val['maxEvaluationsPerRun'],
+  };
+}
+
+function validateRetention(val: unknown, entityContext: string): RetentionPolicy {
+  if (!isRecord(val)) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': 'retention' must be an object`,
+    );
+  }
+  if (typeof val['rawArtifacts'] !== 'string' || !VALID_RAW_ARTIFACTS.has(val['rawArtifacts'])) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': retention.rawArtifacts is invalid`,
+    );
+  }
+  if (
+    typeof val['rawDataDays'] !== 'number' ||
+    !Number.isInteger(val['rawDataDays']) ||
+    val['rawDataDays'] < 0
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted SavedSearch in '${entityContext}': retention.rawDataDays must be an integer >= 0`,
+    );
+  }
+  return {
+    rawArtifacts: val['rawArtifacts'] as 'ERRORS_AND_REVIEW' | 'ALL' | 'NONE',
+    rawDataDays: val['rawDataDays'],
+  };
+}
 
 function serializeSavedSearch(search: SavedSearch): string {
   const canonical: Required<CreateSavedSearchParams> = {
@@ -139,15 +540,15 @@ function rehydrateSavedSearchFromSnapshot(
     }
     const category = data['category'] as SavedSearch['category'];
 
-    if (!Array.isArray(data['sourceConfigs']) || data['sourceConfigs'].length === 0) {
+    if (!('sourceConfigs' in data)) {
       throw new StorageCorruptionError(
-        `Corrupted persisted SavedSearch in '${entityContext}': missing or invalid 'sourceConfigs'`,
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'sourceConfigs'`,
       );
     }
 
-    if (typeof data['query'] !== 'object' || data['query'] === null) {
+    if (!('query' in data)) {
       throw new StorageCorruptionError(
-        `Corrupted persisted SavedSearch in '${entityContext}': missing or invalid 'query'`,
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'query'`,
       );
     }
 
@@ -169,25 +570,25 @@ function rehydrateSavedSearchFromSnapshot(
       );
     }
 
-    if (!('rules' in data) || !Array.isArray(data['rules'])) {
+    if (!('rules' in data)) {
       throw new StorageCorruptionError(
         `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'rules'`,
       );
     }
 
-    if (typeof data['evaluation'] !== 'object' || data['evaluation'] === null) {
+    if (!('evaluation' in data)) {
       throw new StorageCorruptionError(
         `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'evaluation'`,
       );
     }
 
-    if (typeof data['ai'] !== 'object' || data['ai'] === null) {
+    if (!('ai' in data)) {
       throw new StorageCorruptionError(
         `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'ai'`,
       );
     }
 
-    if (typeof data['retention'] !== 'object' || data['retention'] === null) {
+    if (!('retention' in data)) {
       throw new StorageCorruptionError(
         `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'retention'`,
       );
@@ -207,6 +608,17 @@ function rehydrateSavedSearchFromSnapshot(
 
     const createdAt = parseIsoDate(data['createdAt'], 'createdAt', id);
     const updatedAt = parseIsoDate(data['updatedAt'], 'updatedAt', id);
+
+    // Strict structural runtime validation of all complex shapes (Finding Único Wave 4)
+    const sourceConfigs = validateSourceConfigs(data['sourceConfigs'], entityContext);
+    const query = validateQuery(data['query'], entityContext);
+    const price = validatePrice(data['price'], entityContext);
+    const location = validateLocation(data['location'], entityContext);
+    const condition = validateCondition(data['condition'], entityContext);
+    const rules = validateRules(data['rules'], entityContext);
+    const evaluation = validateEvaluation(data['evaluation'], entityContext);
+    const ai = validateAi(data['ai'], entityContext);
+    const retention = validateRetention(data['retention'], entityContext);
 
     // Cross-validate indexed table columns vs canonical snapshot (Finding 3 / C3)
     if (fallbackRow) {
@@ -253,15 +665,15 @@ function rehydrateSavedSearchFromSnapshot(
       name,
       enabled,
       category,
-      sourceConfigs: data['sourceConfigs'] as SavedSearch['sourceConfigs'],
-      query: data['query'] as SavedSearch['query'],
-      price: (data['price'] as SavedSearch['price']) ?? null,
-      location: (data['location'] as SavedSearch['location']) ?? null,
-      condition: (data['condition'] as SavedSearch['condition']) ?? null,
-      rules: (data['rules'] as SavedSearch['rules']) ?? [],
-      evaluation: data['evaluation'] as SavedSearch['evaluation'],
-      ai: data['ai'] as SavedSearch['ai'],
-      retention: data['retention'] as SavedSearch['retention'],
+      sourceConfigs,
+      query,
+      price,
+      location,
+      condition,
+      rules,
+      evaluation,
+      ai,
+      retention,
       createdAt,
       updatedAt,
     };
