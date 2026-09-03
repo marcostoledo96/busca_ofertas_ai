@@ -89,6 +89,9 @@ importers:
       '@busca-ofertas-ai/run-export':
         specifier: workspace:*
         version: link:../../packages/run-export
+      '@busca-ofertas-ai/storage-sqlite':
+        specifier: workspace:*
+        version: link:../../packages/storage-sqlite
 
   packages/adapter-sdk:
     dependencies:

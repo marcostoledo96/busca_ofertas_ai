@@ -25,13 +25,16 @@ export type UrlOpenerSpawnFunction = (
 
 export interface NodeExternalUrlOpenerParams {
   readonly spawn?: UrlOpenerSpawnFunction;
+  readonly platform?: NodeJS.Platform;
 }
 
 export class NodeExternalUrlOpener implements ExternalUrlOpenerPort {
   private readonly spawnFn: UrlOpenerSpawnFunction;
+  private readonly platform: NodeJS.Platform;
 
   constructor(params?: NodeExternalUrlOpenerParams) {
     this.spawnFn = (params?.spawn ?? spawn) as unknown as UrlOpenerSpawnFunction;
+    this.platform = params?.platform ?? process.platform;
   }
 
   public async open(url: string, signal?: AbortSignal): Promise<void> {
@@ -73,12 +76,14 @@ export class NodeExternalUrlOpener implements ExternalUrlOpenerPort {
     let command: string;
     let args: string[];
 
-    if (process.platform === 'darwin') {
+    if (this.platform === 'darwin') {
       command = 'open';
       args = [parsed.href];
-    } else if (process.platform === 'win32') {
-      command = 'cmd.exe';
-      args = ['/c', 'start', '', parsed.href];
+    } else if (this.platform === 'win32') {
+      // Use rundll32.exe with url.dll,FileProtocolHandler to execute ShellExecute directly
+      // Avoids cmd.exe /c start which re-interprets &, |, ^, <, >, % as shell syntax
+      command = 'rundll32.exe';
+      args = ['url.dll,FileProtocolHandler', parsed.href];
     } else {
       command = 'xdg-open';
       args = [parsed.href];

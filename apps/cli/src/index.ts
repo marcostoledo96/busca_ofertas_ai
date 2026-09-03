@@ -205,4 +205,8 @@ export {
   NodeExternalUrlOpener,
 } from './platform/node-external-url-opener.js';
 
-export { ReviewPresenter, stripAnsi } from './presentation/review-presenter.js';
+export {
+  ReviewPresenter,
+  stripAnsi,
+  sanitizeTerminalText,
+} from './presentation/review-presenter.js';

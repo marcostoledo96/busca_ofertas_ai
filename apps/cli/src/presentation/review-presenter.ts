@@ -8,6 +8,25 @@ export function stripAnsi(text: string): string {
   return text.replace(ANSI_ESCAPE_REGEX, '');
 }
 
+/**
+ * Sanitizes untrusted/external text for safe terminal rendering:
+ * 1. Strips ANSI escape sequences.
+ * 2. Normalizes ASCII control characters (0-31, 127) including carriage returns to prevent terminal line manipulation.
+ */
+export function sanitizeTerminalText(text: string): string {
+  const withoutAnsi = stripAnsi(text);
+  let sanitized = '';
+  for (let i = 0; i < withoutAnsi.length; i++) {
+    const code = withoutAnsi.charCodeAt(i);
+    if ((code >= 0 && code <= 31) || code === 127) {
+      sanitized += ' ';
+    } else {
+      sanitized += withoutAnsi[i];
+    }
+  }
+  return sanitized.trim();
+}
+
 export class ReviewPresenter {
   public formatCard(item: ReviewItem, index: number, total: number): string {
     const lines: string[] = [
@@ -15,11 +34,11 @@ export class ReviewPresenter {
       `─────────────────────────────────────────────────────────────────`,
       `  REVISIÓN [${index + 1} de ${total}] — Oportunidad: ${item.opportunity.id}`,
       `─────────────────────────────────────────────────────────────────`,
-      `  Título:       ${stripAnsi(item.observation.title)}`,
-      `  URL:          ${item.listing.canonicalUrl}`,
-      `  Precio:       ${item.observation.price ? `${item.observation.price.rawText} (${item.observation.price.amount} ${item.observation.price.currency})` : 'N/A'}`,
-      `  Condición:    ${item.observation.condition ?? 'N/A'}`,
-      `  Ubicación:    ${item.observation.location ? item.observation.location.rawText : 'N/A'}`,
+      `  Título:       ${sanitizeTerminalText(item.observation.title)}`,
+      `  URL:          ${sanitizeTerminalText(item.listing.canonicalUrl)}`,
+      `  Precio:       ${item.observation.price ? `${sanitizeTerminalText(item.observation.price.rawText)} (${item.observation.price.amount} ${item.observation.price.currency})` : 'N/A'}`,
+      `  Condición:    ${item.observation.condition ? sanitizeTerminalText(item.observation.condition) : 'N/A'}`,
+      `  Ubicación:    ${item.observation.location ? sanitizeTerminalText(item.observation.location.rawText) : 'N/A'}`,
       `  Novedad:      ${item.opportunity.novelty}`,
       `  Evaluación:   ${item.evaluation.decision} (Score: ${item.evaluation.score.toFixed(1)}/100)`,
     ];
@@ -27,7 +46,7 @@ export class ReviewPresenter {
     if (item.evaluation.reasons.length > 0) {
       lines.push(`  Motivos:`);
       for (const r of item.evaluation.reasons) {
-        lines.push(`    • [${r.severity}] ${r.code}: ${stripAnsi(r.message)}`);
+        lines.push(`    • [${r.severity}] ${r.code}: ${sanitizeTerminalText(r.message)}`);
       }
     }
 
@@ -62,7 +81,7 @@ export class ReviewPresenter {
 
     for (let i = 0; i < history.length; i++) {
       const fb = history[i]!;
-      const notesPart = fb.notes ? ` — Notas: "${stripAnsi(fb.notes)}"` : '';
+      const notesPart = fb.notes ? ` — Notas: "${sanitizeTerminalText(fb.notes)}"` : '';
       lines.push(
         `    ${i + 1}. [${fb.createdAt.toISOString()}] ${fb.actor} ➔ ${fb.decision}${notesPart}`,
       );

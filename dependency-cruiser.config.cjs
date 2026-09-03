@@ -114,13 +114,27 @@ module.exports = {
       },
     },
     {
+      name: 'cli-non-composition-root-no-storage-sqlite',
+      comment:
+        'Solo apps/cli/src/composition-root.ts puede importar storage-sqlite para el bootstrap productivo; el resto de apps/cli no debe depender de storage-sqlite.',
+      severity: 'error',
+      from: {
+        path: '^apps/cli/',
+        pathNot: '^apps/cli/(src|dist)/composition-root\\.(ts|js|d\\.ts)$',
+      },
+      to: {
+        path: '^packages/storage-sqlite',
+      },
+    },
+    {
       name: 'cli-forbidden-dependencies',
-      comment: 'apps/cli no debe depender de storage-sqlite, playwright ni módulos HTTP.',
+      comment: 'apps/cli no debe depender de drivers SQLite directos, playwright ni módulos HTTP.',
       severity: 'error',
       from: { path: '^apps/cli/' },
       to: {
         path: [
-          '^packages/storage-sqlite',
+          'better-sqlite3',
+          'sqlite3',
           'playwright',
           '^node:http$',
           '^node:https$',

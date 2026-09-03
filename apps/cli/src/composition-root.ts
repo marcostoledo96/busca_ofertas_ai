@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { SourceRegistry } from '@busca-ofertas-ai/configuration';
 import {
@@ -7,6 +8,11 @@ import {
   SYNTHETIC_ADAPTER_SDK_VERSION,
   SYNTHETIC_ADAPTER_CAPABILITIES,
 } from '@busca-ofertas-ai/adapter-synthetic';
+import {
+  openSqliteDatabase,
+  createSqliteRepositories,
+  type SqliteDatabase,
+} from '@busca-ofertas-ai/storage-sqlite';
 import { resolveXdgAppPaths } from './platform/xdg-paths.js';
 import type { ExitCode } from './runtime/exit-codes.js';
 import { TerminalPort, NodeTerminalAdapter } from './runtime/terminal.js';
@@ -51,6 +57,8 @@ export interface CliApplicationOptions {
   readonly configStore?: SavedSearchConfigStore;
   readonly textFilePort?: TextFilePort;
   readonly searchConfigDirectory?: string;
+  readonly databasePath?: string;
+  readonly sqliteDatabase?: SqliteDatabase;
   readonly reviewQueueService?: ReviewQueueService;
   readonly recordFeedbackUseCase?: RecordReviewFeedbackUseCase;
   readonly externalUrlOpener?: ExternalUrlOpenerPort;
@@ -97,84 +105,24 @@ export function createDefaultSourceRegistry(): SourceRegistry {
   return registry;
 }
 
-class DefaultFallbackOpportunityRepo {
-  getById(): Promise<null> {
-    return Promise.resolve(null);
-  }
-  listBySavedSearchId(): Promise<[]> {
-    return Promise.resolve([]);
-  }
-  listByRunId(): Promise<[]> {
-    return Promise.resolve([]);
-  }
-  save(): Promise<void> {
-    return Promise.resolve();
-  }
-}
-class DefaultFallbackEvaluationRepo {
-  getById(): Promise<null> {
-    return Promise.resolve(null);
-  }
-  save(): Promise<void> {
-    return Promise.resolve();
-  }
-}
-class DefaultFallbackObservationRepo {
-  getById(): Promise<null> {
-    return Promise.resolve(null);
-  }
-  listByListingId(): Promise<[]> {
-    return Promise.resolve([]);
-  }
-  listBySourceRunId(): Promise<[]> {
-    return Promise.resolve([]);
-  }
-  save(): Promise<void> {
-    return Promise.resolve();
-  }
-  recordObservation(): Promise<never> {
-    throw new Error('Not supported');
-  }
-}
-class DefaultFallbackListingRepo {
-  getById(): Promise<null> {
-    return Promise.resolve(null);
-  }
-  getBySourceAndExternalId(): Promise<null> {
-    return Promise.resolve(null);
-  }
-  save(): Promise<void> {
-    return Promise.resolve();
-  }
-}
-class DefaultFallbackFeedbackRepo {
-  getById(): Promise<null> {
-    return Promise.resolve(null);
-  }
-  listByOpportunityId(): Promise<[]> {
-    return Promise.resolve([]);
-  }
-  save(): Promise<void> {
-    return Promise.resolve();
-  }
+export interface CreateDefaultMenuActionsOptions {
+  readonly formatter?: MenuFormatter | undefined;
+  readonly sourceRegistry?: SourceRegistry | undefined;
+  readonly configStore?: SavedSearchConfigStore | undefined;
+  readonly textFilePort?: TextFilePort | undefined;
+  readonly searchConfigDirectory?: string | undefined;
+  readonly databasePath?: string | undefined;
+  readonly sqliteDatabase?: SqliteDatabase | undefined;
+  readonly reviewQueueService?: ReviewQueueService | undefined;
+  readonly recordFeedbackUseCase?: RecordReviewFeedbackUseCase | undefined;
+  readonly externalUrlOpener?: ExternalUrlOpenerPort | undefined;
 }
 
 /**
  * Creates default menu action handlers for the 8 contractual options.
  */
 export function createDefaultMenuActions(
-  param?:
-    | MenuFormatter
-    | {
-        formatter?: MenuFormatter | undefined;
-        sourceRegistry?: SourceRegistry | undefined;
-        configStore?: SavedSearchConfigStore | undefined;
-        textFilePort?: TextFilePort | undefined;
-        searchConfigDirectory?: string | undefined;
-        reviewQueueService?: ReviewQueueService | undefined;
-        recordFeedbackUseCase?: RecordReviewFeedbackUseCase | undefined;
-        externalUrlOpener?: ExternalUrlOpenerPort | undefined;
-      },
+  param?: MenuFormatter | CreateDefaultMenuActionsOptions,
 ): MenuAction[] {
   const actions: MenuAction[] = [];
   const fmt = param instanceof MenuFormatter ? param : (param?.formatter ?? new MenuFormatter());
@@ -194,32 +142,47 @@ export function createDefaultMenuActions(
       ? new NodeTextFileAdapter()
       : (param?.textFilePort ?? new NodeTextFileAdapter());
 
-  const reviewQueue = param instanceof MenuFormatter ? undefined : param?.reviewQueueService;
-  const recordFeedback = param instanceof MenuFormatter ? undefined : param?.recordFeedbackUseCase;
+  let reviewQueue = param instanceof MenuFormatter ? undefined : param?.reviewQueueService;
+  let recordFeedback = param instanceof MenuFormatter ? undefined : param?.recordFeedbackUseCase;
   const urlOpener =
     param instanceof MenuFormatter
       ? new NodeExternalUrlOpener()
       : (param?.externalUrlOpener ?? new NodeExternalUrlOpener());
 
-  const resolvedReviewQueue =
-    reviewQueue ??
-    new ReviewQueueService({
-      opportunityRepo: new DefaultFallbackOpportunityRepo(),
-      evaluationRepo: new DefaultFallbackEvaluationRepo(),
-      observationRepo: new DefaultFallbackObservationRepo(),
-      listingRepo: new DefaultFallbackListingRepo(),
-      feedbackRepo: new DefaultFallbackFeedbackRepo(),
-    });
+  if (!reviewQueue || !recordFeedback) {
+    const db = param instanceof MenuFormatter ? undefined : param?.sqliteDatabase;
+    const resolvedDb =
+      db ??
+      (() => {
+        const dbPath =
+          (param instanceof MenuFormatter ? undefined : param?.databasePath) ??
+          resolveXdgAppPaths().databasePath;
+        fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+        return openSqliteDatabase({ databasePath: dbPath, createParentDirectory: true });
+      })();
+    resolvedDb.migrate();
+    const repos = createSqliteRepositories(resolvedDb);
 
-  const resolvedRecordFeedback =
-    recordFeedback ??
-    new RecordReviewFeedbackUseCase({
-      opportunityRepo: new DefaultFallbackOpportunityRepo(),
-      evaluationRepo: new DefaultFallbackEvaluationRepo(),
-      feedbackRepo: new DefaultFallbackFeedbackRepo(),
-      clock: new SystemClock(),
-      idGenerator: new UuidIdGenerator(),
-    });
+    reviewQueue =
+      reviewQueue ??
+      new ReviewQueueService({
+        opportunityRepo: repos.opportunities,
+        evaluationRepo: repos.evaluations,
+        observationRepo: repos.observations,
+        listingRepo: repos.listings,
+        feedbackRepo: repos.feedback,
+      });
+
+    recordFeedback =
+      recordFeedback ??
+      new RecordReviewFeedbackUseCase({
+        opportunityRepo: repos.opportunities,
+        evaluationRepo: repos.evaluations,
+        feedbackRepo: repos.feedback,
+        clock: new SystemClock(),
+        idGenerator: new UuidIdGenerator(),
+      });
+  }
 
   for (const item of CONTRACTUAL_MENU_OPTIONS) {
     if (item.optionNumber === 8) {
@@ -241,8 +204,8 @@ export function createDefaultMenuActions(
     } else if (item.optionNumber === 5) {
       actions.push(
         new ReviewListingsActionHandler({
-          reviewQueueService: resolvedReviewQueue,
-          recordFeedbackUseCase: resolvedRecordFeedback,
+          reviewQueueService: reviewQueue,
+          recordFeedbackUseCase: recordFeedback,
           externalUrlOpener: urlOpener,
         }),
       );
@@ -292,6 +255,43 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
     options?.configStore ?? new NodeFileSystemSavedSearchConfigStore(defaultStorageDir);
   const textFilePort = options?.textFilePort ?? new NodeTextFileAdapter();
 
+  // Wire SQLite persistence for review infrastructure
+  let dbToClose: SqliteDatabase | undefined;
+  let reviewQueueService = options?.reviewQueueService;
+  let recordFeedbackUseCase = options?.recordFeedbackUseCase;
+
+  if (!reviewQueueService || !recordFeedbackUseCase) {
+    let db = options?.sqliteDatabase;
+    if (!db) {
+      const dbPath = options?.databasePath ?? resolveXdgAppPaths().databasePath;
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+      db = openSqliteDatabase({ databasePath: dbPath, createParentDirectory: true });
+      dbToClose = db;
+    }
+    db.migrate();
+    const repos = createSqliteRepositories(db);
+
+    reviewQueueService =
+      reviewQueueService ??
+      new ReviewQueueService({
+        opportunityRepo: repos.opportunities,
+        evaluationRepo: repos.evaluations,
+        observationRepo: repos.observations,
+        listingRepo: repos.listings,
+        feedbackRepo: repos.feedback,
+      });
+
+    recordFeedbackUseCase =
+      recordFeedbackUseCase ??
+      new RecordReviewFeedbackUseCase({
+        opportunityRepo: repos.opportunities,
+        evaluationRepo: repos.evaluations,
+        feedbackRepo: repos.feedback,
+        clock: new SystemClock(),
+        idGenerator: new UuidIdGenerator(),
+      });
+  }
+
   const actions =
     options?.actions ??
     createDefaultMenuActions({
@@ -300,8 +300,10 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
       configStore,
       textFilePort,
       searchConfigDirectory: options?.searchConfigDirectory,
-      reviewQueueService: options?.reviewQueueService,
-      recordFeedbackUseCase: options?.recordFeedbackUseCase,
+      databasePath: options?.databasePath,
+      sqliteDatabase: options?.sqliteDatabase ?? dbToClose,
+      reviewQueueService,
+      recordFeedbackUseCase,
       externalUrlOpener: options?.externalUrlOpener,
     });
 
@@ -338,6 +340,13 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
           if (unsubscribeInterrupt) {
             unsubscribeInterrupt();
             unsubscribeInterrupt = undefined;
+          }
+          if (dbToClose) {
+            try {
+              dbToClose.close();
+            } catch {
+              // Ignore if already closed
+            }
           }
           await terminal.close();
         });

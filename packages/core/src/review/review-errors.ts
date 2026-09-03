@@ -6,7 +6,8 @@ export type ReviewErrorCode =
   | 'OBSERVATION_NOT_FOUND'
   | 'LISTING_NOT_FOUND'
   | 'REVIEW_COHERENCE_ERROR'
-  | 'UNSAFE_EXTERNAL_URL';
+  | 'UNSAFE_EXTERNAL_URL'
+  | 'INELIGIBLE_REVIEW_EVALUATION';
 
 export class ReviewError extends DomainError {
   readonly code: ReviewErrorCode;
@@ -44,5 +45,15 @@ export class UnsafeExternalUrlError extends ReviewError {
   constructor(message: string) {
     super(message, 'UNSAFE_EXTERNAL_URL');
     this.name = 'UnsafeExternalUrlError';
+  }
+}
+
+export class IneligibleReviewEvaluationError extends ReviewError {
+  constructor(evaluationId: string, decision: string) {
+    super(
+      `Evaluation '${evaluationId}' with decision '${decision}' is not eligible for manual review feedback. Only 'REVIEW' evaluations are eligible.`,
+      'INELIGIBLE_REVIEW_EVALUATION',
+    );
+    this.name = 'IneligibleReviewEvaluationError';
   }
 }

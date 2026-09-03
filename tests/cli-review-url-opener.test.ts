@@ -80,4 +80,59 @@ describe('NodeExternalUrlOpener (BOAI-015)', () => {
       /aborted/i,
     );
   });
+
+  it('HIGH-02: executes rundll32.exe without cmd.exe /c start on Windows, keeping metacharacters &, |, ^, <, >, % as pure data arguments', async () => {
+    let capturedCommand = '';
+    let capturedArgs: readonly string[] = [];
+    let capturedOptions: { shell?: boolean } | undefined;
+
+    const mockSpawn = (command: string, args: readonly string[], options?: unknown) => {
+      capturedCommand = command;
+      capturedArgs = args;
+      capturedOptions = options as { shell?: boolean } | undefined;
+      return {
+        unref: () => {},
+        on: () => {},
+      };
+    };
+
+    const opener = new NodeExternalUrlOpener({
+      spawn: mockSpawn,
+      platform: 'win32',
+    });
+
+    // Valid HTTPS URLs with shell metacharacters: &, |, ^, <, >, %
+    const testCases = [
+      'https://www.facebook.com/marketplace/item/123/?ref=search&referral_code=test',
+      'https://www.facebook.com/marketplace/item/123/?pipe=a|b',
+      'https://www.facebook.com/marketplace/item/123/?caret=a^b',
+      'https://www.facebook.com/marketplace/item/123/?tag=<injected>',
+      'https://www.facebook.com/marketplace/item/123/?pct=%20escaped%25value',
+      'https://www.facebook.com/marketplace/item/123/?combined=a&b|c^d<e>f%20g',
+    ];
+
+    for (const url of testCases) {
+      await opener.open(url);
+
+      // Binary MUST be rundll32.exe, NEVER cmd.exe or cmd
+      expect(capturedCommand).toBe('rundll32.exe');
+      expect(capturedCommand).not.toContain('cmd');
+
+      // Shell execution MUST be disabled
+      expect(capturedOptions?.shell).toBe(false);
+
+      // Arguments must have exactly 2 elements: the dll handler and the single URL data argument
+      expect(capturedArgs).toHaveLength(2);
+      expect(capturedArgs[0]).toBe('url.dll,FileProtocolHandler');
+
+      // Must NOT contain /c or start command processor syntax
+      expect(capturedArgs).not.toContain('/c');
+      expect(capturedArgs).not.toContain('start');
+
+      // The URL travels as pure data and is preserved
+      const passedUrl = capturedArgs[1];
+      expect(typeof passedUrl).toBe('string');
+      expect(passedUrl?.startsWith('https://')).toBe(true);
+    }
+  });
 });

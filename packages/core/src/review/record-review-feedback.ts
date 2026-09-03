@@ -13,6 +13,7 @@ import {
   ReviewItemNotFoundError,
   EvaluationNotFoundError,
   ReviewCoherenceError,
+  IneligibleReviewEvaluationError,
 } from './review-errors.js';
 
 export interface RecordReviewFeedbackDependencies {
@@ -65,6 +66,10 @@ export class RecordReviewFeedbackUseCase {
     const evaluation = await this.evaluationRepo.getById(params.previousEvaluationId);
     if (!evaluation) {
       throw new EvaluationNotFoundError(params.previousEvaluationId);
+    }
+
+    if (evaluation.decision !== 'REVIEW') {
+      throw new IneligibleReviewEvaluationError(evaluation.id, evaluation.decision);
     }
 
     const feedback = createFeedback({

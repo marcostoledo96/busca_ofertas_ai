@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   CLI_PACKAGE_NAME,
@@ -176,7 +176,6 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
     };
 
     const forbiddenPackages = [
-      '@busca-ofertas-ai/storage-sqlite',
       'playwright',
       'puppeteer',
       'sqlite3',
@@ -199,6 +198,37 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
       '@busca-ofertas-ai/core',
       '@busca-ofertas-ai/report-html',
       '@busca-ofertas-ai/run-export',
+      '@busca-ofertas-ai/storage-sqlite',
     ]);
+  });
+
+  it('ARCHITECTURAL ISOLATION PROOF: only composition-root.ts imports @busca-ofertas-ai/storage-sqlite in apps/cli', () => {
+    const cliSrcDir = resolve(process.cwd(), 'apps/cli/src');
+
+    function getFilesRecursively(dir: string): string[] {
+      let results: string[] = [];
+      const list = readdirSync(dir);
+      for (const file of list) {
+        const fullPath = resolve(dir, file);
+        const stat = statSync(fullPath);
+        if (stat.isDirectory()) {
+          results = results.concat(getFilesRecursively(fullPath));
+        } else if (file.endsWith('.ts') && !file.endsWith('.d.ts')) {
+          results.push(fullPath);
+        }
+      }
+      return results;
+    }
+
+    const allTsFiles = getFilesRecursively(cliSrcDir);
+    const nonCompositionFiles = allTsFiles.filter((f) => !f.endsWith('composition-root.ts'));
+
+    for (const file of nonCompositionFiles) {
+      const content = readFileSync(file, 'utf-8');
+      expect(
+        content.includes('@busca-ofertas-ai/storage-sqlite'),
+        `File ${file} should NOT import storage-sqlite directly; only composition-root.ts is allowed to wire persistence infrastructure.`,
+      ).toBe(false);
+    }
   });
 });

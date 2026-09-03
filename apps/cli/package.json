@@ -21,6 +21,7 @@
     "@busca-ofertas-ai/configuration": "workspace:*",
     "@busca-ofertas-ai/core": "workspace:*",
     "@busca-ofertas-ai/report-html": "workspace:*",
-    "@busca-ofertas-ai/run-export": "workspace:*"
+    "@busca-ofertas-ai/run-export": "workspace:*",
+    "@busca-ofertas-ai/storage-sqlite": "workspace:*"
   }
 }

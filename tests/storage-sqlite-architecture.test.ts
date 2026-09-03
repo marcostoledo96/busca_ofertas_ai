@@ -148,7 +148,7 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(externalDeps).toEqual([]);
   });
 
-  it('verifies that core, configuration, adapter-sdk, and cli do not depend on storage-sqlite', () => {
+  it('verifies that core, configuration, adapter-sdk, report-html, and run-export do not depend on storage-sqlite', () => {
     const corePkg = JSON.parse(
       fs.readFileSync(path.resolve('packages/core/package.json'), 'utf-8'),
     ) as PackageJsonShape;
@@ -158,13 +158,17 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     const sdkPkg = JSON.parse(
       fs.readFileSync(path.resolve('packages/adapter-sdk/package.json'), 'utf-8'),
     ) as PackageJsonShape;
-    const cliPkg = JSON.parse(
-      fs.readFileSync(path.resolve('apps/cli/package.json'), 'utf-8'),
+    const reportHtmlPkg = JSON.parse(
+      fs.readFileSync(path.resolve('packages/report-html/package.json'), 'utf-8'),
+    ) as PackageJsonShape;
+    const runExportPkg = JSON.parse(
+      fs.readFileSync(path.resolve('packages/run-export/package.json'), 'utf-8'),
     ) as PackageJsonShape;
 
     expect(corePkg.dependencies?.['@busca-ofertas-ai/storage-sqlite']).toBeUndefined();
     expect(configPkg.dependencies?.['@busca-ofertas-ai/storage-sqlite']).toBeUndefined();
     expect(sdkPkg.dependencies?.['@busca-ofertas-ai/storage-sqlite']).toBeUndefined();
-    expect(cliPkg.dependencies?.['@busca-ofertas-ai/storage-sqlite']).toBeUndefined();
+    expect(reportHtmlPkg.dependencies?.['@busca-ofertas-ai/storage-sqlite']).toBeUndefined();
+    expect(runExportPkg.dependencies?.['@busca-ofertas-ai/storage-sqlite']).toBeUndefined();
   });
 });

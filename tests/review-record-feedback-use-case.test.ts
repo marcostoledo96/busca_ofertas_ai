@@ -7,6 +7,7 @@ import {
   ReviewItemNotFoundError,
   EvaluationNotFoundError,
   ReviewCoherenceError,
+  IneligibleReviewEvaluationError,
   type Clock,
   type IdGenerator,
 } from '@busca-ofertas-ai/core';
@@ -221,6 +222,126 @@ describe('RecordReviewFeedbackUseCase (BOAI-015)', () => {
           decision: 'CONFIRMED_MATCH',
         }),
       ).rejects.toThrow(EvaluationNotFoundError);
+    });
+  });
+
+  it('rejects evaluations with decision MATCH, throwing IneligibleReviewEvaluationError and performing 0 writes', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      seedHierarchy(db);
+
+      const oppRepo = new SqliteOpportunityRepository(db);
+      const evalRepo = new SqliteEvaluationRepository(db);
+      const fbRepo = new SqliteFeedbackRepository(db);
+
+      await evalRepo.save(
+        createEvaluation({
+          id: 'eval-match',
+          decision: 'MATCH',
+          score: 95,
+          reasons: [
+            createEvaluationReason({
+              code: 'P_ACC',
+              message: 'match',
+              severity: 'INFO',
+              impact: 0,
+            }),
+          ],
+          evaluatedBy: ['RULES'],
+          policyVersion: 'v1',
+          createdAt: new Date('2026-09-03T12:00:00.000Z'),
+        }),
+      );
+
+      await oppRepo.save(
+        createOpportunity({
+          id: 'opp-match',
+          savedSearchId: 'search-1',
+          observationId: 'obs-1',
+          evaluationId: 'eval-match',
+          novelty: 'NEW',
+          createdAt: new Date('2026-09-03T12:00:00.000Z'),
+        }),
+      );
+
+      const useCase = new RecordReviewFeedbackUseCase({
+        opportunityRepo: oppRepo,
+        evaluationRepo: evalRepo,
+        feedbackRepo: fbRepo,
+        clock: { now: () => new Date() },
+        idGenerator: { generate: () => 'fb-id' },
+      });
+
+      await expect(
+        useCase.execute({
+          opportunityId: 'opp-match',
+          previousEvaluationId: 'eval-match',
+          decision: 'CONFIRMED_MATCH',
+        }),
+      ).rejects.toThrow(IneligibleReviewEvaluationError);
+
+      const savedFeedback = await fbRepo.listByOpportunityId('opp-match');
+      expect(savedFeedback).toHaveLength(0);
+    });
+  });
+
+  it('rejects evaluations with decision REJECT, throwing IneligibleReviewEvaluationError and performing 0 writes', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      seedHierarchy(db);
+
+      const oppRepo = new SqliteOpportunityRepository(db);
+      const evalRepo = new SqliteEvaluationRepository(db);
+      const fbRepo = new SqliteFeedbackRepository(db);
+
+      await evalRepo.save(
+        createEvaluation({
+          id: 'eval-reject',
+          decision: 'REJECT',
+          score: 10,
+          reasons: [
+            createEvaluationReason({
+              code: 'HARD_PRICE',
+              message: 'too high',
+              severity: 'HARD',
+              impact: -90,
+            }),
+          ],
+          evaluatedBy: ['RULES'],
+          policyVersion: 'v1',
+          createdAt: new Date('2026-09-03T12:00:00.000Z'),
+        }),
+      );
+
+      await oppRepo.save(
+        createOpportunity({
+          id: 'opp-reject',
+          savedSearchId: 'search-1',
+          observationId: 'obs-1',
+          evaluationId: 'eval-reject',
+          novelty: 'NEW',
+          createdAt: new Date('2026-09-03T12:00:00.000Z'),
+        }),
+      );
+
+      const useCase = new RecordReviewFeedbackUseCase({
+        opportunityRepo: oppRepo,
+        evaluationRepo: evalRepo,
+        feedbackRepo: fbRepo,
+        clock: { now: () => new Date() },
+        idGenerator: { generate: () => 'fb-id' },
+      });
+
+      await expect(
+        useCase.execute({
+          opportunityId: 'opp-reject',
+          previousEvaluationId: 'eval-reject',
+          decision: 'NOT_INTERESTED',
+        }),
+      ).rejects.toThrow(IneligibleReviewEvaluationError);
+
+      const savedFeedback = await fbRepo.listByOpportunityId('opp-reject');
+      expect(savedFeedback).toHaveLength(0);
     });
   });
 });

@@ -178,9 +178,9 @@ Implementación interactiva de la Opción 5 del menú principal (`Revisar public
 3. **Ver historial reciente**: Lista las publicaciones que ya cuentan con decisiones de feedback registradas. Al seleccionar un ítem se despliega el historial cronológico completo de decisiones tomadas y se ofrece la acción **Registrar nueva decisión (re-evaluar)**.
 0. **Volver al menú principal**: Salida limpia y cooperativa.
 
-### Presentación de la card y sanitización
+### Presentación de la card y sanitización centralizada
 - Formateo claro de datos contextuales: título, precio resuelto, score de reglas/IA, motivos de evaluación y URL canónica.
-- **Sanitización ANSI**: Todo texto no confiable proveniente del scraper (títulos, descripciones o notas) se desinfecta mediante eliminación estricta de secuencias de escape ANSI (`\x1b[...]`) para prevenir inyecciones o distorsiones visuales en el emulador de terminal.
+- **Sanitización terminal integral**: Todo texto no confiable proveniente del scraper o de persistencia (título, `price.rawText`, `location.rawText`, `canonicalUrl`, motivos `EvaluationReason.message` y notas de feedback) se desinfecta mediante `sanitizeTerminalText()`. Esta función elimina tanto secuencias de escape ANSI (`\x1b[...]`) como caracteres de control no imprimibles (ASCII 0-31, 127 y `\r`) para evitar manipulación del cursor, sobreescritura de líneas o inyección de comandos en el emulador de terminal.
 
 ### Acciones sobre cada ítem en revisión
 - **[1] Marcar relevante (`CONFIRMED_MATCH`)**: Confirma que la publicación coincide con la búsqueda. Solicita notas opcionales (máx. 2000 caracteres) y persiste la decisión.
@@ -190,11 +190,26 @@ Implementación interactiva de la Opción 5 del menú principal (`Revisar public
 - **[5] Omitir (siguiente)**: Salta al siguiente ítem dejando la oportunidad pendiente en cola sin escribir registros de feedback.
 - **[0] Volver al menú**: Sale de la cola actual de manera limpia.
 
+### Invariante de Dominio: Elegibilidad de Evaluación para Feedback
+- `RecordReviewFeedbackUseCase` exige que la evaluación asociada tenga estrictamente `decision === 'REVIEW'`.
+- Intentos de registrar feedback sobre evaluaciones `MATCH` o `REJECT` son rechazados con `IneligibleReviewEvaluationError` fail-closed, asegurando exactamente cero escrituras en la base de datos.
+
 ### Seguridad en la apertura de URLs externas (`ExternalUrlOpenerPort`)
 - Pre-validación contra caracteres de control (`\r`, `\n`, `\t`, `\x00-\x1f`, `\x7f`) antes de la normalización del parser de URL.
 - Restricción estricta al protocolo `https:` (rechaza `http:`, `file:`, `javascript:`, `data:`, `ftp:`, etc.).
 - Prohibición de credenciales de usuario embebidas (`https://user:pass@host/`).
-- Ejecución desacoplada mediante `child_process.spawn` con `shell: false`, `detached: true` y `stdio: 'ignore'`, sin posibilidad de ejecución de comandos por inyección de shell.
+- Ejecución desacoplada mediante binarios independientes con `shell: false`, `detached: true` y `stdio: 'ignore'`.
+- **Protección contra command injection en Windows**: Se utiliza `rundll32.exe url.dll,FileProtocolHandler <url>` pasando la URL como argumento de datos directo. Se descarta terminantemente `cmd.exe /c start` para evitar que caracteres válidos en URLs HTTPS (`&`, `|`, `^`, `<`, `>`, `%`) sean reinterpretados como sintaxis de shell por un procesador de comandos.
+
+### Composición y Persistencia Real en SQLite
+- `apps/cli/src/composition-root.ts` es el único punto de composición autorizado dentro de `apps/cli` para importar `@busca-ofertas-ai/storage-sqlite` (reglado por `dependency-cruiser`).
+- En el arranque productivo, inicializa la base SQLite en la ruta canónica XDG, ejecuta migraciones automáticas (`db.migrate()`), instancia repositorios reales e inyecta `ReviewQueueService` y `RecordReviewFeedbackUseCase`.
+- Se eliminaron todos los repositorios fallback en memoria simulados: la persistencia es real, obligatoria y respaldada en disco con cierre de conexión ordenado (`signalManager.registerCleanup`).
+
+### Estado del Prompt Post-Run ("¿Desea revisar las N publicaciones dudosas ahora?")
+- El componente `PostRunReviewCoordinator` se encuentra completamente implementado y testeado en `@busca-ofertas-ai/core` para evaluar ítems y coordinar la decisión de revisión interactiva inmediata.
+- **Dependencia de backlog**: El disparador interactivo post-búsqueda requiere la ejecución real del pipeline de búsqueda (Opción 1 del menú, "Ejecutar búsqueda guardada"), la cual se encuentra deliberadamente postergada en el backlog (`NotImplementedActionHandler`, issues futuras BOAI-017 / BOAI-023).
+- BOAI-015 no simula una ejecución artificial ni anticipa el pipeline de scraping fuera de alcance. La integración queda lista en el núcleo y documentada para conectarse en cuanto la Opción 1 sea implementada.
 
 ### Soporte de decisiones contradictorias (Re-review)
 - Si el usuario reconsidera una decisión (ej. marcó inicialmente `CONFIRMED_MATCH` y luego descubre que era un accesorio marcando `FALSE_POSITIVE`), el sistema registra la nueva decisión en la tabla `feedback` sin sobrescribir ni eliminar la anterior.
