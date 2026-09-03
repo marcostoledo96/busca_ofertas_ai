@@ -19,6 +19,7 @@ import {
   createNodeCryptoHasher,
   ListingIdentityCollisionError,
   ObservationFingerprintCollisionError,
+  RecordObservationCoherenceError,
 } from '@busca-ofertas-ai/storage-sqlite';
 import { withTempDatabase } from '@busca-ofertas-ai/storage-sqlite/testing';
 
@@ -641,6 +642,78 @@ describe('Deduplication & Change Classification (BOAI-012)', () => {
       expect(history[0]!.id).toBe('obs-fp-col-1');
       expect(history[0]!.title).toBe('Item Alpha');
       expect(history[0]!.condition).toBe('NEW');
+    });
+  });
+
+  it('rejects out-of-order observation fail-closed when incoming observedAt is older than latest persisted (Finding C)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const { sourceRun } = await setupPrerequisites(db);
+      const obsRepo = new SqliteObservationRepository(db);
+
+      const listing = createListing({
+        id: 'listing-chronological-test',
+        sourceId: 'synthetic',
+        externalId: 'syn-item-chrono',
+        canonicalUrl: 'https://synthetic.invalid/listings/syn-item-chrono',
+        firstSeenAt: new Date('2026-08-30T10:30:00.000Z'),
+        lastSeenAt: new Date('2026-08-30T10:30:00.000Z'),
+      });
+
+      // 1. Persist latest observation at 10:30
+      const fpLatest = computeObservationFingerprint(
+        { title: 'Nintendo Switch Latest', price: null },
+        hasher,
+      );
+      const obsLatest = createObservation({
+        id: 'obs-latest-1030',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:30:00.000Z'),
+        title: 'Nintendo Switch Latest',
+        rawFingerprint: fpLatest,
+      });
+
+      const res1 = await obsRepo.recordObservation({ listing, observation: obsLatest });
+      expect(res1.isNewObservation).toBe(true);
+      expect(res1.changeKind).toBe('NEW');
+
+      // 2. Incoming observation with observedAt = 09:30 (older than latest persisted 10:30)
+      const fpOlder = computeObservationFingerprint(
+        { title: 'Nintendo Switch Older Out-Of-Order', price: null },
+        hasher,
+      );
+      const obsOlder = createObservation({
+        id: 'obs-older-0930',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T09:30:00.000Z'), // out-of-order!
+        title: 'Nintendo Switch Older Out-Of-Order',
+        rawFingerprint: fpOlder,
+      });
+
+      await expect(obsRepo.recordObservation({ listing, observation: obsOlder })).rejects.toThrow(
+        RecordObservationCoherenceError,
+      );
+
+      try {
+        await obsRepo.recordObservation({ listing, observation: obsOlder });
+      } catch (err) {
+        expect(err).toBeInstanceOf(RecordObservationCoherenceError);
+        if (err instanceof RecordObservationCoherenceError) {
+          expect(err.code).toBe('RECORD_OBSERVATION_COHERENCE_ERROR');
+          expect(err.details.kind).toBe('OUT_OF_ORDER_OBSERVED_AT');
+          expect(err.details.incomingObservedAt).toBe('2026-08-30T09:30:00.000Z');
+          expect(err.details.latestPersistedObservedAt).toBe('2026-08-30T10:30:00.000Z');
+          expect(err.details.listingId).toBe(listing.id);
+        }
+      }
+
+      // 3. Verify zero mutation: exactly 1 observation remains in the database
+      const history = await obsRepo.listByListingId(listing.id);
+      expect(history).toHaveLength(1);
+      expect(history[0]!.id).toBe('obs-latest-1030');
+      expect(history[0]!.observedAt.toISOString()).toBe('2026-08-30T10:30:00.000Z');
     });
   });
 });

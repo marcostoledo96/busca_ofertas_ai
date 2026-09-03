@@ -98,14 +98,16 @@ function isRecord(val: unknown): val is Record<string, unknown> {
   return typeof val === 'object' && val !== null && !Array.isArray(val);
 }
 
+const ISO_CANONICAL_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+
 function parseIsoDate(isoString: string, fieldName: string, entityId: string): Date {
-  if (typeof isoString !== 'string') {
+  if (typeof isoString !== 'string' || !ISO_CANONICAL_UTC_REGEX.test(isoString)) {
     throw new StorageCorruptionError(
-      `Corrupted persisted entity '${entityId}': '${fieldName}' must be a string, got ${typeof isoString}`,
+      `Corrupted persisted entity '${entityId}': '${fieldName}' must be a canonical ISO UTC date string ending with 'Z', got '${String(isoString)}'`,
     );
   }
   const date = new Date(isoString);
-  if (Number.isNaN(date.getTime()) || !isoString.includes('T')) {
+  if (Number.isNaN(date.getTime())) {
     throw new StorageCorruptionError(
       `Corrupted persisted entity '${entityId}': '${fieldName}' is not a valid ISO date ('${isoString}')`,
     );
@@ -220,7 +222,7 @@ function rehydrateResolvedPrice(rawJson: string, entityId: string): ResolvedPric
 
   // 8. converted: optional, but if present must be strictly valid
   let converted: ConvertedPrice | undefined = undefined;
-  if ('converted' in parsed && parsed['converted'] !== undefined && parsed['converted'] !== null) {
+  if ('converted' in parsed && parsed['converted'] !== undefined) {
     const rawConverted = parsed['converted'];
     if (!isRecord(rawConverted)) {
       throw new StorageCorruptionError(`Corrupted price.converted in observation '${entityId}'`);
@@ -296,34 +298,30 @@ function rehydrateResolvedLocation(rawJson: string, entityId: string): ResolvedL
   }
 
   let region: string | undefined = undefined;
-  if ('region' in parsed && parsed['region'] !== undefined && parsed['region'] !== null) {
+  if ('region' in parsed && parsed['region'] !== undefined) {
     if (typeof parsed['region'] !== 'string') {
       throw new StorageCorruptionError(
-        `Corrupted location.region in observation '${entityId}': expected string, got ${typeof parsed['region']}`,
+        `Corrupted location.region in observation '${entityId}': expected string, got ${JSON.stringify(parsed['region'])}`,
       );
     }
     region = parsed['region'];
   }
 
   let city: string | undefined = undefined;
-  if ('city' in parsed && parsed['city'] !== undefined && parsed['city'] !== null) {
+  if ('city' in parsed && parsed['city'] !== undefined) {
     if (typeof parsed['city'] !== 'string') {
       throw new StorageCorruptionError(
-        `Corrupted location.city in observation '${entityId}': expected string, got ${typeof parsed['city']}`,
+        `Corrupted location.city in observation '${entityId}': expected string, got ${JSON.stringify(parsed['city'])}`,
       );
     }
     city = parsed['city'];
   }
 
   let neighborhood: string | undefined = undefined;
-  if (
-    'neighborhood' in parsed &&
-    parsed['neighborhood'] !== undefined &&
-    parsed['neighborhood'] !== null
-  ) {
+  if ('neighborhood' in parsed && parsed['neighborhood'] !== undefined) {
     if (typeof parsed['neighborhood'] !== 'string') {
       throw new StorageCorruptionError(
-        `Corrupted location.neighborhood in observation '${entityId}': expected string, got ${typeof parsed['neighborhood']}`,
+        `Corrupted location.neighborhood in observation '${entityId}': expected string, got ${JSON.stringify(parsed['neighborhood'])}`,
       );
     }
     neighborhood = parsed['neighborhood'];
@@ -331,11 +329,7 @@ function rehydrateResolvedLocation(rawJson: string, entityId: string): ResolvedL
 
   let coordinates: { readonly latitude: number; readonly longitude: number } | undefined =
     undefined;
-  if (
-    'coordinates' in parsed &&
-    parsed['coordinates'] !== undefined &&
-    parsed['coordinates'] !== null
-  ) {
+  if ('coordinates' in parsed && parsed['coordinates'] !== undefined) {
     const rawCoords = parsed['coordinates'];
     if (!isRecord(rawCoords)) {
       throw new StorageCorruptionError(
@@ -744,15 +738,21 @@ export class SqliteObservationRepository implements ObservationRepository {
             existingListingRow.id,
           );
 
-          const earliestFirstSeen =
-            incomingListing.firstSeenAt.getTime() < existingFirstSeen.getTime()
-              ? incomingListing.firstSeenAt
-              : existingFirstSeen;
+          const earliestFirstSeen = new Date(
+            Math.min(
+              existingFirstSeen.getTime(),
+              incomingListing.firstSeenAt.getTime(),
+              incomingObs.observedAt.getTime(),
+            ),
+          );
 
-          const latestLastSeen =
-            incomingListing.lastSeenAt.getTime() > existingLastSeen.getTime()
-              ? incomingListing.lastSeenAt
-              : existingLastSeen;
+          const latestLastSeen = new Date(
+            Math.max(
+              existingLastSeen.getTime(),
+              incomingListing.lastSeenAt.getTime(),
+              incomingObs.observedAt.getTime(),
+            ),
+          );
 
           const updateListingStmt = tx.prepare(
             `UPDATE listings
@@ -789,6 +789,13 @@ export class SqliteObservationRepository implements ObservationRepository {
             });
           }
 
+          const earliestFirstSeen = new Date(
+            Math.min(incomingListing.firstSeenAt.getTime(), incomingObs.observedAt.getTime()),
+          );
+          const latestLastSeen = new Date(
+            Math.max(incomingListing.lastSeenAt.getTime(), incomingObs.observedAt.getTime()),
+          );
+
           const insertListingStmt = tx.prepare(
             `INSERT INTO listings (
               id, source_id, external_id, canonical_url, first_seen_at, last_seen_at
@@ -801,10 +808,17 @@ export class SqliteObservationRepository implements ObservationRepository {
               incomingListing.sourceId,
               incomingListing.externalId,
               incomingListing.canonicalUrl,
-              incomingListing.firstSeenAt.toISOString(),
-              incomingListing.lastSeenAt.toISOString(),
+              earliestFirstSeen.toISOString(),
+              latestLastSeen.toISOString(),
             );
-            effectiveListing = incomingListing;
+            effectiveListing = createListing({
+              id: incomingListing.id,
+              sourceId: incomingListing.sourceId,
+              externalId: incomingListing.externalId,
+              canonicalUrl: incomingListing.canonicalUrl,
+              firstSeenAt: earliestFirstSeen,
+              lastSeenAt: latestLastSeen,
+            });
           } catch (insertErr) {
             // Handle concurrent insert race on uq_listings_source_external
             existingListingRow = findListingStmt.get(
@@ -826,21 +840,45 @@ export class SqliteObservationRepository implements ObservationRepository {
                 attemptingId: incomingListing.id,
               });
             }
+            const recheckedFirstSeen = parseIsoDate(
+              existingListingRow.first_seen_at,
+              'first_seen_at',
+              existingListingRow.id,
+            );
+            const recheckedLastSeen = parseIsoDate(
+              existingListingRow.last_seen_at,
+              'last_seen_at',
+              existingListingRow.id,
+            );
+            const raceFirstSeen = new Date(
+              Math.min(
+                recheckedFirstSeen.getTime(),
+                incomingListing.firstSeenAt.getTime(),
+                incomingObs.observedAt.getTime(),
+              ),
+            );
+            const raceLastSeen = new Date(
+              Math.max(
+                recheckedLastSeen.getTime(),
+                incomingListing.lastSeenAt.getTime(),
+                incomingObs.observedAt.getTime(),
+              ),
+            );
+            if (
+              raceFirstSeen.getTime() !== recheckedFirstSeen.getTime() ||
+              raceLastSeen.getTime() !== recheckedLastSeen.getTime()
+            ) {
+              tx.prepare(
+                `UPDATE listings SET first_seen_at = ?, last_seen_at = ? WHERE id = ?`,
+              ).run(raceFirstSeen.toISOString(), raceLastSeen.toISOString(), existingListingRow.id);
+            }
             effectiveListing = createListing({
               id: existingListingRow.id,
               sourceId: existingListingRow.source_id,
               externalId: existingListingRow.external_id,
               canonicalUrl: incomingListing.canonicalUrl,
-              firstSeenAt: parseIsoDate(
-                existingListingRow.first_seen_at,
-                'first_seen_at',
-                existingListingRow.id,
-              ),
-              lastSeenAt: parseIsoDate(
-                existingListingRow.last_seen_at,
-                'last_seen_at',
-                existingListingRow.id,
-              ),
+              firstSeenAt: raceFirstSeen,
+              lastSeenAt: raceLastSeen,
             });
           }
         }
@@ -863,42 +901,7 @@ export class SqliteObservationRepository implements ObservationRepository {
           }
         }
 
-        // 3. Query previous latest Observation for effectiveListing.id
-        const findLatestObsStmt = tx.prepare<ObservationRow, [string]>(
-          `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
-           FROM observations
-           WHERE listing_id = ?
-           ORDER BY observed_at DESC, id DESC
-           LIMIT 1`,
-        );
-        const latestObsRow = findLatestObsStmt.get(effectiveListing.id);
-
-        // 4. Determine novelty / change classification
-        let changeKind: ObservationChangeKind;
-        let latestObs: Observation | null = null;
-
-        if (!latestObsRow) {
-          changeKind = 'NEW';
-        } else {
-          latestObs = rehydrateObservation(latestObsRow);
-
-          // Priority 1: REAPPEARED
-          const wasGone = latestObs.availability === 'SOLD' || latestObs.availability === 'REMOVED';
-          const isNowBack =
-            incomingObs.availability === 'AVAILABLE' || incomingObs.availability === 'PENDING';
-
-          if (wasGone && isNowBack) {
-            changeKind = 'REAPPEARED';
-          } else if (!arePricesSemanticallyEqual(latestObs.price, incomingObs.price)) {
-            // Priority 2: PRICE_CHANGED
-            changeKind = 'PRICE_CHANGED';
-          } else {
-            // Priority 3: UNCHANGED (no price change, no reappearance, not new)
-            changeKind = 'UNCHANGED';
-          }
-        }
-
-        // 5. Observation deduplication check within same run
+        // 3. Observation deduplication check within same run
         const findExistingInRunStmt = tx.prepare<ObservationRow, [string, string, string]>(
           `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
            FROM observations
@@ -920,7 +923,7 @@ export class SqliteObservationRepository implements ObservationRepository {
             result = {
               listing: effectiveListing,
               observation: existingObs,
-              changeKind,
+              changeKind: 'UNCHANGED',
               isNewObservation: false,
             };
             return;
@@ -933,6 +936,51 @@ export class SqliteObservationRepository implements ObservationRepository {
             sourceRunId: incomingObs.sourceRunId,
             fingerprint: incomingObs.rawFingerprint,
           });
+        }
+
+        // 4. Query previous latest Observation for effectiveListing.id
+        const findLatestObsStmt = tx.prepare<ObservationRow, [string]>(
+          `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
+           FROM observations
+           WHERE listing_id = ?
+           ORDER BY observed_at DESC, id DESC
+           LIMIT 1`,
+        );
+        const latestObsRow = findLatestObsStmt.get(effectiveListing.id);
+
+        // 5. Determine novelty / change classification
+        let changeKind: ObservationChangeKind;
+        let latestObs: Observation | null = null;
+
+        if (!latestObsRow) {
+          changeKind = 'NEW';
+        } else {
+          latestObs = rehydrateObservation(latestObsRow);
+
+          // Out-of-order defense: reject if incoming observation is older than latest persisted observation
+          if (incomingObs.observedAt.getTime() < latestObs.observedAt.getTime()) {
+            throw new RecordObservationCoherenceError({
+              kind: 'OUT_OF_ORDER_OBSERVED_AT',
+              listingId: effectiveListing.id,
+              incomingObservedAt: incomingObs.observedAt.toISOString(),
+              latestPersistedObservedAt: latestObs.observedAt.toISOString(),
+            });
+          }
+
+          // Priority 1: REAPPEARED
+          const wasGone = latestObs.availability === 'SOLD' || latestObs.availability === 'REMOVED';
+          const isNowBack =
+            incomingObs.availability === 'AVAILABLE' || incomingObs.availability === 'PENDING';
+
+          if (wasGone && isNowBack) {
+            changeKind = 'REAPPEARED';
+          } else if (!arePricesSemanticallyEqual(latestObs.price, incomingObs.price)) {
+            // Priority 2: PRICE_CHANGED
+            changeKind = 'PRICE_CHANGED';
+          } else {
+            // Priority 3: UNCHANGED (no price change, no reappearance, not new)
+            changeKind = 'UNCHANGED';
+          }
         }
 
         // 6. Insert new Observation row pointing to effectiveListing.id

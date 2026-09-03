@@ -20,10 +20,12 @@ function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
+const ISO_CANONICAL_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+
 function parseIsoDate(isoString: string, fieldName: string, entityId: string): Date {
-  if (typeof isoString !== 'string') {
+  if (typeof isoString !== 'string' || !ISO_CANONICAL_UTC_REGEX.test(isoString)) {
     throw new StorageCorruptionError(
-      `Corrupted persisted Listing '${entityId}': '${fieldName}' must be a string, got ${typeof isoString}`,
+      `Corrupted persisted Listing '${entityId}': '${fieldName}' must be a canonical ISO UTC date string ending with 'Z', got '${String(isoString)}'`,
     );
   }
   const date = new Date(isoString);

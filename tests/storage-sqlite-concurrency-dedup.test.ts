@@ -305,13 +305,13 @@ describe('SQLite Concurrency & Multi-Threaded Deduplication (BOAI-012 / Finding 
           externalId: 'syn-item-scenario-1',
           canonicalUrl: 'https://synthetic.invalid/listings/syn-item-scenario-1',
           firstSeenAt: '2026-08-30T10:00:00.000Z',
-          lastSeenAt: '2026-08-30T10:05:00.000Z',
+          lastSeenAt: '2026-08-30T10:00:00.000Z',
         },
         observation: {
           id: 'obs-writer-b',
           listingId: 'listing-writer-b',
           sourceRunId: 'source-run-conc-shared',
-          observedAt: '2026-08-30T10:05:00.000Z',
+          observedAt: '2026-08-30T10:00:00.000Z',
           title: 'Nintendo Switch Writer B',
           rawFingerprint: 'fp-writer-b',
         },
@@ -537,10 +537,33 @@ describe('SQLite Concurrency & Multi-Threaded Deduplication (BOAI-012 / Finding 
     }
   });
 
-  it('Scenario 4: race with differing contents produces consistent history with monotonic firstSeenAt / lastSeenAt', async () => {
+  it('Scenario 4: race with differing contents produces consistent history, monotonic timestamps, and deterministic changeKind', async () => {
     const ctx = createTempDatabaseContext();
     try {
       await setupDatabasePrerequisites(ctx.databasePath);
+
+      // Pre-seed the listing with a baseline observation at 09:00:00.000Z
+      const dbPre = openSqliteDatabase({ databasePath: ctx.databasePath });
+      const baselinePrice = createResolvedPrice({
+        rawText: '$200.000',
+        amount: 200000,
+        currency: 'ARS',
+        resolution: 'EXPLICIT',
+        confidence: 0.9,
+        evidence: ['$200.000'],
+      });
+      const baselineFp = computeObservationFingerprint(
+        { title: 'Nintendo Switch Baseline', price: baselinePrice },
+        hasher,
+      );
+      dbPre.exec(`
+        INSERT INTO listings (id, source_id, external_id, canonical_url, first_seen_at, last_seen_at)
+        VALUES ('listing-scenario-4', 'synthetic', 'syn-item-scenario-4', 'https://synthetic.invalid/listings/syn-item-scenario-4', '2026-08-30T09:00:00.000Z', '2026-08-30T09:00:00.000Z');
+
+        INSERT INTO observations (id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint)
+        VALUES ('obs-scenario-4-baseline', 'listing-scenario-4', 'source-run-conc-shared', '2026-08-30T09:00:00.000Z', 'Nintendo Switch Baseline', NULL, '${JSON.stringify(baselinePrice)}', NULL, NULL, 'AVAILABLE', '[]', NULL, '${baselineFp}');
+      `);
+      dbPre.close();
 
       const priceA = createResolvedPrice({
         rawText: '$250.000',
@@ -577,13 +600,13 @@ describe('SQLite Concurrency & Multi-Threaded Deduplication (BOAI-012 / Finding 
           externalId: 'syn-item-scenario-4',
           canonicalUrl: 'https://synthetic.invalid/listings/syn-item-scenario-4',
           firstSeenAt: '2026-08-30T09:00:00.000Z',
-          lastSeenAt: '2026-08-30T09:30:00.000Z',
+          lastSeenAt: '2026-08-30T10:00:00.000Z',
         },
         observation: {
           id: 'obs-scenario-4-a',
           listingId: 'listing-scenario-4',
           sourceRunId: 'source-run-conc-shared',
-          observedAt: '2026-08-30T09:30:00.000Z',
+          observedAt: '2026-08-30T10:00:00.000Z',
           title: 'Nintendo Switch Price 250',
           price: {
             rawText: '$250.000',
@@ -604,14 +627,14 @@ describe('SQLite Concurrency & Multi-Threaded Deduplication (BOAI-012 / Finding 
           sourceId: 'synthetic',
           externalId: 'syn-item-scenario-4',
           canonicalUrl: 'https://synthetic.invalid/listings/syn-item-scenario-4',
-          firstSeenAt: '2026-08-30T10:00:00.000Z',
-          lastSeenAt: '2026-08-30T10:30:00.000Z',
+          firstSeenAt: '2026-08-30T09:00:00.000Z',
+          lastSeenAt: '2026-08-30T10:00:00.000Z',
         },
         observation: {
           id: 'obs-scenario-4-b',
           listingId: 'listing-scenario-4',
           sourceRunId: 'source-run-conc-shared',
-          observedAt: '2026-08-30T10:30:00.000Z',
+          observedAt: '2026-08-30T10:00:00.000Z',
           title: 'Nintendo Switch Price 220',
           price: {
             rawText: '$220.000',
@@ -631,18 +654,24 @@ describe('SQLite Concurrency & Multi-Threaded Deduplication (BOAI-012 / Finding 
       expect(resA.ok).toBe(true);
       expect(resB.ok).toBe(true);
 
+      // Deterministic changeKind: both workers observe a price change against previous state
+      expect(resA.result?.isNewObservation).toBe(true);
+      expect(resB.result?.isNewObservation).toBe(true);
+      expect(resA.result?.changeKind).toBe('PRICE_CHANGED');
+      expect(resB.result?.changeKind).toBe('PRICE_CHANGED');
+
       const verifyDb = openSqliteDatabase({ databasePath: ctx.databasePath });
 
-      // Both observations were persisted into consistent history
+      // All 3 observations exist (baseline + 2 concurrent observations)
       const obsRows = verifyDb
         .prepare<{ id: string; price: string }, [string]>(
-          'SELECT id, price FROM observations WHERE listing_id = ? ORDER BY observed_at ASC',
+          'SELECT id, price FROM observations WHERE listing_id = ? ORDER BY observed_at ASC, id ASC',
         )
         .all(resA.result!.listingId);
 
-      expect(obsRows).toHaveLength(2);
+      expect(obsRows).toHaveLength(3);
 
-      // Listing timestamps: monotonic earliest firstSeenAt (09:00:00), monotonic latest lastSeenAt (10:30:00)
+      // Listing timestamps: monotonic earliest firstSeenAt (09:00:00), monotonic latest lastSeenAt (10:00:00)
       const listingRow = verifyDb
         .prepare<{ first_seen_at: string; last_seen_at: string }, [string]>(
           'SELECT first_seen_at, last_seen_at FROM listings WHERE id = ?',
@@ -650,8 +679,71 @@ describe('SQLite Concurrency & Multi-Threaded Deduplication (BOAI-012 / Finding 
         .get(resA.result!.listingId);
 
       expect(listingRow?.first_seen_at).toBe('2026-08-30T09:00:00.000Z');
-      expect(listingRow?.last_seen_at).toBe('2026-08-30T10:30:00.000Z');
+      expect(listingRow?.last_seen_at).toBe('2026-08-30T10:00:00.000Z');
 
+      verifyDb.close();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it('Scenario 5: concurrent ingestion of two distinct listings deterministically yields changeKind NEW for both', async () => {
+    const ctx = createTempDatabaseContext();
+    try {
+      await setupDatabasePrerequisites(ctx.databasePath);
+
+      const taskA: WorkerTaskPayload = {
+        listing: {
+          id: 'listing-distinct-a',
+          sourceId: 'synthetic',
+          externalId: 'syn-item-distinct-a',
+          canonicalUrl: 'https://synthetic.invalid/listings/syn-item-distinct-a',
+          firstSeenAt: '2026-08-30T10:00:00.000Z',
+          lastSeenAt: '2026-08-30T10:00:00.000Z',
+        },
+        observation: {
+          id: 'obs-distinct-a',
+          listingId: 'listing-distinct-a',
+          sourceRunId: 'source-run-conc-shared',
+          observedAt: '2026-08-30T10:00:00.000Z',
+          title: 'Distinct Item A',
+          rawFingerprint: 'fp-distinct-a',
+        },
+      };
+
+      const taskB: WorkerTaskPayload = {
+        listing: {
+          id: 'listing-distinct-b',
+          sourceId: 'synthetic',
+          externalId: 'syn-item-distinct-b',
+          canonicalUrl: 'https://synthetic.invalid/listings/syn-item-distinct-b',
+          firstSeenAt: '2026-08-30T10:00:00.000Z',
+          lastSeenAt: '2026-08-30T10:00:00.000Z',
+        },
+        observation: {
+          id: 'obs-distinct-b',
+          listingId: 'listing-distinct-b',
+          sourceRunId: 'source-run-conc-shared',
+          observedAt: '2026-08-30T10:00:00.000Z',
+          title: 'Distinct Item B',
+          rawFingerprint: 'fp-distinct-b',
+        },
+      };
+
+      const [resA, resB] = await runConcurrentWorkers(ctx.databasePath, taskA, taskB);
+
+      expect(resA.ok).toBe(true);
+      expect(resB.ok).toBe(true);
+      expect(resA.result?.changeKind).toBe('NEW');
+      expect(resB.result?.changeKind).toBe('NEW');
+      expect(resA.result?.isNewObservation).toBe(true);
+      expect(resB.result?.isNewObservation).toBe(true);
+
+      const verifyDb = openSqliteDatabase({ databasePath: ctx.databasePath });
+      const listingsCount = verifyDb
+        .prepare<{ count: number }, []>('SELECT COUNT(*) as count FROM listings')
+        .get();
+      expect(listingsCount?.count).toBe(2);
       verifyDb.close();
     } finally {
       ctx.cleanup();

@@ -399,12 +399,18 @@ export class ObservationFingerprintCollisionError extends SqliteStorageError {
 }
 
 export interface RecordObservationCoherenceDetails {
-  readonly kind: 'LISTING_ID_MISMATCH' | 'SOURCE_ID_MISMATCH' | 'SOURCE_RUN_NOT_FOUND';
+  readonly kind:
+    | 'LISTING_ID_MISMATCH'
+    | 'SOURCE_ID_MISMATCH'
+    | 'SOURCE_RUN_NOT_FOUND'
+    | 'OUT_OF_ORDER_OBSERVED_AT';
   readonly listingId?: string;
   readonly observationListingId?: string;
   readonly listingSourceId?: string;
   readonly sourceRunSourceId?: string;
   readonly sourceRunId?: string;
+  readonly incomingObservedAt?: string;
+  readonly latestPersistedObservedAt?: string;
 }
 
 export class RecordObservationCoherenceError extends SqliteStorageError {
@@ -421,6 +427,8 @@ export class RecordObservationCoherenceError extends SqliteStorageError {
         msg = `RecordObservation input coherence failure: observation.listingId ('${details.observationListingId}') must match incoming listing.id ('${details.listingId}') before natural key resolution.`;
       } else if (details.kind === 'SOURCE_ID_MISMATCH') {
         msg = `RecordObservation input coherence failure: listing.sourceId ('${details.listingSourceId}') does not match sourceRun.sourceId ('${details.sourceRunSourceId}'). SourceRun cannot record observations for a different source.`;
+      } else if (details.kind === 'OUT_OF_ORDER_OBSERVED_AT') {
+        msg = `RecordObservation input coherence failure: incoming observation.observedAt ('${details.incomingObservedAt}') is older than latest persisted observation.observedAt ('${details.latestPersistedObservedAt}') for listing '${details.listingId}'. Observations must be recorded in chronological order.`;
       } else {
         msg = `RecordObservation input coherence failure: sourceRun with id '${details.sourceRunId}' was not found.`;
       }

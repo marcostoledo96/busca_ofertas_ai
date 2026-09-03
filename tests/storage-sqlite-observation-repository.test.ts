@@ -441,6 +441,46 @@ describe('SqliteObservationRepository (BOAI-012)', () => {
           price: validPrice,
           location: { ...validLocation, coordinates: { latitude: 999, longitude: -58.43 } },
         },
+        // Finding B: strict optional shapes:
+        {
+          id: 'corrupt-price-converted-null',
+          price: { ...validPrice, converted: null },
+          location: validLocation,
+        },
+        {
+          id: 'corrupt-location-region-null',
+          price: validPrice,
+          location: { ...validLocation, region: null },
+        },
+        {
+          id: 'corrupt-location-city-null',
+          price: validPrice,
+          location: { ...validLocation, city: null },
+        },
+        {
+          id: 'corrupt-location-neighborhood-null',
+          price: validPrice,
+          location: { ...validLocation, neighborhood: null },
+        },
+        {
+          id: 'corrupt-location-coordinates-null',
+          price: validPrice,
+          location: { ...validLocation, coordinates: null },
+        },
+        {
+          id: 'corrupt-price-converted-at-no-z',
+          price: {
+            ...validPrice,
+            converted: {
+              amount: 100,
+              currency: 'ARS',
+              exchangeRate: 1.0,
+              exchangeRateOrigin: 'MANUAL',
+              convertedAt: '2026-08-30T10:00:00', // no Z!
+            },
+          },
+          location: validLocation,
+        },
       ];
 
       for (const scenario of corruptionScenarios) {
@@ -451,6 +491,29 @@ describe('SqliteObservationRepository (BOAI-012)', () => {
 
         await expect(repo.getById(scenario.id)).rejects.toThrow(StorageCorruptionError);
       }
+
+      // Non-canonical timestamps without Z must strictly fail closed with StorageCorruptionError
+      db.exec(`
+        INSERT INTO observations (id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint)
+        VALUES ('corrupt-obs-no-z', '${listing.id}', '${sourceRun.id}', '2026-08-30T10:00:00', 'Title', NULL, '${JSON.stringify(validPrice)}', '${JSON.stringify(validLocation)}', NULL, 'AVAILABLE', '[]', NULL, 'fp-no-z');
+      `);
+      await expect(repo.getById('corrupt-obs-no-z')).rejects.toThrow(StorageCorruptionError);
+
+      db.exec(`
+        INSERT INTO observations (id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint)
+        VALUES ('corrupt-pub-offset', '${listing.id}', '${sourceRun.id}', '2026-08-30T10:00:00.000Z', 'Title', NULL, '${JSON.stringify(validPrice)}', '${JSON.stringify(validLocation)}', NULL, 'AVAILABLE', '[]', '2026-08-30T10:00:00-03:00', 'fp-pub-offset');
+      `);
+      await expect(repo.getById('corrupt-pub-offset')).rejects.toThrow(StorageCorruptionError);
+
+      // Non-canonical timestamps on listing must also fail closed in listing repository
+      db.exec(`
+        INSERT INTO listings (id, source_id, external_id, canonical_url, first_seen_at, last_seen_at)
+        VALUES ('listing-corrupt-dates', 'synthetic', 'syn-corrupt-dates', 'https://synthetic.invalid/listings/corrupt-dates', '2026-08-30T10:00:00', '2026-08-30T10:00:00.000Z');
+      `);
+      const listingRepo = new SqliteListingRepository(db);
+      await expect(listingRepo.getById('listing-corrupt-dates')).rejects.toThrow(
+        StorageCorruptionError,
+      );
 
       // listByListingId must also fail closed when a corrupted observation row is present
       await expect(repo.listByListingId(listing.id)).rejects.toThrow(StorageCorruptionError);
@@ -734,6 +797,127 @@ describe('SqliteObservationRepository (BOAI-012)', () => {
         )
         .get('obs-mismatched-id', 'obs-mismatched-source');
       expect(obsCount?.total).toBe(0);
+    });
+  });
+
+  it('updates Listing.lastSeenAt to include incoming Observation.observedAt even when observation is deduplicated (Finding A)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const { sourceRun } = await setupPrerequisites(db);
+      const repo = new SqliteObservationRepository(db);
+      const listingRepo = new SqliteListingRepository(db);
+      const hasher = createNodeCryptoHasher();
+
+      const listing = createListing({
+        id: 'listing-last-seen-test',
+        sourceId: 'synthetic',
+        externalId: 'syn-last-seen-test',
+        canonicalUrl: 'https://synthetic.invalid/listings/syn-last-seen-test',
+        firstSeenAt: new Date('2026-08-30T10:00:00.000Z'),
+        lastSeenAt: new Date('2026-08-30T10:00:00.000Z'),
+      });
+
+      const fp = computeObservationFingerprint(
+        { title: 'Nintendo Switch Sighting', price: null },
+        hasher,
+      );
+
+      const initialObs = createObservation({
+        id: 'obs-sighting-1',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:00:00.000Z'),
+        title: 'Nintendo Switch Sighting',
+        rawFingerprint: fp,
+      });
+
+      // 1. Persist initial sighting at 10:00
+      const res1 = await repo.recordObservation({
+        listing,
+        observation: initialObs,
+      });
+      expect(res1.isNewObservation).toBe(true);
+      expect(res1.listing.lastSeenAt.toISOString()).toBe('2026-08-30T10:00:00.000Z');
+
+      // 2. Incoming listing keeps lastSeenAt at 10:00, but incoming identical observation has observedAt 11:00
+      const secondObs = createObservation({
+        id: 'obs-sighting-2',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T11:00:00.000Z'),
+        title: 'Nintendo Switch Sighting',
+        rawFingerprint: fp,
+      });
+
+      const incomingListing = createListing({
+        id: listing.id,
+        sourceId: listing.sourceId,
+        externalId: listing.externalId,
+        canonicalUrl: listing.canonicalUrl,
+        firstSeenAt: new Date('2026-08-30T10:00:00.000Z'),
+        lastSeenAt: new Date('2026-08-30T10:00:00.000Z'), // incoming listing maintains 10:00
+      });
+
+      const res2 = await repo.recordObservation({
+        listing: incomingListing,
+        observation: secondObs,
+      });
+
+      // 3. Deduplication: isNewObservation = false, observations count unchanged, Listing.lastSeenAt = 11:00
+      expect(res2.isNewObservation).toBe(false);
+      expect(res2.changeKind).toBe('UNCHANGED');
+      expect(res2.listing.lastSeenAt.toISOString()).toBe('2026-08-30T11:00:00.000Z');
+
+      const persistedListing = await listingRepo.getById(res2.listing.id);
+      expect(persistedListing?.lastSeenAt.toISOString()).toBe('2026-08-30T11:00:00.000Z');
+
+      const allObs = await repo.listByListingId(res2.listing.id);
+      expect(allObs).toHaveLength(1);
+    });
+  });
+
+  it('guarantees Listing.firstSeenAt is never later than incoming Observation.observedAt', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const { sourceRun } = await setupPrerequisites(db);
+      const repo = new SqliteObservationRepository(db);
+      const listingRepo = new SqliteListingRepository(db);
+      const hasher = createNodeCryptoHasher();
+
+      const listing = createListing({
+        id: 'listing-first-seen-test',
+        sourceId: 'synthetic',
+        externalId: 'syn-first-seen-test',
+        canonicalUrl: 'https://synthetic.invalid/listings/syn-first-seen-test',
+        firstSeenAt: new Date('2026-08-30T12:00:00.000Z'),
+        lastSeenAt: new Date('2026-08-30T12:00:00.000Z'),
+      });
+
+      const fp = computeObservationFingerprint(
+        { title: 'Nintendo Switch Early Sighting', price: null },
+        hasher,
+      );
+
+      // Observation observed at 10:00 (earlier than listing.firstSeenAt of 12:00)
+      const earlyObs = createObservation({
+        id: 'obs-early-1',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:00:00.000Z'),
+        title: 'Nintendo Switch Early Sighting',
+        rawFingerprint: fp,
+      });
+
+      const res = await repo.recordObservation({
+        listing,
+        observation: earlyObs,
+      });
+
+      expect(res.listing.firstSeenAt.toISOString()).toBe('2026-08-30T10:00:00.000Z');
+      expect(res.listing.lastSeenAt.toISOString()).toBe('2026-08-30T12:00:00.000Z');
+
+      const persisted = await listingRepo.getById(listing.id);
+      expect(persisted?.firstSeenAt.toISOString()).toBe('2026-08-30T10:00:00.000Z');
     });
   });
 });

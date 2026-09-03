@@ -91,7 +91,11 @@ interface Observation {
 
 - Toda `Observation` persistida es estrictamente **inmutable**. Guardar un `Observation.id` existente solo es una operación idempotente si el contenido completo persistido es idéntico. Cualquier divergencia emite `ObservationIdentityCollisionError`.
 - **Deduplicación intra-run**: si en el mismo `sourceRunId` se observa la misma `Listing` con idéntico payload y fingerprint, se actualiza `lastSeenAt` de la `Listing` y no se inserta una fila redundante (`isNewObservation = false`).
-- **Monotonicidad temporal de Listing**: `Listing.firstSeenAt` es monótonamente la fecha más temprana observada (nunca avanza); `Listing.lastSeenAt` es monótonamente la fecha más reciente observada (nunca retrocede).
+- **Monotonicidad temporal de Listing**:
+  - `Listing.lastSeenAt = max(persisted.lastSeenAt, incoming.lastSeenAt, incomingObservation.observedAt)`: el avistamiento de una publicación siempre actualiza su presencia más reciente, incluso cuando la observación es deduplicada.
+  - `Listing.firstSeenAt = min(persisted.firstSeenAt, incoming.firstSeenAt, incomingObservation.observedAt)`: la fecha de primer avistamiento jamás puede ser posterior a ninguna observación registrada para esa publicación.
+- **Formato canónico de timestamps UTC**: todo timestamp persistido debe ser una cadena ISO 8601 canónica en UTC terminada en `Z` (`YYYY-MM-DDTHH:mm:ss.sssZ`). Formas no canónicas (sin zona horaria o con offsets numéricos como `-03:00`) se rechazan estrictamente con `StorageCorruptionError` sin reparación silenciosa.
+- **Formas JSON persistidas estrictas**: el JSON persistido se trata como `unknown`. Un campo opcional ausente se permite; si la clave está presente, el valor debe pertenecer al tipo exacto del dominio. Si el dominio no admite `null` (por ejemplo `price.converted`, `location.region`, `city`, `neighborhood` o `coordinates`), la presencia de `null` se rechaza con `StorageCorruptionError`.
 
 #### Clasificación de novedad (`changeKind`)
 
@@ -102,7 +106,8 @@ La clasificación de cambios durante `recordObservation` evalúa la transición 
 3. `PRICE_CHANGED`: el precio resolvió un importe, moneda o tipo diferente respecto de la última observación (`isNewObservation = true`).
 4. `UNCHANGED`: no ocurrió un cambio de precio ni una reaparición ni es un nuevo ítem.
    - **Semántica crítica**: `UNCHANGED != no new Observation`. Si cambian atributos no relacionados al precio (título, descripción, ubicación, condición), se persiste una nueva `Observation` en el historial (`isNewObservation = true`) mientras que `changeKind` permanece `UNCHANGED`. Solo cuando el fingerprint semántico es idéntico dentro del mismo run se concluye `isNewObservation = false`.
-5. **Política de reaparición**: la transición a `REAPPEARED` requiere evidencia positiva de disponibilidad (`AVAILABLE`/`PENDING`) posterior a un estado terminal explícito (`SOLD`/`REMOVED`). La mera ausencia en los resultados de una búsqueda **no** se infiere como eliminación ni autoriza a declarar reaparición.
+5. **Política cronológica y defensiva ante observaciones desordenadas**: para garantizar resultados deterministas e impedir calcular novedades respecto a estados futuros, si una observación entrante posee un `observedAt` anterior a la última observación ya persistida para la misma publicación (`incoming.observedAt < latestPersisted.observedAt`), se rechaza la operación fail-closed con `RecordObservationCoherenceError` (`OUT_OF_ORDER_OBSERVED_AT`) con mutación cero.
+6. **Política de reaparición**: la transición a `REAPPEARED` requiere evidencia positiva de disponibilidad (`AVAILABLE`/`PENDING`) posterior a un estado terminal explícito (`SOLD`/`REMOVED`). La mera ausencia en los resultados de una búsqueda **no** se infiere como eliminación ni autoriza a declarar reaparición.
 
 ### Opportunity
 
