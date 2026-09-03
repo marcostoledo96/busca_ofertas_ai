@@ -16,8 +16,8 @@ describe('Run Export Architecture & Boundaries (BOAI-014)', () => {
     expect(typeof runExport.resolveHistoricalSearchRevision).toBe('function');
     expect(typeof runExport.projectPersistedRunExport).toBe('function');
     expect(Array.isArray(runExport.CSV_COLUMNS)).toBe(true);
-    expect(runExport.CSV_COLUMN_COUNT).toBe(55);
-    expect(runExport.CSV_COLUMNS).toHaveLength(55);
+    expect(runExport.CSV_COLUMN_COUNT).toBe(65);
+    expect(runExport.CSV_COLUMNS).toHaveLength(65);
   });
 
   it('has zero external runtime dependencies in package manifest', () => {

@@ -150,18 +150,16 @@ export async function projectPersistedRunExport(
     }
 
     const metadata = await runRepository.getSourceRunMetadata(sr.id);
-    if (sr.status === 'SUCCESS' || sr.status === 'ZERO_RESULTS_CONFIRMED') {
-      if (!metadata || !metadata.adapterVersion) {
-        throw new RunExportProjectionError({
-          code: 'SOURCE_METADATA_MISSING',
-          message: `SourceRun '${sr.id}' with status '${sr.status}' is missing required execution metadata.`,
-          runId,
-          sourceRunId: sr.id,
-        });
-      }
+    if (!metadata || !metadata.adapterVersion || metadata.adapterVersion.trim().length === 0) {
+      throw new RunExportProjectionError({
+        code: 'SOURCE_METADATA_MISSING',
+        message: `SourceRun '${sr.id}' is missing required execution metadata or non-empty adapterVersion.`,
+        runId,
+        sourceRunId: sr.id,
+      });
     }
 
-    const adapterVersion = metadata?.adapterVersion ?? '0.0.0';
+    const adapterVersion = metadata.adapterVersion;
     const collectorId =
       metadata?.collectorId ?? ('collectorId' in sr ? (sr.collectorId ?? null) : null);
     const finishedAt = 'finishedAt' in sr && sr.finishedAt ? sr.finishedAt.toISOString() : null;

@@ -23,7 +23,7 @@ function createSnapshotWithFormulaAndCoordinates(): RunExportSnapshot {
       revisionNumber: 1,
       schemaVersion: 1,
       name: '=SUM(1,2)', // Malicious title/name
-      category: 'consoles',
+      category: 'PRODUCT',
     },
     manualExchangeRate: null,
     sources: [
@@ -63,6 +63,7 @@ function createSnapshotWithFormulaAndCoordinates(): RunExportSnapshot {
           resolution: 'EXPLICIT',
           confidence: 0.99,
           evidence: ['tag'],
+          kind: 'TOTAL',
           converted: null,
         },
         location: {
@@ -81,19 +82,19 @@ function createSnapshotWithFormulaAndCoordinates(): RunExportSnapshot {
 }
 
 describe('Run Export CSV Serializer (BOAI-014)', () => {
-  it('enforces exact 55 columns in header and all rows', () => {
-    expect(CSV_COLUMNS).toHaveLength(55);
-    expect(CSV_COLUMN_COUNT).toBe(55);
+  it('enforces exact 65 columns in header and all rows', () => {
+    expect(CSV_COLUMNS).toHaveLength(65);
+    expect(CSV_COLUMN_COUNT).toBe(65);
 
     const snapshot = createSnapshotWithFormulaAndCoordinates();
     const csv = serializeCsv(snapshot);
     const parsed = parseCsvRfc4180(csv);
 
     expect(parsed.headers).toEqual([...CSV_COLUMNS]);
-    expect(parsed.headers.length).toBe(55);
+    expect(parsed.headers.length).toBe(65);
 
     for (let i = 0; i < parsed.rows.length; i++) {
-      expect(parsed.rows[i]?.length).toBe(55);
+      expect(parsed.rows[i]?.length).toBe(65);
     }
   });
 
@@ -103,17 +104,23 @@ describe('Run Export CSV Serializer (BOAI-014)', () => {
     const parsed = parseCsvRfc4180(csv);
 
     // Row 0: RUN
-    expect(parsed.rows[0]?.[1]).toBe('RUN');
-    expect(parsed.rows[0]?.[2]).toBe('run-formulas');
+    const recordTypeCol = CSV_COLUMNS.indexOf('record_type');
+    const runIdCol = CSV_COLUMNS.indexOf('run_id');
+    const srIdCol = CSV_COLUMNS.indexOf('source_run_id');
+    const sourceIdCol = CSV_COLUMNS.indexOf('source_id');
+    const listingIdCol = CSV_COLUMNS.indexOf('listing_id');
+
+    expect(parsed.rows[0]?.[recordTypeCol]).toBe('RUN');
+    expect(parsed.rows[0]?.[runIdCol]).toBe('run-formulas');
 
     // Row 1: SOURCE
-    expect(parsed.rows[1]?.[1]).toBe('SOURCE');
-    expect(parsed.rows[1]?.[14]).toBe('sr-1');
-    expect(parsed.rows[1]?.[15]).toBe('synthetic');
+    expect(parsed.rows[1]?.[recordTypeCol]).toBe('SOURCE');
+    expect(parsed.rows[1]?.[srIdCol]).toBe('sr-1');
+    expect(parsed.rows[1]?.[sourceIdCol]).toBe('synthetic');
 
     // Row 2: RESULT
-    expect(parsed.rows[2]?.[1]).toBe('RESULT');
-    expect(parsed.rows[2]?.[22]).toBe('listing-1');
+    expect(parsed.rows[2]?.[recordTypeCol]).toBe('RESULT');
+    expect(parsed.rows[2]?.[listingIdCol]).toBe('listing-1');
   });
 
   it('neutralizes spreadsheet formula injection on untrusted textual fields', () => {

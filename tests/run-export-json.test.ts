@@ -17,7 +17,7 @@ function createRepresentativeSnapshot(): RunExportSnapshot {
       revisionNumber: 1,
       schemaVersion: 1,
       name: 'Search Omega',
-      category: 'consoles',
+      category: 'PRODUCT',
     },
     manualExchangeRate: null,
     sources: [

@@ -26,6 +26,12 @@ export const CSV_COLUMNS = [
   'source_items_count',
   'source_error_code',
   'source_error_message',
+  'source_pages_requested',
+  'source_pages_completed',
+  'source_raw_items_count',
+  'source_parsed_items_count',
+  'source_rejected_items_count',
+  'source_stop_reason',
   'listing_id',
   'external_id',
   'canonical_url',
@@ -36,16 +42,19 @@ export const CSV_COLUMNS = [
   'description',
   'condition',
   'availability',
+  'raw_fingerprint',
   'price_raw_text',
   'price_amount',
   'price_currency',
   'price_resolution',
+  'price_kind',
   'price_confidence',
   'price_evidence_json',
   'converted_amount',
   'converted_currency',
   'exchange_rate',
   'exchange_rate_origin',
+  'converted_at',
   'location_raw_text',
   'location_region',
   'location_city',
@@ -58,10 +67,11 @@ export const CSV_COLUMNS = [
   'reasons_json',
   'evaluated_by_json',
   'policy_version',
+  'evaluation_created_at',
   'image_urls_json',
 ] as const;
 
-export const CSV_COLUMN_COUNT = CSV_COLUMNS.length; // 55
+export const CSV_COLUMN_COUNT = CSV_COLUMNS.length; // 65
 
 export const CSV_ROW_DELIMITER = '\r\n' as const;
 
@@ -122,7 +132,7 @@ export function serializeCsv(snapshot: RunExportSnapshot): string {
   const search = snapshot.search;
   const manualFx = snapshot.manualExchangeRate;
 
-  // 1. RUN row
+  // 1. RUN row (columns 1-14 populated, remaining 51 empty)
   const runRowCells: CellDefinition[] = [
     { value: snapshot.schemaVersion, isNumeric: true },
     { value: 'RUN' },
@@ -138,12 +148,13 @@ export function serializeCsv(snapshot: RunExportSnapshot): string {
     { value: run.error?.code ?? null },
     { value: run.error?.message ?? null },
     { value: manualFx, isNumeric: true },
-    // Remaining 41 columns are empty
-    ...Array.from({ length: 41 }, (): CellDefinition => ({ value: null })),
+    // Remaining 51 columns are empty
+    ...Array.from({ length: 51 }, (): CellDefinition => ({ value: null })),
   ];
   rows.push(buildCsvRow(runRowCells));
 
   // 2. SOURCE rows (ordered by sourceId ASC, sourceRunId ASC)
+  // Columns 1-14: run & search; Columns 15-28: source & metrics; Remaining 37 columns: empty
   const sortedSources = sortSources(snapshot.sources);
   for (const src of sortedSources) {
     const sourceRowCells: CellDefinition[] = [
@@ -169,13 +180,20 @@ export function serializeCsv(snapshot: RunExportSnapshot): string {
       { value: src.itemsCount, isNumeric: true },
       { value: src.error?.code ?? null },
       { value: src.error?.message ?? null },
-      // Remaining 33 result columns are empty
-      ...Array.from({ length: 33 }, (): CellDefinition => ({ value: null })),
+      { value: src.metrics?.pagesRequested ?? null, isNumeric: true },
+      { value: src.metrics?.pagesCompleted ?? null, isNumeric: true },
+      { value: src.metrics?.rawItemsCount ?? null, isNumeric: true },
+      { value: src.metrics?.parsedItemsCount ?? null, isNumeric: true },
+      { value: src.metrics?.rejectedItemsCount ?? null, isNumeric: true },
+      { value: src.metrics?.stopReason ?? null },
+      // Remaining 37 result columns are empty
+      ...Array.from({ length: 37 }, (): CellDefinition => ({ value: null })),
     ];
     rows.push(buildCsvRow(sourceRowCells));
   }
 
   // 3. RESULT rows (ordered by sourceId ASC, listingId ASC, observedAt ASC, observationId ASC)
+  // Columns 1-14: run & search; Columns 15-16: source run/id; Columns 17-28: 12 empty source fields; Columns 29-65: 37 result fields
   const sortedResults = sortResults(snapshot.results);
   for (const res of sortedResults) {
     const resultRowCells: CellDefinition[] = [
@@ -195,12 +213,9 @@ export function serializeCsv(snapshot: RunExportSnapshot): string {
       { value: manualFx, isNumeric: true },
       { value: res.sourceRunId },
       { value: res.sourceId },
-      { value: null }, // collector_id
-      { value: null }, // adapter_version
-      { value: null }, // source_status
-      { value: null, isNumeric: true }, // source_items_count
-      { value: null }, // source_error_code
-      { value: null }, // source_error_message
+      // 12 empty source fields (collector_id through source_stop_reason)
+      ...Array.from({ length: 12 }, (): CellDefinition => ({ value: null })),
+      // 37 result fields
       { value: res.listingId },
       { value: res.externalId },
       { value: res.canonicalUrl },
@@ -211,10 +226,12 @@ export function serializeCsv(snapshot: RunExportSnapshot): string {
       { value: res.description },
       { value: res.condition },
       { value: res.availability },
+      { value: res.rawFingerprint },
       { value: res.price?.rawText ?? null },
       { value: res.price?.amount ?? null, isNumeric: true },
       { value: res.price?.currency ?? null },
       { value: res.price?.resolution ?? null },
+      { value: res.price?.kind ?? null },
       { value: res.price?.confidence ?? null, isNumeric: true },
       {
         value:
@@ -226,6 +243,7 @@ export function serializeCsv(snapshot: RunExportSnapshot): string {
       { value: res.price?.converted?.currency ?? null },
       { value: res.price?.converted?.exchangeRate ?? null, isNumeric: true },
       { value: res.price?.converted?.exchangeRateOrigin ?? null },
+      { value: res.price?.converted?.convertedAt ?? null },
       { value: res.location?.rawText ?? null },
       { value: res.location?.region ?? null },
       { value: res.location?.city ?? null },
@@ -248,6 +266,7 @@ export function serializeCsv(snapshot: RunExportSnapshot): string {
             : null,
       },
       { value: res.evaluation?.policyVersion ?? null },
+      { value: res.evaluation?.createdAt ?? null },
       { value: res.imageUrls && res.imageUrls.length > 0 ? JSON.stringify(res.imageUrls) : '[]' },
     ];
     rows.push(buildCsvRow(resultRowCells));

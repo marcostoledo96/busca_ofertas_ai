@@ -2,6 +2,8 @@ export const RUN_EXPORT_SCHEMA_VERSION = 1 as const;
 
 export type RunExportSchemaVersion = typeof RUN_EXPORT_SCHEMA_VERSION;
 
+export type RunExportSearchCategory = 'PRODUCT' | 'REAL_ESTATE' | 'VEHICLE';
+
 export type RunExportRunStatus =
   'CREATED' | 'RUNNING' | 'SUCCESS' | 'PARTIAL_SUCCESS' | 'FAILED' | 'CANCELLED';
 
@@ -20,6 +22,15 @@ export type RunExportSourceStatus =
   | 'TIMEOUT'
   | 'CONFIGURATION_UNSUPPORTED'
   | 'CANCELLED';
+
+export type RunExportSourceStopReason =
+  | 'ALL_PAGES_FETCHED'
+  | 'MAX_PAGES_REACHED'
+  | 'MAX_ITEMS_REACHED'
+  | 'NO_MORE_RESULTS'
+  | 'RATE_LIMIT_STOP'
+  | 'USER_ABORTED'
+  | 'DEADLINE_EXCEEDED';
 
 export type RunExportListingCondition =
   'NEW' | 'LIKE_NEW' | 'GOOD' | 'FAIR' | 'FOR_PARTS' | 'UNKNOWN';
@@ -60,7 +71,7 @@ export interface RunExportSearch {
   readonly revisionNumber: number;
   readonly schemaVersion: number;
   readonly name: string;
-  readonly category: string;
+  readonly category: RunExportSearchCategory;
 }
 
 export interface RunExportSourceMetrics {
@@ -69,7 +80,7 @@ export interface RunExportSourceMetrics {
   readonly rawItemsCount: number | null;
   readonly parsedItemsCount: number | null;
   readonly rejectedItemsCount: number | null;
-  readonly stopReason: string | null;
+  readonly stopReason: RunExportSourceStopReason | null;
 }
 
 export interface RunExportSourceError {
@@ -95,7 +106,7 @@ export interface RunExportConvertedPrice {
   readonly currency: 'ARS';
   readonly exchangeRate: number;
   readonly exchangeRateOrigin: 'MANUAL';
-  readonly convertedAt?: string | null | undefined;
+  readonly convertedAt: string;
 }
 
 export interface RunExportPrice {
@@ -105,7 +116,7 @@ export interface RunExportPrice {
   readonly resolution: RunExportPriceResolution;
   readonly confidence: number;
   readonly evidence: readonly string[];
-  readonly kind?: RunExportPriceKind | undefined;
+  readonly kind: RunExportPriceKind;
   readonly converted: RunExportConvertedPrice | null;
 }
 

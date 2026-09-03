@@ -13,38 +13,56 @@ function createCompleteSnapshot(): RunExportSnapshot {
     run: {
       id: 'run-parity-100',
       savedSearchId: 'search-lite-amba',
-      status: 'SUCCESS',
+      status: 'PARTIAL_SUCCESS',
       startedAt: '2026-08-30T10:00:00.000Z',
       finishedAt: '2026-08-30T10:05:00.000Z',
-      error: null,
+      error: {
+        code: 'PARTIAL_RUN_FAILURE',
+        message: 'One of the sources encountered a network error',
+      },
     },
     search: {
       savedSearchId: 'search-lite-amba',
       revisionNumber: 3,
       schemaVersion: 1,
       name: 'Nintendo Switch Lite AMBA',
-      category: 'consoles',
+      category: 'PRODUCT',
     },
-    manualExchangeRate: null,
+    manualExchangeRate: 1400,
     sources: [
       {
         sourceRunId: 'sr-synth-1',
         sourceId: 'synthetic',
         collectorId: 'collector-synthetic',
-        adapterVersion: '0.1.0',
+        adapterVersion: '1.2.3',
         status: 'SUCCESS',
         startedAt: '2026-08-30T10:00:00.000Z',
         finishedAt: '2026-08-30T10:04:00.000Z',
         itemsCount: 1,
         metrics: {
-          pagesRequested: 1,
-          pagesCompleted: 1,
-          rawItemsCount: 1,
-          parsedItemsCount: 1,
-          rejectedItemsCount: 0,
-          stopReason: 'COMPLETED',
+          pagesRequested: 5,
+          pagesCompleted: 3,
+          rawItemsCount: 10,
+          parsedItemsCount: 8,
+          rejectedItemsCount: 2,
+          stopReason: 'ALL_PAGES_FETCHED',
         },
         error: null,
+      },
+      {
+        sourceRunId: 'sr-failed-2',
+        sourceId: 'failed_source',
+        collectorId: null,
+        adapterVersion: '2.0.0',
+        status: 'NETWORK_ERROR',
+        startedAt: '2026-08-30T10:00:00.000Z',
+        finishedAt: '2026-08-30T10:01:00.000Z',
+        itemsCount: 0,
+        metrics: null,
+        error: {
+          code: 'ETIMEDOUT',
+          message: 'Connection timed out',
+        },
       },
     ],
     results: [
@@ -71,7 +89,13 @@ function createCompleteSnapshot(): RunExportSnapshot {
           confidence: 0.98,
           evidence: ['price_badge', 'ocr_text'],
           kind: 'TOTAL',
-          converted: null,
+          converted: {
+            amount: 175000,
+            currency: 'ARS',
+            exchangeRate: 1400,
+            exchangeRateOrigin: 'MANUAL',
+            convertedAt: '2026-08-30T10:02:30.000Z',
+          },
         },
         location: {
           rawText: 'Belgrano, CABA',
@@ -81,7 +105,7 @@ function createCompleteSnapshot(): RunExportSnapshot {
           latitude: -34.5627,
           longitude: -58.4563,
         },
-        novelty: null,
+        novelty: 'NEW',
         evaluation: {
           decision: 'MATCH',
           score: 92,
@@ -93,7 +117,7 @@ function createCompleteSnapshot(): RunExportSnapshot {
               severity: 'INFO',
             },
           ],
-          evaluatedBy: ['RULES'],
+          evaluatedBy: ['RULES', 'AI'],
           policyVersion: '1.0.0',
           createdAt: '2026-08-30T10:03:00.000Z',
         },
@@ -103,7 +127,7 @@ function createCompleteSnapshot(): RunExportSnapshot {
 }
 
 describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
-  it('preserves 1:1 factual semantic parity between JSON and CSV exports', () => {
+  it('preserves 1:1 factual semantic parity between JSON and CSV exports across all 65 columns', () => {
     const fixture = createCompleteSnapshot();
 
     const jsonStr = serializeJson(fixture);
@@ -111,6 +135,9 @@ describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
 
     const json = JSON.parse(jsonStr) as RunExportSnapshot;
     const csv = parseCsvRfc4180(csvStr);
+
+    expect(CSV_COLUMNS).toHaveLength(65);
+    expect(csv.headers).toEqual([...CSV_COLUMNS]);
 
     const colIndex = (name: (typeof CSV_COLUMNS)[number]) => {
       const idx = CSV_COLUMNS.indexOf(name);
@@ -132,9 +159,14 @@ describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
     expect(runRow[colIndex('run_status')]).toBe(json.run.status);
     expect(runRow[colIndex('run_started_at')]).toBe(json.run.startedAt);
     expect(runRow[colIndex('run_finished_at')]).toBe(json.run.finishedAt);
-    expect(runRow[colIndex('run_error_code')]).toBe('');
-    expect(runRow[colIndex('run_error_message')]).toBe('');
-    expect(runRow[colIndex('manual_exchange_rate')]).toBe('');
+    expect(runRow[colIndex('run_error_code')]).toBe(json.run.error?.code ?? '');
+    expect(runRow[colIndex('run_error_message')]).toBe(json.run.error?.message ?? '');
+    expect(runRow[colIndex('manual_exchange_rate')]).toBe(String(json.manualExchangeRate));
+
+    // Columns 15 to 65 must be empty in RUN row
+    for (let c = 14; c < 65; c++) {
+      expect(runRow[c]).toBe('');
+    }
 
     // 2. Sources Parity
     const sourceRows = csv.rows.filter((r) => r[colIndex('record_type')] === 'SOURCE');
@@ -144,14 +176,56 @@ describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
       const jSrc = json.sources[i]!;
       const cSrc = sourceRows[i]!;
 
+      // Run and search fields in source row
+      expect(cSrc[colIndex('run_id')]).toBe(json.run.id);
+      expect(cSrc[colIndex('saved_search_id')]).toBe(json.run.savedSearchId);
+      expect(cSrc[colIndex('search_revision_number')]).toBe(String(json.search.revisionNumber));
+      expect(cSrc[colIndex('search_name')]).toBe(json.search.name);
+      expect(cSrc[colIndex('search_category')]).toBe(json.search.category);
+      expect(cSrc[colIndex('manual_exchange_rate')]).toBe(String(json.manualExchangeRate));
+
+      // Source fields
       expect(cSrc[colIndex('source_run_id')]).toBe(jSrc.sourceRunId);
       expect(cSrc[colIndex('source_id')]).toBe(jSrc.sourceId);
       expect(cSrc[colIndex('collector_id')]).toBe(jSrc.collectorId ?? '');
       expect(cSrc[colIndex('adapter_version')]).toBe(jSrc.adapterVersion);
       expect(cSrc[colIndex('source_status')]).toBe(jSrc.status);
       expect(cSrc[colIndex('source_items_count')]).toBe(String(jSrc.itemsCount));
-      expect(cSrc[colIndex('source_error_code')]).toBe('');
-      expect(cSrc[colIndex('source_error_message')]).toBe('');
+      expect(cSrc[colIndex('source_error_code')]).toBe(jSrc.error?.code ?? '');
+      expect(cSrc[colIndex('source_error_message')]).toBe(jSrc.error?.message ?? '');
+
+      // Source metrics fields
+      expect(cSrc[colIndex('source_pages_requested')]).toBe(
+        jSrc.metrics?.pagesRequested !== null && jSrc.metrics?.pagesRequested !== undefined
+          ? String(jSrc.metrics.pagesRequested)
+          : '',
+      );
+      expect(cSrc[colIndex('source_pages_completed')]).toBe(
+        jSrc.metrics?.pagesCompleted !== null && jSrc.metrics?.pagesCompleted !== undefined
+          ? String(jSrc.metrics.pagesCompleted)
+          : '',
+      );
+      expect(cSrc[colIndex('source_raw_items_count')]).toBe(
+        jSrc.metrics?.rawItemsCount !== null && jSrc.metrics?.rawItemsCount !== undefined
+          ? String(jSrc.metrics.rawItemsCount)
+          : '',
+      );
+      expect(cSrc[colIndex('source_parsed_items_count')]).toBe(
+        jSrc.metrics?.parsedItemsCount !== null && jSrc.metrics?.parsedItemsCount !== undefined
+          ? String(jSrc.metrics.parsedItemsCount)
+          : '',
+      );
+      expect(cSrc[colIndex('source_rejected_items_count')]).toBe(
+        jSrc.metrics?.rejectedItemsCount !== null && jSrc.metrics?.rejectedItemsCount !== undefined
+          ? String(jSrc.metrics.rejectedItemsCount)
+          : '',
+      );
+      expect(cSrc[colIndex('source_stop_reason')]).toBe(jSrc.metrics?.stopReason ?? '');
+
+      // Result fields (columns 28 to 64) must be empty in SOURCE row
+      for (let c = 28; c < 65; c++) {
+        expect(cSrc[c]).toBe('');
+      }
     }
 
     // 3. Results Parity
@@ -162,6 +236,24 @@ describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
       const jRes = json.results[i]!;
       const cRes = resultRows[i]!;
 
+      // Run and search fields in result row
+      expect(cRes[colIndex('run_id')]).toBe(json.run.id);
+      expect(cRes[colIndex('saved_search_id')]).toBe(json.run.savedSearchId);
+      expect(cRes[colIndex('search_revision_number')]).toBe(String(json.search.revisionNumber));
+      expect(cRes[colIndex('search_name')]).toBe(json.search.name);
+      expect(cRes[colIndex('search_category')]).toBe(json.search.category);
+      expect(cRes[colIndex('manual_exchange_rate')]).toBe(String(json.manualExchangeRate));
+
+      // Source linkage
+      expect(cRes[colIndex('source_run_id')]).toBe(jRes.sourceRunId);
+      expect(cRes[colIndex('source_id')]).toBe(jRes.sourceId);
+
+      // Source specific fields (columns 16 to 27) must be empty in RESULT row
+      for (let c = 16; c <= 27; c++) {
+        expect(cRes[c]).toBe('');
+      }
+
+      // Result identity & metadata
       expect(cRes[colIndex('listing_id')]).toBe(jRes.listingId);
       expect(cRes[colIndex('external_id')]).toBe(jRes.externalId);
       expect(cRes[colIndex('canonical_url')]).toBe(jRes.canonicalUrl);
@@ -172,14 +264,25 @@ describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
       expect(cRes[colIndex('description')]).toBe(jRes.description ?? '');
       expect(cRes[colIndex('condition')]).toBe(jRes.condition ?? '');
       expect(cRes[colIndex('availability')]).toBe(jRes.availability);
+      expect(cRes[colIndex('raw_fingerprint')]).toBe(jRes.rawFingerprint);
 
-      // Price
+      // Price & Converted Price
       expect(cRes[colIndex('price_raw_text')]).toBe(jRes.price?.rawText ?? '');
       expect(cRes[colIndex('price_amount')]).toBe(String(jRes.price?.amount ?? ''));
       expect(cRes[colIndex('price_currency')]).toBe(jRes.price?.currency ?? '');
       expect(cRes[colIndex('price_resolution')]).toBe(jRes.price?.resolution ?? '');
+      expect(cRes[colIndex('price_kind')]).toBe(jRes.price?.kind ?? '');
       expect(cRes[colIndex('price_confidence')]).toBe(String(jRes.price?.confidence ?? ''));
       expect(JSON.parse(cRes[colIndex('price_evidence_json')]!)).toEqual(jRes.price?.evidence);
+      expect(cRes[colIndex('converted_amount')]).toBe(String(jRes.price?.converted?.amount ?? ''));
+      expect(cRes[colIndex('converted_currency')]).toBe(jRes.price?.converted?.currency ?? '');
+      expect(cRes[colIndex('exchange_rate')]).toBe(
+        String(jRes.price?.converted?.exchangeRate ?? ''),
+      );
+      expect(cRes[colIndex('exchange_rate_origin')]).toBe(
+        jRes.price?.converted?.exchangeRateOrigin ?? '',
+      );
+      expect(cRes[colIndex('converted_at')]).toBe(jRes.price?.converted?.convertedAt ?? '');
 
       // Location
       expect(cRes[colIndex('location_raw_text')]).toBe(jRes.location?.rawText ?? '');
@@ -189,6 +292,9 @@ describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
       expect(cRes[colIndex('location_latitude')]).toBe(String(jRes.location?.latitude ?? ''));
       expect(cRes[colIndex('location_longitude')]).toBe(String(jRes.location?.longitude ?? ''));
 
+      // Novelty
+      expect(cRes[colIndex('novelty')]).toBe(jRes.novelty ?? '');
+
       // Evaluation
       expect(cRes[colIndex('decision')]).toBe(jRes.evaluation?.decision ?? '');
       expect(cRes[colIndex('score')]).toBe(String(jRes.evaluation?.score ?? ''));
@@ -197,6 +303,7 @@ describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
         jRes.evaluation?.evaluatedBy,
       );
       expect(cRes[colIndex('policy_version')]).toBe(jRes.evaluation?.policyVersion ?? '');
+      expect(cRes[colIndex('evaluation_created_at')]).toBe(jRes.evaluation?.createdAt ?? '');
 
       // Images
       expect(JSON.parse(cRes[colIndex('image_urls_json')]!)).toEqual(jRes.imageUrls);

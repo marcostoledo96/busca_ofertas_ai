@@ -80,16 +80,14 @@ export function serializeJson(snapshot: RunExportSnapshot): string {
           resolution: res.price.resolution,
           confidence: res.price.confidence,
           evidence: [...res.price.evidence],
-          ...(res.price.kind !== undefined ? { kind: res.price.kind } : {}),
+          kind: res.price.kind,
           converted: res.price.converted
             ? {
                 amount: res.price.converted.amount,
                 currency: res.price.converted.currency,
                 exchangeRate: res.price.converted.exchangeRate,
                 exchangeRateOrigin: res.price.converted.exchangeRateOrigin,
-                ...(res.price.converted.convertedAt !== undefined
-                  ? { convertedAt: res.price.converted.convertedAt }
-                  : {}),
+                convertedAt: res.price.converted.convertedAt,
               }
             : null,
         }

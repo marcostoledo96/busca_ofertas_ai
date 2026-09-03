@@ -1,8 +1,10 @@
 export {
   RUN_EXPORT_SCHEMA_VERSION,
   type RunExportSchemaVersion,
+  type RunExportSearchCategory,
   type RunExportRunStatus,
   type RunExportSourceStatus,
+  type RunExportSourceStopReason,
   type RunExportListingCondition,
   type RunExportAvailability,
   type RunExportPriceCurrency,
