@@ -17,6 +17,7 @@ export type SqliteStorageErrorCode =
   | 'RUN_IDENTITY_COLLISION'
   | 'SOURCE_RUN_IDENTITY_COLLISION'
   | 'SAVED_SEARCH_IDENTITY_COLLISION'
+  | 'OBSERVATION_IDENTITY_COLLISION'
   | 'SENSITIVE_DATA_DETECTED';
 
 export interface SqliteStorageErrorOptions {
@@ -335,6 +336,33 @@ export class SavedSearchIdentityCollisionError extends SqliteStorageError {
     this.savedSearchId = details.savedSearchId;
     this.existingCreatedAt = details.existingCreatedAt;
     this.attemptingCreatedAt = details.attemptingCreatedAt;
+  }
+}
+
+export interface ObservationIdentityCollisionDetails {
+  readonly observationId: string;
+  readonly listingId: string;
+  readonly sourceRunId: string;
+}
+
+export class ObservationIdentityCollisionError extends SqliteStorageError {
+  readonly observationId: string;
+  readonly listingId: string;
+  readonly sourceRunId: string;
+
+  constructor(
+    details: ObservationIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Observation identity conflict on observation ID '${details.observationId}': existing record (listingId='${details.listingId}', sourceRunId='${details.sourceRunId}') is immutable and cannot be overwritten with different content.`;
+    super(msg, 'OBSERVATION_IDENTITY_COLLISION', options);
+    this.name = 'ObservationIdentityCollisionError';
+    this.observationId = details.observationId;
+    this.listingId = details.listingId;
+    this.sourceRunId = details.sourceRunId;
   }
 }
 

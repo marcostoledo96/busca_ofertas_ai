@@ -28,10 +28,34 @@ export interface ListingRepository {
   save(listing: Listing): Promise<void>;
 }
 
+/**
+ * Novelty classification of an observation relative to existing history.
+ * - 'NEW': First observation ever recorded for this listing.
+ * - 'REAPPEARED': Previous observation was REMOVED/SOLD and current is AVAILABLE/PENDING.
+ * - 'PRICE_CHANGED': Semantically relevant price changed from the previous observation.
+ * - 'UNCHANGED': No NEW, REAPPEARED, or PRICE_CHANGED condition occurred.
+ *   Note: 'UNCHANGED' novelty does NOT mean no observation was stored; if non-price content
+ *   (title, condition, location, imageUrls) changed, a new Observation is persisted (isNewObservation = true).
+ */
+export type ObservationChangeKind = 'NEW' | 'UNCHANGED' | 'PRICE_CHANGED' | 'REAPPEARED';
+
+export interface RecordObservationParams {
+  readonly listing: Listing;
+  readonly observation: Observation;
+}
+
+export interface RecordObservationResult {
+  readonly listing: Listing;
+  readonly observation: Observation;
+  readonly changeKind: ObservationChangeKind;
+  readonly isNewObservation: boolean;
+}
+
 export interface ObservationRepository {
   getById(id: string): Promise<Observation | null>;
   listByListingId(listingId: string): Promise<readonly Observation[]>;
   save(observation: Observation): Promise<void>;
+  recordObservation(params: RecordObservationParams): Promise<RecordObservationResult>;
 }
 
 export interface OpportunityRepository {

@@ -16,6 +16,7 @@ export {
   type ListingIdentityCollisionDetails,
   type RunIdentityCollisionDetails,
   type SourceRunIdentityCollisionDetails,
+  type ObservationIdentityCollisionDetails,
   SqliteStorageError,
   DatabaseOpenFailedError,
   DatabaseClosedError,
@@ -34,6 +35,7 @@ export {
   RunIdentityCollisionError,
   SourceRunIdentityCollisionError,
   SavedSearchIdentityCollisionError,
+  ObservationIdentityCollisionError,
   SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './errors/index.js';
@@ -73,12 +75,16 @@ export {
 } from './sanitization/sanitizer.js';
 export { validateNoSensitiveData, validateSessionRef } from './sanitization/secret-detector.js';
 
+// Crypto Hasher
+export { NodeCryptoHasher, createNodeCryptoHasher } from './crypto/hasher.js';
+
 // Repositories and concurrency control
 export {
   type SqliteRepositories,
   SqliteSavedSearchRepository,
   SqliteRunRepository,
   SqliteListingRepository,
+  SqliteObservationRepository,
   SqliteExecutionLock,
   createSqliteRepositories,
 } from './repositories/index.js';

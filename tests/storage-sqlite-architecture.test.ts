@@ -39,7 +39,12 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(typeof StorageModule.ExecutionLockHeldError).toBe('function');
     expect(typeof StorageModule.ExecutionLockReleaseError).toBe('function');
     expect(typeof StorageModule.ListingIdentityCollisionError).toBe('function');
+    expect(typeof StorageModule.ObservationIdentityCollisionError).toBe('function');
     expect(typeof StorageModule.SensitiveDataDetectedError).toBe('function');
+
+    // Crypto
+    expect(typeof StorageModule.NodeCryptoHasher).toBe('function');
+    expect(typeof StorageModule.createNodeCryptoHasher).toBe('function');
 
     // Sanitizer
     expect(typeof StorageModule.sanitizeString).toBe('function');
@@ -51,6 +56,7 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(typeof StorageModule.SqliteSavedSearchRepository).toBe('function');
     expect(typeof StorageModule.SqliteRunRepository).toBe('function');
     expect(typeof StorageModule.SqliteListingRepository).toBe('function');
+    expect(typeof StorageModule.SqliteObservationRepository).toBe('function');
     expect(typeof StorageModule.SqliteExecutionLock).toBe('function');
     expect(typeof StorageModule.createSqliteRepositories).toBe('function');
 
@@ -58,17 +64,20 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(StorageModule.STORAGE_SQLITE_PACKAGE_NAME).toBe('@busca-ofertas-ai/storage-sqlite');
     expect(StorageModule.SCHEMA_MIGRATIONS_TABLE_NAME).toBe('schema_migrations');
     expect(Array.isArray(StorageModule.PRODUCTION_MIGRATIONS)).toBe(true);
-    expect(StorageModule.PRODUCTION_MIGRATIONS.length).toBe(2);
+    expect(StorageModule.PRODUCTION_MIGRATIONS.length).toBe(3);
     expect(StorageModule.PRODUCTION_MIGRATIONS[0]!.version).toBe(1);
     expect(StorageModule.PRODUCTION_MIGRATIONS[0]!.name).toBe('001_create_schema_migrations');
     expect(StorageModule.PRODUCTION_MIGRATIONS[1]!.version).toBe(2);
     expect(StorageModule.PRODUCTION_MIGRATIONS[1]!.name).toBe('002_create_operational_persistence');
+    expect(StorageModule.PRODUCTION_MIGRATIONS[2]!.version).toBe(3);
+    expect(StorageModule.PRODUCTION_MIGRATIONS[2]!.name).toBe('003_create_observation_history');
   });
 
   it('guarantees runtime immutability of the production migration manifest', () => {
     expect(Object.isFrozen(StorageModule.PRODUCTION_MIGRATIONS)).toBe(true);
     expect(Object.isFrozen(StorageModule.PRODUCTION_MIGRATIONS[0])).toBe(true);
     expect(Object.isFrozen(StorageModule.PRODUCTION_MIGRATIONS[1])).toBe(true);
+    expect(Object.isFrozen(StorageModule.PRODUCTION_MIGRATIONS[2])).toBe(true);
 
     // Attempting to push to frozen array must throw in strict mode
     expect(() => {
