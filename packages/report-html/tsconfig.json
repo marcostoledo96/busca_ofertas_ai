@@ -6,10 +6,5 @@
     "composite": true,
     "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*"],
-  "references": [
-    { "path": "../../packages/configuration" },
-    { "path": "../../packages/report-html" },
-    { "path": "../../adapters/synthetic" }
-  ]
+  "include": ["src/**/*"]
 }

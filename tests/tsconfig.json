@@ -11,6 +11,7 @@
     { "path": "../packages/adapter-sdk" },
     { "path": "../packages/configuration" },
     { "path": "../packages/storage-sqlite" },
+    { "path": "../packages/report-html" },
     { "path": "../adapters/synthetic" },
     { "path": "../apps/cli" }
   ]

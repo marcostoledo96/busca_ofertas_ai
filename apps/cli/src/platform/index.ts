@@ -26,3 +26,13 @@ export {
   type FakeReportOpenerOptions,
   FakeReportOpener,
 } from './report-opener.js';
+
+export {
+  PRIVATE_REPORT_FILE_MODE,
+  type PersistReportHtmlOptions,
+  type PersistedReportLocation,
+  generateSearchSlug,
+  sanitizeShortRunId,
+  formatRunTimestamp,
+  persistReportHtml,
+} from './report-writer.js';
