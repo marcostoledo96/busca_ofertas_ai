@@ -54,6 +54,7 @@ export interface RecordObservationResult {
 export interface ObservationRepository {
   getById(id: string): Promise<Observation | null>;
   listByListingId(listingId: string): Promise<readonly Observation[]>;
+  listBySourceRunId(sourceRunId: string): Promise<readonly Observation[]>;
   save(observation: Observation): Promise<void>;
   recordObservation(params: RecordObservationParams): Promise<RecordObservationResult>;
 }

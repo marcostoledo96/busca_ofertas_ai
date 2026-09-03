@@ -156,3 +156,14 @@ El feedback se persiste y puede producir sugerencias de reglas, nunca cambios au
 ## Sin notificaciones en el MVP
 
 Telegram, email y listeners quedan expresamente fuera. Los resultados se consultan al ejecutar la aplicación.
+
+## Exportaciones JSON y CSV por Run (BOAI-014)
+
+Cada ejecución persistida puede proyectarse a archivos determinísticos e interoperables `results.json` y `results.csv`:
+
+- **Directorio común y privado**: Se guardan en el mismo directorio determinístico de la ejecución (`reports/<timestamp>_<slug>_<sha256>/`) junto a `report.html`, con permisos `0700` para el directorio y `0600` para los archivos.
+- **Consistencia de par con falla controlada (Controlled-Failure Pair Consistency)**: Ambos archivos temporales se escriben y validan antes del commit. Si la persistencia falla durante el reemplazo, se restaura la versión anterior intacta o se limpian los archivos parciales. Nunca queda un estado intermedio roto (`results.json` nuevo con `results.csv` viejo).
+- **Proyección agnóstica de infraestructura**: El servicio de proyección lee únicamente a través de los ports de repositorios de `@busca-ofertas-ai/core`. Los conceptos aún no persistidos en la base SQLite (como evaluaciones de reglas/IA o novedades) se proyectan honestamente como `null`.
+- **Resolución de revisión histórica de búsqueda**: Se selecciona la revisión efectiva de `SavedSearch` cuyo `recordedAt <= run.startedAt`, desempatando por `revisionNumber DESC`. Se valida coherencia estricta (`recordedAt === snapshot.updatedAt`).
+- **Paridad semántica JSON / CSV (55 columnas)**: Todas las dimensiones de datos presentes en el JSON tienen su correspondiente columna tipada en el CSV sin pérdida de información factual.
+- **Seguridad contra inyección de fórmulas**: Los textos no confiables con prefijo `=+\-@` (con o sin espacios) se neutralizan anteponiendo `'`. Las columnas numéricas genuinas (como coordenadas negativas de latitud/longitud) se conservan intactas sin comillas.

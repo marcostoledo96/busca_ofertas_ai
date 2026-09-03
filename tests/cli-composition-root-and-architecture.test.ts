@@ -198,6 +198,7 @@ describe('CLI Composition Root and Architecture (BOAI-006)', () => {
       '@busca-ofertas-ai/adapter-synthetic',
       '@busca-ofertas-ai/configuration',
       '@busca-ofertas-ai/report-html',
+      '@busca-ofertas-ai/run-export',
     ]);
   });
 });

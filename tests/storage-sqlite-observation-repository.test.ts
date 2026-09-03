@@ -1006,4 +1006,132 @@ describe('SqliteObservationRepository (BOAI-012)', () => {
       expect(persisted?.firstSeenAt.toISOString()).toBe('2026-08-30T10:00:00.000Z');
     });
   });
+
+  describe('SqliteObservationRepository.listBySourceRunId (BOAI-014)', () => {
+    it('returns empty array when sourceRun has no observations or does not exist', async () => {
+      const ctx = createTempDatabaseContext();
+      try {
+        const db = openSqliteDatabase({ databasePath: ctx.databasePath });
+        db.migrate();
+        try {
+          const repo = new SqliteObservationRepository(db);
+          const results = await repo.listBySourceRunId('non-existent-source-run');
+          expect(results).toEqual([]);
+        } finally {
+          db.close();
+        }
+      } finally {
+        ctx.cleanup();
+      }
+    });
+
+    it('lists observations belonging to the specified sourceRun with strict deterministic ordering', async () => {
+      const ctx = createTempDatabaseContext();
+      try {
+        const db = openSqliteDatabase({ databasePath: ctx.databasePath });
+        db.migrate();
+        try {
+          const { sourceRun, listing } = await setupPrerequisites(db);
+          const repo = new SqliteObservationRepository(db);
+
+          // Insert observations with different timestamps and IDs
+          const obs1 = createObservation({
+            id: 'obs-b',
+            listingId: listing.id,
+            sourceRunId: sourceRun.id,
+            observedAt: new Date('2026-08-30T11:00:00.000Z'),
+            title: 'Item B at 11:00',
+            rawFingerprint: 'fp-b',
+          });
+          const obs2 = createObservation({
+            id: 'obs-a',
+            listingId: listing.id,
+            sourceRunId: sourceRun.id,
+            observedAt: new Date('2026-08-30T10:00:00.000Z'),
+            title: 'Item A at 10:00',
+            rawFingerprint: 'fp-a',
+          });
+          const obs3 = createObservation({
+            id: 'obs-c',
+            listingId: listing.id,
+            sourceRunId: sourceRun.id,
+            observedAt: new Date('2026-08-30T11:00:00.000Z'),
+            title: 'Item C at 11:00 with later ID',
+            rawFingerprint: 'fp-c',
+          });
+
+          // Save in arbitrary order
+          await repo.save(obs1);
+          await repo.save(obs2);
+          await repo.save(obs3);
+
+          const results = await repo.listBySourceRunId(sourceRun.id);
+          expect(results).toHaveLength(3);
+          // Ordered by observed_at ASC, id ASC:
+          // 1. obs-a (10:00)
+          // 2. obs-b (11:00, id 'obs-b' < 'obs-c')
+          // 3. obs-c (11:00, id 'obs-c')
+          expect(results.map((o) => o.id)).toEqual(['obs-a', 'obs-b', 'obs-c']);
+        } finally {
+          db.close();
+        }
+      } finally {
+        ctx.cleanup();
+      }
+    });
+
+    it('isolates observations between different source runs and runs', async () => {
+      const ctx = createTempDatabaseContext();
+      try {
+        const db = openSqliteDatabase({ databasePath: ctx.databasePath });
+        db.migrate();
+        try {
+          const { run, sourceRun, listing } = await setupPrerequisites(db);
+          const repo = new SqliteObservationRepository(db);
+          const runRepo = new SqliteRunRepository(db);
+
+          // Create second source run under same run
+          const sourceRun2 = createSourceRun({
+            id: 'source-run-2',
+            runId: run.id,
+            sourceId: 'synthetic',
+            startedAt: new Date('2026-08-30T10:30:00.000Z'),
+          });
+          await runRepo.saveSourceRun(sourceRun2, { adapterVersion: '0.1.0' });
+
+          const obsRun1 = createObservation({
+            id: 'obs-sr1',
+            listingId: listing.id,
+            sourceRunId: sourceRun.id,
+            observedAt: new Date('2026-08-30T10:00:00.000Z'),
+            title: 'Obs for SR1',
+            rawFingerprint: 'fp-sr1',
+          });
+          const obsRun2 = createObservation({
+            id: 'obs-sr2',
+            listingId: listing.id,
+            sourceRunId: sourceRun2.id,
+            observedAt: new Date('2026-08-30T10:30:00.000Z'),
+            title: 'Obs for SR2',
+            rawFingerprint: 'fp-sr2',
+          });
+
+          await repo.save(obsRun1);
+          await repo.save(obsRun2);
+
+          const list1 = await repo.listBySourceRunId(sourceRun.id);
+          expect(list1).toHaveLength(1);
+          expect(list1[0]?.id).toBe('obs-sr1');
+
+          const list2 = await repo.listBySourceRunId(sourceRun2.id);
+          expect(list2).toHaveLength(1);
+          expect(list2[0]?.id).toBe('obs-sr2');
+        } finally {
+          db.close();
+        }
+      } finally {
+        ctx.cleanup();
+      }
+    });
+  });
 });

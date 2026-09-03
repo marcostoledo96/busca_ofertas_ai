@@ -170,12 +170,17 @@ export {
   type FakeReportOpenerOptions,
   FakeReportOpener,
   PRIVATE_REPORT_FILE_MODE,
+  type ResolveRunOutputDirectoryOptions,
   type PersistReportHtmlOptions,
   type PersistedReportLocation,
+  type PersistRunExportsOptions,
+  type PersistedRunExportsLocation,
   generateSearchSlug,
   sanitizeShortRunId,
   formatRunTimestamp,
+  resolveRunOutputDirectory,
   persistReportHtml,
+  persistRunExports,
 } from './platform/index.js';
 
 // Reporting Orchestration
@@ -184,3 +189,10 @@ export {
   type GenerateAndOpenReportResult,
   generateAndOpenReport,
 } from './reporting/index.js';
+
+// Exporting Orchestration
+export {
+  type GenerateRunExportsOptions,
+  type GenerateRunExportsResult,
+  generateRunExports,
+} from './exporting/index.js';

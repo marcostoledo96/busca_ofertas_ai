@@ -29,10 +29,15 @@ export {
 
 export {
   PRIVATE_REPORT_FILE_MODE,
+  type ResolveRunOutputDirectoryOptions,
   type PersistReportHtmlOptions,
   type PersistedReportLocation,
+  type PersistRunExportsOptions,
+  type PersistedRunExportsLocation,
   generateSearchSlug,
   sanitizeShortRunId,
   formatRunTimestamp,
+  resolveRunOutputDirectory,
   persistReportHtml,
+  persistRunExports,
 } from './report-writer.js';
