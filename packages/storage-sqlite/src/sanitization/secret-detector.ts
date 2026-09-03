@@ -23,14 +23,14 @@ const FORBIDDEN_NORMALIZED_KEYS = new Set<string>([
 const normalizeKey = (key: string): string => key.toLowerCase().replace(/[-_]/g, '');
 
 const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
-  /\bAuthorization\s*:\s*\S+/i,
-  /\b(?:Set-Cookie|Cookie)\s*:\s*\S+/i,
-  /\bBearer\s+[A-Za-z0-9_\-.~+/=]{8,}\b/i,
+  /\bAuthorization\s*:/i,
+  /\b(?:Set-Cookie|Cookie)\s*:/i,
+  /\bBearer\s+\S+/i,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b/i,
   /\bgithub_pat_[A-Za-z0-9_]{16,}\b/i,
-  /\bpassword\s*=\s*\S+/i,
-  /\bapi_key\s*=\s*\S+/i,
-  /\btoken\s*=\s*\S+/i,
+  /\bpassword\s*=/i,
+  /\bapi_key\s*=/i,
+  /\btoken\s*=/i,
 ] as const;
 
 const FORBIDDEN_SESSION_REF_PATTERNS: readonly RegExp[] = [
@@ -46,15 +46,8 @@ export function validateNoSensitiveData(value: unknown, path = 'options', maxDep
   if (value === null || value === undefined) {
     return;
   }
-  if (maxDepth <= 0) {
-    if (typeof value === 'object' && Object.keys(value).length > 0) {
-      throw new SensitiveDataDetectedError(
-        `Maximum object nesting depth exceeded at '${path}'. Cannot verify absence of sensitive data; failing closed.`,
-      );
-    }
-    return;
-  }
 
+  // Primitive string: ALWAYS execute secret-pattern validation, even at depth limit (Finding 1A)
   if (typeof value === 'string') {
     for (const pattern of SECRET_VALUE_PATTERNS) {
       if (pattern.test(value)) {
@@ -62,6 +55,26 @@ export function validateNoSensitiveData(value: unknown, path = 'options', maxDep
           `Sensitive credential pattern detected at '${path}'. Direct persistence of secrets is forbidden.`,
         );
       }
+    }
+    return;
+  }
+
+  // Safe primitives: numbers, booleans, bigints, symbols
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint' ||
+    typeof value === 'symbol'
+  ) {
+    return;
+  }
+
+  // Object/array traversal: fail closed if depth is exhausted and deeper inspection is required
+  if (maxDepth <= 0) {
+    if (typeof value === 'object' && value !== null && Object.keys(value).length > 0) {
+      throw new SensitiveDataDetectedError(
+        `Maximum object nesting depth exceeded at '${path}'. Cannot verify absence of sensitive data; failing closed.`,
+      );
     }
     return;
   }

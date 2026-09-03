@@ -303,7 +303,31 @@ export class SqliteRunRepository implements RunRepository {
         'itemsCount' in sourceRun && sourceRun.itemsCount !== undefined
           ? sourceRun.itemsCount
           : null;
-      const collectorId = 'collectorId' in sourceRun ? (sourceRun.collectorId ?? null) : null;
+
+      const srCollector =
+        'collectorId' in sourceRun &&
+        sourceRun.collectorId !== undefined &&
+        sourceRun.collectorId !== null
+          ? sourceRun.collectorId
+          : null;
+      const metaCollector =
+        metadata && metadata.collectorId !== undefined && metadata.collectorId !== null
+          ? metadata.collectorId
+          : null;
+
+      // Finding 2: Reject contradictory collectorId authority immediately (0 writes)
+      if (srCollector !== null && metaCollector !== null && srCollector !== metaCollector) {
+        throw new SourceRunIdentityCollisionError(
+          {
+            sourceRunId: sourceRun.id,
+            existingCollectorId: srCollector,
+            attemptingCollectorId: metaCollector,
+          },
+          `SourceRun '${sourceRun.id}' collectorId contradiction: SourceRun collectorId '${srCollector}' conflicts with metadata collectorId '${metaCollector}'.`,
+        );
+      }
+
+      const incomingCollector = srCollector ?? metaCollector;
 
       const pagesRequested = metadata.metrics?.pagesRequested ?? null;
       const pagesCompleted = metadata.metrics?.pagesCompleted ?? null;
@@ -360,15 +384,10 @@ export class SqliteRunRepository implements RunRepository {
             );
           }
 
-          // CollectorId provenance transition policy (Finding C2)
+          // CollectorId provenance transition policy (Finding 2 / C2)
           let resolvedCollectorId = existing.collector_id;
-          const incomingCollector = metadata.collectorId ?? collectorId;
           if (existing.collector_id !== null) {
-            if (
-              incomingCollector !== null &&
-              incomingCollector !== undefined &&
-              incomingCollector !== existing.collector_id
-            ) {
+            if (incomingCollector !== null && incomingCollector !== existing.collector_id) {
               throw new SourceRunIdentityCollisionError(
                 {
                   sourceRunId: sourceRun.id,
@@ -378,10 +397,10 @@ export class SqliteRunRepository implements RunRepository {
                 `SourceRun '${sourceRun.id}' immutable collectorId collision: existing '${existing.collector_id}' cannot be modified to '${incomingCollector}'.`,
               );
             }
-            // If incoming is null/undefined or equals existing, resolvedCollectorId remains existing.collector_id
+            // If incoming is null (omitted in update) or equals existing, resolvedCollectorId remains existing.collector_id
           } else {
             // NULL -> concrete: permitted
-            resolvedCollectorId = incomingCollector ?? null;
+            resolvedCollectorId = incomingCollector;
           }
 
           const updateStmt = tx.prepare(
@@ -408,7 +427,7 @@ export class SqliteRunRepository implements RunRepository {
             sourceRun.id,
           );
         } else {
-          const resolvedCollectorId = metadata.collectorId ?? collectorId ?? null;
+          const resolvedCollectorId = incomingCollector;
           const insertStmt = tx.prepare(
             `INSERT INTO source_runs (
               id, run_id, source_id, collector_id, adapter_version, status,

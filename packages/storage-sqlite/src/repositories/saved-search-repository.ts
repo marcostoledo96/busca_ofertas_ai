@@ -51,24 +51,7 @@ function parseIsoDate(isoString: unknown, fieldName: string, entityId: string): 
   return date;
 }
 
-interface CanonicalSavedSearchSnapshot {
-  readonly id?: unknown;
-  readonly schemaVersion?: unknown;
-  readonly name?: unknown;
-  readonly enabled?: unknown;
-  readonly category?: unknown;
-  readonly sourceConfigs?: unknown;
-  readonly query?: unknown;
-  readonly price?: unknown;
-  readonly location?: unknown;
-  readonly condition?: unknown;
-  readonly rules?: unknown;
-  readonly evaluation?: unknown;
-  readonly ai?: unknown;
-  readonly retention?: unknown;
-  readonly createdAt?: unknown;
-  readonly updatedAt?: unknown;
-}
+const VALID_CATEGORIES: ReadonlySet<string> = new Set(['PRODUCT', 'REAL_ESTATE', 'VEHICLE']);
 
 function serializeSavedSearch(search: SavedSearch): string {
   const canonical: Required<CreateSavedSearchParams> = {
@@ -107,50 +90,125 @@ function rehydrateSavedSearchFromSnapshot(
     );
   }
 
-  if (typeof parsed !== 'object' || parsed === null) {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new StorageCorruptionError(
       `Corrupted persisted SavedSearch in '${entityContext}': snapshot is not an object`,
     );
   }
 
-  const data = parsed as CanonicalSavedSearchSnapshot;
+  const data = parsed as Record<string, unknown>;
 
   try {
-    const id =
-      typeof data.id === 'string'
-        ? data.id
-        : (fallbackRow?.id ?? entityContext.replace(/^revision:/, ''));
+    // Explicit canonical validation: NO fallback from indexed table columns (Finding 3)
+    if (typeof data['id'] !== 'string' || data['id'].trim().length === 0) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing or invalid 'id'`,
+      );
+    }
+    const id = data['id'];
 
-    if (fallbackRow) {
-      parseIsoDate(fallbackRow.created_at, 'created_at', id);
-      parseIsoDate(fallbackRow.updated_at, 'updated_at', id);
+    if (
+      typeof data['schemaVersion'] !== 'number' ||
+      !Number.isInteger(data['schemaVersion']) ||
+      data['schemaVersion'] < 1
+    ) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing or invalid 'schemaVersion'`,
+      );
+    }
+    const schemaVersion = data['schemaVersion'];
+
+    if (typeof data['name'] !== 'string' || data['name'].trim().length === 0) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing or invalid 'name'`,
+      );
+    }
+    const name = data['name'];
+
+    if (typeof data['enabled'] !== 'boolean') {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing or invalid 'enabled'`,
+      );
+    }
+    const enabled = data['enabled'];
+
+    if (typeof data['category'] !== 'string' || !VALID_CATEGORIES.has(data['category'])) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing or invalid 'category'`,
+      );
+    }
+    const category = data['category'] as SavedSearch['category'];
+
+    if (!Array.isArray(data['sourceConfigs']) || data['sourceConfigs'].length === 0) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing or invalid 'sourceConfigs'`,
+      );
     }
 
-    const rawCreatedAt = data.createdAt ?? fallbackRow?.created_at;
-    const rawUpdatedAt = data.updatedAt ?? fallbackRow?.updated_at;
+    if (typeof data['query'] !== 'object' || data['query'] === null) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing or invalid 'query'`,
+      );
+    }
 
-    const createdAt = parseIsoDate(rawCreatedAt, 'createdAt', id);
-    const updatedAt = parseIsoDate(rawUpdatedAt, 'updatedAt', id);
+    if (!('price' in data)) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'price'`,
+      );
+    }
 
-    const schemaVersion =
-      typeof data.schemaVersion === 'number'
-        ? data.schemaVersion
-        : (fallbackRow?.schema_version ?? 1);
+    if (!('location' in data)) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'location'`,
+      );
+    }
 
-    const name = typeof data.name === 'string' ? data.name : (fallbackRow?.name ?? '');
+    if (!('condition' in data)) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'condition'`,
+      );
+    }
 
-    const enabled =
-      typeof data.enabled === 'boolean'
-        ? data.enabled
-        : fallbackRow
-          ? fallbackRow.enabled === 1
-          : true;
+    if (!('rules' in data) || !Array.isArray(data['rules'])) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'rules'`,
+      );
+    }
 
-    const category = (
-      typeof data.category === 'string' ? data.category : (fallbackRow?.category ?? 'PRODUCT')
-    ) as SavedSearch['category'];
+    if (typeof data['evaluation'] !== 'object' || data['evaluation'] === null) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'evaluation'`,
+      );
+    }
 
-    // Cross-validate indexed table columns vs canonical snapshot (Finding C3)
+    if (typeof data['ai'] !== 'object' || data['ai'] === null) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'ai'`,
+      );
+    }
+
+    if (typeof data['retention'] !== 'object' || data['retention'] === null) {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'retention'`,
+      );
+    }
+
+    if (typeof data['createdAt'] !== 'string') {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'createdAt'`,
+      );
+    }
+
+    if (typeof data['updatedAt'] !== 'string') {
+      throw new StorageCorruptionError(
+        `Corrupted persisted SavedSearch in '${entityContext}': missing canonical field 'updatedAt'`,
+      );
+    }
+
+    const createdAt = parseIsoDate(data['createdAt'], 'createdAt', id);
+    const updatedAt = parseIsoDate(data['updatedAt'], 'updatedAt', id);
+
+    // Cross-validate indexed table columns vs canonical snapshot (Finding 3 / C3)
     if (fallbackRow) {
       if (fallbackRow.id !== id) {
         throw new StorageCorruptionError(
@@ -189,34 +247,21 @@ function rehydrateSavedSearchFromSnapshot(
       }
     }
 
-    if (
-      !data.sourceConfigs ||
-      !data.query ||
-      !data.evaluation ||
-      !data.ai ||
-      !data.retention ||
-      !name
-    ) {
-      throw new StorageCorruptionError(
-        `Corrupted persisted SavedSearch in '${entityContext}': missing required domain fields`,
-      );
-    }
-
     const params: CreateSavedSearchParams = {
       id,
       schemaVersion,
       name,
       enabled,
       category,
-      sourceConfigs: data.sourceConfigs as SavedSearch['sourceConfigs'],
-      query: data.query as SavedSearch['query'],
-      price: (data.price as SavedSearch['price']) ?? null,
-      location: (data.location as SavedSearch['location']) ?? null,
-      condition: (data.condition as SavedSearch['condition']) ?? null,
-      rules: (data.rules as SavedSearch['rules']) ?? [],
-      evaluation: data.evaluation as SavedSearch['evaluation'],
-      ai: data.ai as SavedSearch['ai'],
-      retention: data.retention as SavedSearch['retention'],
+      sourceConfigs: data['sourceConfigs'] as SavedSearch['sourceConfigs'],
+      query: data['query'] as SavedSearch['query'],
+      price: (data['price'] as SavedSearch['price']) ?? null,
+      location: (data['location'] as SavedSearch['location']) ?? null,
+      condition: (data['condition'] as SavedSearch['condition']) ?? null,
+      rules: (data['rules'] as SavedSearch['rules']) ?? [],
+      evaluation: data['evaluation'] as SavedSearch['evaluation'],
+      ai: data['ai'] as SavedSearch['ai'],
+      retention: data['retention'] as SavedSearch['retention'],
       createdAt,
       updatedAt,
     };
@@ -272,7 +317,7 @@ export class SqliteSavedSearchRepository implements SavedSearchRepository {
 
   save(savedSearch: SavedSearch): Promise<void> {
     try {
-      // 1. Defensively inspect options and sessionRef before opening the transaction or writing rows.
+      // 1. Defensively inspect options, sessionRef, and rule params before opening the transaction or writing rows.
       // If any sensitive secret data is present, throw SensitiveDataDetectedError (fail-closed, 0 mutations).
       for (const cfg of savedSearch.sourceConfigs) {
         if (cfg.options !== undefined) {
@@ -280,6 +325,13 @@ export class SqliteSavedSearchRepository implements SavedSearchRepository {
         }
         if (cfg.sessionRef !== undefined) {
           validateSessionRef(cfg.sessionRef, `sourceConfigs.${cfg.id}.sessionRef`);
+        }
+      }
+
+      for (let i = 0; i < savedSearch.rules.length; i++) {
+        const rule = savedSearch.rules[i]!;
+        if (rule.params !== undefined) {
+          validateNoSensitiveData(rule.params, `rules[${i}].params`);
         }
       }
 

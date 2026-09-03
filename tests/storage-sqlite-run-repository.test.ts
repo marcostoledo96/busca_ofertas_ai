@@ -526,7 +526,7 @@ describe('SqliteRunRepository (BOAI-011 / Findings A & C)', () => {
     });
   });
 
-  it('enforces collectorId provenance transitions: NULL->A allowed, A->A allowed, A->B rejected, A->NULL preserves A (Finding C2)', async () => {
+  it('enforces single collectorId authority and provenance transitions (Finding 2)', async () => {
     await withTempDatabase(async (db) => {
       await setupBaseSearch(db);
       const repo = new SqliteRunRepository(db);
@@ -539,48 +539,90 @@ describe('SqliteRunRepository (BOAI-011 / Findings A & C)', () => {
       });
       await repo.save(run);
 
-      const sr = createSourceRun({
-        id: 'sr-collector-1',
+      // 1. new SourceRun: sourceRun collector=A metadata collector=B → reject / no row
+      const contradictorySr = createSourceRun({
+        id: 'sr-contradictory',
+        runId: run.id,
+        sourceId: 'fb-marketplace',
+        status: 'RUNNING',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
+        collectorId: 'collector-A',
+      });
+      await expect(
+        repo.saveSourceRun(contradictorySr, {
+          adapterVersion: '1.0.0',
+          collectorId: 'collector-B',
+        }),
+      ).rejects.toThrow(SourceRunIdentityCollisionError);
+
+      const initialList = await repo.listSourceRunsByRunId(run.id);
+      expect(initialList.find((s) => s.id === 'sr-contradictory')).toBeUndefined();
+
+      // 2. existing NULL: SourceRun collector=A → store A
+      const nullSr = createSourceRun({
+        id: 'sr-collector-lifecycle',
         runId: run.id,
         sourceId: 'fb-marketplace',
         status: 'RUNNING',
         startedAt: new Date('2026-08-30T12:00:00.000Z'),
       });
+      await repo.saveSourceRun(nullSr, { adapterVersion: '1.0.0' });
 
-      // 1. Initial insert with no collectorId -> stored as NULL
-      await repo.saveSourceRun(sr, { adapterVersion: '1.0.0' });
-      let meta = await repo.getSourceRunMetadata('sr-collector-1');
-      expect(meta!.collectorId).toBeUndefined();
+      let list = await repo.listSourceRunsByRunId(run.id);
+      expect(list[0]!.collectorId).toBeUndefined();
 
-      // 2. NULL -> concrete collector 'collector-A': allowed
-      await repo.saveSourceRun(sr, {
-        adapterVersion: '1.0.0',
+      const srWithA = createSourceRun({
+        id: 'sr-collector-lifecycle',
+        runId: run.id,
+        sourceId: 'fb-marketplace',
+        status: 'RUNNING',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
         collectorId: 'collector-A',
       });
-      meta = await repo.getSourceRunMetadata('sr-collector-1');
+      await repo.saveSourceRun(srWithA, { adapterVersion: '1.0.0' });
+
+      list = await repo.listSourceRunsByRunId(run.id);
+      expect(list[0]!.collectorId).toBe('collector-A');
+      let meta = await repo.getSourceRunMetadata('sr-collector-lifecycle');
       expect(meta!.collectorId).toBe('collector-A');
 
-      // 3. concrete A -> same A: allowed
-      await repo.saveSourceRun(sr, {
-        adapterVersion: '1.0.0',
-        collectorId: 'collector-A',
+      // 3. existing A: SourceRun collector=A → allow
+      await repo.saveSourceRun(srWithA, { adapterVersion: '1.0.0' });
+      list = await repo.listSourceRunsByRunId(run.id);
+      expect(list[0]!.collectorId).toBe('collector-A');
+
+      // 4. existing A: SourceRun collector=B → reject (row unchanged)
+      const srWithB = createSourceRun({
+        id: 'sr-collector-lifecycle',
+        runId: run.id,
+        sourceId: 'fb-marketplace',
+        status: 'RUNNING',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
+        collectorId: 'collector-B',
       });
-      meta = await repo.getSourceRunMetadata('sr-collector-1');
+      await expect(repo.saveSourceRun(srWithB, { adapterVersion: '1.0.0' })).rejects.toThrow(
+        SourceRunIdentityCollisionError,
+      );
+
+      list = await repo.listSourceRunsByRunId(run.id);
+      expect(list[0]!.collectorId).toBe('collector-A');
+      meta = await repo.getSourceRunMetadata('sr-collector-lifecycle');
       expect(meta!.collectorId).toBe('collector-A');
 
-      // 4. concrete A -> different B: reject with SourceRunIdentityCollisionError, row unchanged
-      await expect(
-        repo.saveSourceRun(sr, {
-          adapterVersion: '1.0.0',
-          collectorId: 'collector-B',
-        }),
-      ).rejects.toThrow(SourceRunIdentityCollisionError);
-      meta = await repo.getSourceRunMetadata('sr-collector-1');
-      expect(meta!.collectorId).toBe('collector-A');
+      // 5. existing A: SourceRun collector omitted → preserve A
+      const srOmitted = createSourceRun({
+        id: 'sr-collector-lifecycle',
+        runId: run.id,
+        sourceId: 'fb-marketplace',
+        status: 'RUNNING',
+        startedAt: new Date('2026-08-30T12:00:00.000Z'),
+      });
+      await repo.saveSourceRun(srOmitted, { adapterVersion: '1.0.0' });
 
-      // 5. concrete A -> NULL / undefined: does NOT erase provenance (keeps 'collector-A')
-      await repo.saveSourceRun(sr, { adapterVersion: '1.0.0' });
-      meta = await repo.getSourceRunMetadata('sr-collector-1');
+      // After listSourceRunsByRunId(), the rehydrated collector represents exactly the accepted provenance ('collector-A')
+      list = await repo.listSourceRunsByRunId(run.id);
+      expect(list[0]!.collectorId).toBe('collector-A');
+      meta = await repo.getSourceRunMetadata('sr-collector-lifecycle');
       expect(meta!.collectorId).toBe('collector-A');
     });
   });

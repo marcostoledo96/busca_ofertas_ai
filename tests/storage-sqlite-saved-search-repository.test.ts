@@ -453,7 +453,7 @@ describe('SqliteSavedSearchRepository (BOAI-011 / Findings B & C)', () => {
     });
   });
 
-  it('fails closed when nesting exceeds maxDepth > 20 and writes 0 rows (Finding B1)', async () => {
+  it('fails closed when nesting exceeds maxDepth > 20 and writes 0 rows (Finding 1A)', async () => {
     await withTempDatabase(async (db) => {
       db.migrate();
       const repo = new SqliteSavedSearchRepository(db);
@@ -489,6 +489,119 @@ describe('SqliteSavedSearchRepository (BOAI-011 / Findings B & C)', () => {
         .prepare('SELECT id FROM saved_search_revisions WHERE saved_search_id = ?')
         .get('search-deep-nesting');
       expect(revRow).toBeUndefined();
+    });
+  });
+
+  it('scans primitive string leaves at exactly depth 0, throws SensitiveDataDetectedError, and writes 0 rows (Finding 1A)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const repo = new SqliteSavedSearchRepository(db);
+
+      // Helper to build a chain of exactly 20 nested objects where the 20th level's value is the leaf
+      const buildDepth20Chain = (leafValue: string): Record<string, unknown> => {
+        let current: unknown = leafValue;
+        for (let i = 0; i < 20; i++) {
+          current = { [`level_${19 - i}`]: current };
+        }
+        return current as Record<string, unknown>;
+      };
+
+      const testLeaves = [
+        { desc: 'Bearer token at depth 0', leaf: 'Bearer abcdefghijklmnopqrstuvwxyz' },
+        { desc: 'Cookie header at depth 0', leaf: 'Cookie: session=my-secret-cookie-value' },
+        { desc: 'password at depth 0', leaf: 'password=supersecretpassword123' },
+      ];
+
+      for (let i = 0; i < testLeaves.length; i++) {
+        const item = testLeaves[i]!;
+        const searchId = `search-depth0-leaf-${i}`;
+        const search = createSavedSearch({
+          ...minimalSearch,
+          id: searchId,
+          sourceConfigs: [
+            {
+              id: 'fb-marketplace',
+              enabled: true,
+              queries: ['test'],
+              options: buildDepth20Chain(item.leaf),
+            },
+          ],
+        });
+
+        await expect(repo.save(search)).rejects.toThrow(SensitiveDataDetectedError);
+
+        // Verify 0 rows in saved_searches and saved_search_revisions for each case
+        const searchRow = db.prepare('SELECT id FROM saved_searches WHERE id = ?').get(searchId);
+        expect(searchRow).toBeUndefined();
+
+        const revRow = db
+          .prepare('SELECT id FROM saved_search_revisions WHERE saved_search_id = ?')
+          .get(searchId);
+        expect(revRow).toBeUndefined();
+      }
+    });
+  });
+
+  it('validates rules[].params for secrets and writes 0 rows on detection (Finding 1B)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const repo = new SqliteSavedSearchRepository(db);
+
+      const secretRulesCases = [
+        { desc: 'rules[0].params.apiKey', params: { apiKey: 'secret-api-key-123' } },
+        { desc: 'rules[0].params.password', params: { password: 'secret-pass-456' } },
+        { desc: 'rules[0].params.authorization', params: { authorization: 'Bearer secret-auth' } },
+        {
+          desc: 'nested bearer/cookie in rules[0].params',
+          params: { nested: { header: 'Cookie: session=xyz123' } },
+        },
+      ];
+
+      for (let i = 0; i < secretRulesCases.length; i++) {
+        const item = secretRulesCases[i]!;
+        const searchId = `search-rule-secret-${i}`;
+        const search = createSavedSearch({
+          ...minimalSearch,
+          id: searchId,
+          rules: [
+            {
+              id: 'rule-test-secret',
+              type: 'CUSTOM_FILTER',
+              params: item.params,
+            },
+          ],
+        });
+
+        await expect(repo.save(search)).rejects.toThrow(SensitiveDataDetectedError);
+
+        // Verify 0 current row and 0 revisions
+        const searchRow = db.prepare('SELECT id FROM saved_searches WHERE id = ?').get(searchId);
+        expect(searchRow).toBeUndefined();
+
+        const revRow = db
+          .prepare('SELECT id FROM saved_search_revisions WHERE saved_search_id = ?')
+          .get(searchId);
+        expect(revRow).toBeUndefined();
+      }
+
+      // Legitimate rule parameters pass and round-trip cleanly
+      const legitSearchId = 'search-rule-legit';
+      const legitSearch = createSavedSearch({
+        ...minimalSearch,
+        id: legitSearchId,
+        rules: [
+          {
+            id: 'rule-legit',
+            type: 'PRICE_CEILING',
+            params: { maxPrice: 250000, terms: ['switch'] },
+          },
+        ],
+      });
+
+      await repo.save(legitSearch);
+      const retrieved = await repo.getById(legitSearchId);
+      expect(retrieved).not.toBeNull();
+      expect(retrieved!.rules[0]!.params).toEqual({ maxPrice: 250000, terms: ['switch'] });
     });
   });
 
@@ -662,6 +775,83 @@ describe('SqliteSavedSearchRepository (BOAI-011 / Findings B & C)', () => {
 
       const repo = new SqliteSavedSearchRepository(db);
       await expect(repo.getById('corrupt-date-search')).rejects.toThrow(StorageCorruptionError);
+    });
+  });
+
+  it('fails closed with StorageCorruptionError when canonical fields are missing in current payload or revision snapshot (Finding 3)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const repo = new SqliteSavedSearchRepository(db);
+
+      const search = createSavedSearch({
+        ...minimalSearch,
+        id: 'search-canonical-fields',
+        name: 'Valid Canonical Search',
+      });
+      await repo.save(search);
+
+      const fieldsToRemove = [
+        'id',
+        'name',
+        'enabled',
+        'category',
+        'createdAt',
+        'updatedAt',
+      ] as const;
+
+      for (const field of fieldsToRemove) {
+        // 1. Current payload missing field
+        const fullPayload = JSON.parse(
+          (
+            db
+              .prepare('SELECT payload FROM saved_searches WHERE id = ?')
+              .get('search-canonical-fields') as { payload: string }
+          ).payload,
+        ) as Record<string, unknown>;
+        const corruptPayload: Record<string, unknown> = { ...fullPayload };
+        delete corruptPayload[field];
+
+        db.prepare('UPDATE saved_searches SET payload = ? WHERE id = ?').run(
+          JSON.stringify(corruptPayload),
+          'search-canonical-fields',
+        );
+
+        await expect(repo.getById('search-canonical-fields')).rejects.toThrow(
+          StorageCorruptionError,
+        );
+
+        // Restore current payload
+        db.prepare('UPDATE saved_searches SET payload = ? WHERE id = ?').run(
+          JSON.stringify(fullPayload),
+          'search-canonical-fields',
+        );
+
+        // 2. Revision snapshot missing field
+        const fullSnapshot = JSON.parse(
+          (
+            db
+              .prepare('SELECT snapshot FROM saved_search_revisions WHERE saved_search_id = ?')
+              .get('search-canonical-fields') as { snapshot: string }
+          ).snapshot,
+        ) as Record<string, unknown>;
+        const corruptSnapshot: Record<string, unknown> = { ...fullSnapshot };
+        delete corruptSnapshot[field];
+
+        db.prepare('UPDATE saved_search_revisions SET snapshot = ? WHERE saved_search_id = ?').run(
+          JSON.stringify(corruptSnapshot),
+          'search-canonical-fields',
+        );
+
+        await expect(repo.listRevisions('search-canonical-fields')).rejects.toThrow(
+          StorageCorruptionError,
+        );
+
+        // Restore revision snapshot
+        db.prepare('UPDATE saved_search_revisions SET snapshot = ? WHERE saved_search_id = ?').run(
+          JSON.stringify(fullSnapshot),
+          'search-canonical-fields',
+        );
+      }
     });
   });
 });
