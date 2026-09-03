@@ -16,10 +16,7 @@ function createCompleteSnapshot(): RunExportSnapshot {
       status: 'PARTIAL_SUCCESS',
       startedAt: '2026-08-30T10:00:00.000Z',
       finishedAt: '2026-08-30T10:05:00.000Z',
-      error: {
-        code: 'PARTIAL_RUN_FAILURE',
-        message: 'One of the sources encountered a network error',
-      },
+      error: null,
     },
     search: {
       savedSearchId: 'search-lite-amba',
@@ -57,7 +54,7 @@ function createCompleteSnapshot(): RunExportSnapshot {
         status: 'NETWORK_ERROR',
         startedAt: '2026-08-30T10:00:00.000Z',
         finishedAt: '2026-08-30T10:01:00.000Z',
-        itemsCount: 0,
+        itemsCount: null,
         metrics: null,
         error: {
           code: 'ETIMEDOUT',
@@ -189,8 +186,9 @@ describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
       expect(cSrc[colIndex('source_id')]).toBe(jSrc.sourceId);
       expect(cSrc[colIndex('collector_id')]).toBe(jSrc.collectorId ?? '');
       expect(cSrc[colIndex('adapter_version')]).toBe(jSrc.adapterVersion);
-      expect(cSrc[colIndex('source_status')]).toBe(jSrc.status);
-      expect(cSrc[colIndex('source_items_count')]).toBe(String(jSrc.itemsCount));
+      expect(cSrc[colIndex('source_items_count')]).toBe(
+        jSrc.itemsCount !== null ? String(jSrc.itemsCount) : '',
+      );
       expect(cSrc[colIndex('source_error_code')]).toBe(jSrc.error?.code ?? '');
       expect(cSrc[colIndex('source_error_message')]).toBe(jSrc.error?.message ?? '');
 
@@ -308,5 +306,37 @@ describe('Run Export Cross-Format Semantic Parity (BOAI-014)', () => {
       // Images
       expect(JSON.parse(cRes[colIndex('image_urls_json')]!)).toEqual(jRes.imageUrls);
     }
+  });
+
+  it('preserves 1:1 factual parity for run error code and message on FAILED runs', () => {
+    const fixture: RunExportSnapshot = {
+      ...createCompleteSnapshot(),
+      run: {
+        id: 'run-failed-parity',
+        savedSearchId: 'search-lite-amba',
+        status: 'FAILED',
+        startedAt: '2026-08-30T10:00:00.000Z',
+        finishedAt: '2026-08-30T10:02:00.000Z',
+        error: {
+          code: 'ERR_ALL_SOURCES_DEAD',
+          message: 'All configured sources failed',
+        },
+      },
+    };
+
+    const jsonStr = serializeJson(fixture);
+    const csvStr = serializeCsv(fixture);
+
+    const json = JSON.parse(jsonStr) as RunExportSnapshot;
+    const csv = parseCsvRfc4180(csvStr);
+
+    const colIndex = (name: (typeof CSV_COLUMNS)[number]) => CSV_COLUMNS.indexOf(name);
+    const runRow = csv.rows.find((r) => r[colIndex('record_type')] === 'RUN')!;
+
+    expect(runRow[colIndex('run_status')]).toBe('FAILED');
+    expect(runRow[colIndex('run_error_code')]).toBe('ERR_ALL_SOURCES_DEAD');
+    expect(runRow[colIndex('run_error_message')]).toBe('All configured sources failed');
+    expect(json.run.error?.code).toBe('ERR_ALL_SOURCES_DEAD');
+    expect(json.run.error?.message).toBe('All configured sources failed');
   });
 });

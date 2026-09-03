@@ -491,4 +491,387 @@ describe('Run Export Runtime Validation (BOAI-014)', () => {
     delete (priceObj['converted'] as Record<string, unknown>)['convertedAt'];
     expect(() => validateRunExportSnapshot(rawNoConvertedAt)).toThrow(RunExportValidationError);
   });
+
+  it('enforces Run status lifecycle coherence (CREATED, RUNNING, SUCCESS, PARTIAL_SUCCESS, FAILED, CANCELLED)', () => {
+    const valid = createValidCanonicalSnapshot();
+
+    // 1. CREATED + finishedAt -> reject
+    const createdWithFinished = {
+      ...valid,
+      run: { ...valid.run, status: 'CREATED', finishedAt: '2026-08-30T10:05:00.000Z', error: null },
+    };
+    expect(() => validateRunExportSnapshot(createdWithFinished)).toThrow(RunExportValidationError);
+
+    // 2. CREATED + error -> reject
+    const createdWithError = {
+      ...valid,
+      run: {
+        ...valid.run,
+        status: 'CREATED',
+        finishedAt: null,
+        error: { code: 'ERR', message: 'Fail' },
+      },
+    };
+    expect(() => validateRunExportSnapshot(createdWithError)).toThrow(RunExportValidationError);
+
+    // 3. RUNNING + finishedAt -> reject
+    const runningWithFinished = {
+      ...valid,
+      run: { ...valid.run, status: 'RUNNING', finishedAt: '2026-08-30T10:05:00.000Z', error: null },
+    };
+    expect(() => validateRunExportSnapshot(runningWithFinished)).toThrow(RunExportValidationError);
+
+    // 4. RUNNING + error -> reject
+    const runningWithError = {
+      ...valid,
+      run: {
+        ...valid.run,
+        status: 'RUNNING',
+        finishedAt: null,
+        error: { code: 'ERR', message: 'Fail' },
+      },
+    };
+    expect(() => validateRunExportSnapshot(runningWithError)).toThrow(RunExportValidationError);
+
+    // 5. SUCCESS + null finishedAt -> reject
+    const successNoFinished = {
+      ...valid,
+      run: { ...valid.run, status: 'SUCCESS', finishedAt: null, error: null },
+    };
+    expect(() => validateRunExportSnapshot(successNoFinished)).toThrow(RunExportValidationError);
+
+    // 6. SUCCESS + error -> reject
+    const successWithError = {
+      ...valid,
+      run: {
+        ...valid.run,
+        status: 'SUCCESS',
+        finishedAt: '2026-08-30T10:05:00.000Z',
+        error: { code: 'ERR', message: 'Err' },
+      },
+    };
+    expect(() => validateRunExportSnapshot(successWithError)).toThrow(RunExportValidationError);
+
+    // 7. PARTIAL_SUCCESS + null finishedAt -> reject
+    const partialNoFinished = {
+      ...valid,
+      run: { ...valid.run, status: 'PARTIAL_SUCCESS', finishedAt: null, error: null },
+    };
+    expect(() => validateRunExportSnapshot(partialNoFinished)).toThrow(RunExportValidationError);
+
+    // 8. PARTIAL_SUCCESS + error -> reject
+    const partialWithError = {
+      ...valid,
+      run: {
+        ...valid.run,
+        status: 'PARTIAL_SUCCESS',
+        finishedAt: '2026-08-30T10:05:00.000Z',
+        error: { code: 'ERR', message: 'Err' },
+      },
+    };
+    expect(() => validateRunExportSnapshot(partialWithError)).toThrow(RunExportValidationError);
+
+    // 9. FAILED + null finishedAt -> reject
+    const failedNoFinished = {
+      ...valid,
+      run: {
+        ...valid.run,
+        status: 'FAILED',
+        finishedAt: null,
+        error: { code: 'FAIL', message: 'Crash' },
+      },
+    };
+    expect(() => validateRunExportSnapshot(failedNoFinished)).toThrow(RunExportValidationError);
+
+    // 10. FAILED + null error -> reject
+    const failedNoError = {
+      ...valid,
+      run: {
+        ...valid.run,
+        status: 'FAILED',
+        finishedAt: '2026-08-30T10:05:00.000Z',
+        error: null,
+      },
+    };
+    expect(() => validateRunExportSnapshot(failedNoError)).toThrow(RunExportValidationError);
+
+    // 11. FAILED + empty error message -> reject
+    const failedEmptyMsg = {
+      ...valid,
+      run: {
+        ...valid.run,
+        status: 'FAILED',
+        finishedAt: '2026-08-30T10:05:00.000Z',
+        error: { code: 'FAIL', message: '   ' },
+      },
+    };
+    expect(() => validateRunExportSnapshot(failedEmptyMsg)).toThrow(RunExportValidationError);
+
+    // 12. CANCELLED + null error -> PASS
+    const cancelledNoError = {
+      ...valid,
+      run: {
+        ...valid.run,
+        status: 'CANCELLED',
+        finishedAt: '2026-08-30T10:05:00.000Z',
+        error: null,
+      },
+    };
+    expect(() => validateRunExportSnapshot(cancelledNoError)).not.toThrow();
+
+    // 13. CANCELLED + valid error -> PASS
+    const cancelledWithError = {
+      ...valid,
+      run: {
+        ...valid.run,
+        status: 'CANCELLED',
+        finishedAt: '2026-08-30T10:05:00.000Z',
+        error: { code: 'USER_ABORT', message: 'User aborted' },
+      },
+    };
+    expect(() => validateRunExportSnapshot(cancelledWithError)).not.toThrow();
+
+    // 14. finishedAt before startedAt -> reject
+    const invertedChronology = {
+      ...valid,
+      run: {
+        ...valid.run,
+        startedAt: '2026-08-30T10:05:00.000Z',
+        finishedAt: '2026-08-30T10:00:00.000Z', // 5 minutes BEFORE startedAt
+      },
+    };
+    expect(() => validateRunExportSnapshot(invertedChronology)).toThrow(RunExportValidationError);
+  });
+
+  it('enforces Source status lifecycle coherence, failure handling, and metrics completeness', () => {
+    const valid = createValidCanonicalSnapshot();
+
+    // 1. PENDING + finishedAt -> reject
+    const pendingFinished = {
+      ...valid,
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'PENDING',
+          finishedAt: '2026-08-30T10:05:00.000Z',
+          itemsCount: null,
+          error: null,
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(pendingFinished)).toThrow(RunExportValidationError);
+
+    // 2. PENDING + itemsCount -> reject
+    const pendingWithItems = {
+      ...valid,
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'PENDING',
+          finishedAt: null,
+          itemsCount: 0,
+          error: null,
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(pendingWithItems)).toThrow(RunExportValidationError);
+
+    // 3. PENDING + error -> reject
+    const pendingWithError = {
+      ...valid,
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'PENDING',
+          finishedAt: null,
+          itemsCount: null,
+          error: { code: 'ERR', message: 'Failed' },
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(pendingWithError)).toThrow(RunExportValidationError);
+
+    // 4. RUNNING + finishedAt -> reject
+    const runningFinished = {
+      ...valid,
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'RUNNING',
+          finishedAt: '2026-08-30T10:05:00.000Z',
+          itemsCount: null,
+          error: null,
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(runningFinished)).toThrow(RunExportValidationError);
+
+    // 5. SUCCESS + null finishedAt -> reject
+    const successNoFinished = {
+      ...valid,
+      sources: [{ ...valid.sources[0]!, status: 'SUCCESS', finishedAt: null }],
+    };
+    expect(() => validateRunExportSnapshot(successNoFinished)).toThrow(RunExportValidationError);
+
+    // 6. SUCCESS + null itemsCount -> reject
+    const successNoItems = {
+      ...valid,
+      sources: [{ ...valid.sources[0]!, status: 'SUCCESS', itemsCount: null }],
+    };
+    expect(() => validateRunExportSnapshot(successNoItems)).toThrow(RunExportValidationError);
+
+    // 7. SUCCESS + error -> reject
+    const successWithError = {
+      ...valid,
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'SUCCESS',
+          error: { code: 'ERR', message: 'Err' },
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(successWithError)).toThrow(RunExportValidationError);
+
+    // 8. SUCCESS + null metrics -> reject
+    const successNoMetrics = {
+      ...valid,
+      sources: [{ ...valid.sources[0]!, status: 'SUCCESS', metrics: null }],
+    };
+    expect(() => validateRunExportSnapshot(successNoMetrics)).toThrow(RunExportValidationError);
+
+    // 9. SUCCESS + incomplete metrics (missing stopReason) -> reject
+    const successIncompleteMetrics = {
+      ...valid,
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'SUCCESS',
+          metrics: { ...valid.sources[0]!.metrics!, stopReason: null },
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(successIncompleteMetrics)).toThrow(
+      RunExportValidationError,
+    );
+
+    // 10. ZERO_RESULTS_CONFIRMED + itemsCount !== 0 -> reject
+    const zeroWithItems = {
+      ...valid,
+      results: [],
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'ZERO_RESULTS_CONFIRMED',
+          itemsCount: 5,
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(zeroWithItems)).toThrow(RunExportValidationError);
+
+    // 11. ZERO_RESULTS_CONFIRMED + error -> reject
+    const zeroWithError = {
+      ...valid,
+      results: [],
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'ZERO_RESULTS_CONFIRMED',
+          itemsCount: 0,
+          error: { code: 'ERR', message: 'Err' },
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(zeroWithError)).toThrow(RunExportValidationError);
+
+    // 12. ZERO_RESULTS_CONFIRMED + null metrics -> reject
+    const zeroNoMetrics = {
+      ...valid,
+      results: [],
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'ZERO_RESULTS_CONFIRMED',
+          itemsCount: 0,
+          metrics: null,
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(zeroNoMetrics)).toThrow(RunExportValidationError);
+
+    // 13. Failure statuses (e.g. NETWORK_ERROR) + null error -> reject
+    const failNoError = {
+      ...valid,
+      results: [],
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'NETWORK_ERROR',
+          itemsCount: null,
+          error: null,
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(failNoError)).toThrow(RunExportValidationError);
+
+    // 14. Failure statuses + non-null itemsCount -> reject
+    const failWithItems = {
+      ...valid,
+      results: [],
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'NETWORK_ERROR',
+          itemsCount: 0,
+          error: { code: 'NET', message: 'Timeout' },
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(failWithItems)).toThrow(RunExportValidationError);
+
+    // 15. CANCELLED + null error -> PASS
+    const cancelNoError = {
+      ...valid,
+      results: [],
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'CANCELLED',
+          itemsCount: null,
+          error: null,
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(cancelNoError)).not.toThrow();
+
+    // 16. CANCELLED + valid error -> PASS
+    const cancelWithError = {
+      ...valid,
+      results: [],
+      sources: [
+        {
+          ...valid.sources[0]!,
+          status: 'CANCELLED',
+          itemsCount: null,
+          error: { code: 'USR', message: 'Cancelled by user' },
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(cancelWithError)).not.toThrow();
+
+    // 17. Source finishedAt before startedAt -> reject
+    const sourceInvertedChronology = {
+      ...valid,
+      sources: [
+        {
+          ...valid.sources[0]!,
+          startedAt: '2026-08-30T10:05:00.000Z',
+          finishedAt: '2026-08-30T10:00:00.000Z',
+        },
+      ],
+    };
+    expect(() => validateRunExportSnapshot(sourceInvertedChronology)).toThrow(
+      RunExportValidationError,
+    );
+  });
 });

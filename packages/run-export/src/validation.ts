@@ -51,6 +51,44 @@ const VALID_SOURCE_STATUSES: ReadonlySet<RunExportSourceStatus> = new Set([
   'CANCELLED',
 ]);
 
+const FAILURE_SOURCE_STATUSES: ReadonlySet<RunExportSourceStatus> = new Set([
+  'AUTHENTICATION_REQUIRED',
+  'MANUAL_INTERVENTION_REQUIRED',
+  'RATE_LIMITED',
+  'NETWORK_ERROR',
+  'SOURCE_UNAVAILABLE',
+  'CONTRACT_CHANGED',
+  'PARSER_FAILED',
+  'TIMEOUT',
+  'CONFIGURATION_UNSUPPORTED',
+]);
+
+function validateCompleteSourceMetrics(metrics: Record<string, unknown>, path: string): void {
+  const fields = [
+    'pagesRequested',
+    'pagesCompleted',
+    'rawItemsCount',
+    'parsedItemsCount',
+    'rejectedItemsCount',
+  ] as const;
+  for (const field of fields) {
+    const val = metrics[field];
+    if (val === null || val === undefined) {
+      throw new RunExportValidationError(
+        `Field '${field}' in complete source metrics must not be null or omitted at '${path}.${field}'`,
+        `${path}.${field}`,
+      );
+    }
+  }
+  const stopReason = metrics['stopReason'];
+  if (stopReason === null || stopReason === undefined) {
+    throw new RunExportValidationError(
+      `Field 'stopReason' in complete source metrics must not be null or omitted at '${path}.stopReason'`,
+      `${path}.stopReason`,
+    );
+  }
+}
+
 const VALID_STOP_REASONS: ReadonlySet<RunExportSourceStopReason> = new Set([
   'ALL_PAGES_FETCHED',
   'MAX_PAGES_REACHED',
@@ -217,12 +255,14 @@ export function validateRunExportSnapshot(
       '$.run.status',
     );
   }
-  validateCanonicalTimestamp(
+  const runStartedAt = validateCanonicalTimestamp(
     requireOwnProperty(run, 'startedAt', '$.run.startedAt'),
     '$.run.startedAt',
   );
-  const runFinishedAt = requireOwnProperty(run, 'finishedAt', '$.run.finishedAt');
-  validateNullableCanonicalTimestamp(runFinishedAt, '$.run.finishedAt');
+  const runFinishedAt = validateNullableCanonicalTimestamp(
+    requireOwnProperty(run, 'finishedAt', '$.run.finishedAt'),
+    '$.run.finishedAt',
+  );
 
   const runError = requireOwnProperty(run, 'error', '$.run.error');
   if (runError !== null) {
@@ -240,12 +280,78 @@ export function validateRunExportSnapshot(
       );
     }
     const errMsg = requireOwnProperty(runError, 'message', '$.run.error.message');
-    if (errMsg !== null && typeof errMsg !== 'string') {
+    if (typeof errMsg !== 'string' || errMsg.trim().length === 0) {
       throw new RunExportValidationError(
-        "Field 'run.error.message' must be string or null",
+        "Field 'run.error.message' must be a non-empty string",
         '$.run.error.message',
       );
     }
+  }
+
+  // Cross-validation: run status lifecycle coherence
+  if (runFinishedAt !== null) {
+    if (new Date(runFinishedAt).getTime() < new Date(runStartedAt).getTime()) {
+      throw new RunExportValidationError(
+        `run.finishedAt '${runFinishedAt}' cannot be before run.startedAt '${runStartedAt}'`,
+        '$.run.finishedAt',
+      );
+    }
+  }
+
+  switch (runStatus) {
+    case 'CREATED':
+    case 'RUNNING':
+      if (runFinishedAt !== null) {
+        throw new RunExportValidationError(
+          `Run with status '${runStatus}' must have finishedAt === null, got '${runFinishedAt}'`,
+          '$.run.finishedAt',
+        );
+      }
+      if (runError !== null) {
+        throw new RunExportValidationError(
+          `Run with status '${runStatus}' must have error === null`,
+          '$.run.error',
+        );
+      }
+      break;
+    case 'SUCCESS':
+    case 'PARTIAL_SUCCESS':
+      if (runFinishedAt === null) {
+        throw new RunExportValidationError(
+          `Run with status '${runStatus}' must have a valid non-null finishedAt`,
+          '$.run.finishedAt',
+        );
+      }
+      if (runError !== null) {
+        throw new RunExportValidationError(
+          `Run with status '${runStatus}' must have error === null`,
+          '$.run.error',
+        );
+      }
+      break;
+    case 'FAILED':
+      if (runFinishedAt === null) {
+        throw new RunExportValidationError(
+          "Run with status 'FAILED' must have a valid non-null finishedAt",
+          '$.run.finishedAt',
+        );
+      }
+      if (runError === null) {
+        throw new RunExportValidationError(
+          "Run with status 'FAILED' must have a non-null error object",
+          '$.run.error',
+        );
+      }
+      break;
+    case 'CANCELLED':
+      if (runFinishedAt === null) {
+        throw new RunExportValidationError(
+          "Run with status 'CANCELLED' must have a valid non-null finishedAt",
+          '$.run.finishedAt',
+        );
+      }
+      // error may be null or valid error object
+      break;
   }
 
   // 3. search
@@ -352,17 +458,18 @@ export function validateRunExportSnapshot(
       );
     }
 
-    validateCanonicalTimestamp(
+    const srcStartedAt = validateCanonicalTimestamp(
       requireOwnProperty(src, 'startedAt', `${path}.startedAt`),
       `${path}.startedAt`,
     );
-    const srcFinishedAt = requireOwnProperty(src, 'finishedAt', `${path}.finishedAt`);
-    validateNullableCanonicalTimestamp(srcFinishedAt, `${path}.finishedAt`);
+    const srcFinishedAt = validateNullableCanonicalTimestamp(
+      requireOwnProperty(src, 'finishedAt', `${path}.finishedAt`),
+      `${path}.finishedAt`,
+    );
 
-    const itemsCount = requireOwnProperty(src, 'itemsCount', `${path}.itemsCount`);
-    if (itemsCount !== null) {
-      validateInteger(itemsCount, `${path}.itemsCount`, 0);
-    }
+    const rawItemsCount = requireOwnProperty(src, 'itemsCount', `${path}.itemsCount`);
+    const itemsCount =
+      rawItemsCount !== null ? validateInteger(rawItemsCount, `${path}.itemsCount`, 0) : null;
 
     const srcMetrics = requireOwnProperty(src, 'metrics', `${path}.metrics`);
     if (srcMetrics !== null) {
@@ -414,12 +521,128 @@ export function validateRunExportSnapshot(
         );
       }
       const msg = requireOwnProperty(srcError, 'message', `${path}.error.message`);
-      if (msg !== null && typeof msg !== 'string') {
+      if (typeof msg !== 'string' || msg.trim().length === 0) {
         throw new RunExportValidationError(
-          `error.message at '${path}.error.message' must be string or null`,
+          `error.message at '${path}.error.message' must be a non-empty string`,
           `${path}.error.message`,
         );
       }
+    }
+
+    // Cross-validation: source status lifecycle coherence
+    if (srcFinishedAt !== null) {
+      if (new Date(srcFinishedAt).getTime() < new Date(srcStartedAt).getTime()) {
+        throw new RunExportValidationError(
+          `source.finishedAt '${srcFinishedAt}' cannot be before source.startedAt '${srcStartedAt}' at '${path}.finishedAt'`,
+          `${path}.finishedAt`,
+        );
+      }
+    }
+
+    if (srcStatus === 'PENDING' || srcStatus === 'RUNNING') {
+      if (srcFinishedAt !== null) {
+        throw new RunExportValidationError(
+          `Source with status '${srcStatus}' must have finishedAt === null, got '${srcFinishedAt}'`,
+          `${path}.finishedAt`,
+        );
+      }
+      if (itemsCount !== null) {
+        throw new RunExportValidationError(
+          `Source with status '${srcStatus}' cannot have itemsCount, got ${itemsCount}`,
+          `${path}.itemsCount`,
+        );
+      }
+      if (srcError !== null) {
+        throw new RunExportValidationError(
+          `Source with status '${srcStatus}' must have error === null`,
+          `${path}.error`,
+        );
+      }
+    } else if (srcStatus === 'SUCCESS') {
+      if (srcFinishedAt === null) {
+        throw new RunExportValidationError(
+          "Source with status 'SUCCESS' must have a valid non-null finishedAt",
+          `${path}.finishedAt`,
+        );
+      }
+      if (itemsCount === null) {
+        throw new RunExportValidationError(
+          "Source with status 'SUCCESS' must have a non-null integer itemsCount",
+          `${path}.itemsCount`,
+        );
+      }
+      if (srcError !== null) {
+        throw new RunExportValidationError(
+          "Source with status 'SUCCESS' must have error === null",
+          `${path}.error`,
+        );
+      }
+      if (srcMetrics === null) {
+        throw new RunExportValidationError(
+          "Source with status 'SUCCESS' must have non-null metrics",
+          `${path}.metrics`,
+        );
+      }
+      validateCompleteSourceMetrics(srcMetrics, `${path}.metrics`);
+    } else if (srcStatus === 'ZERO_RESULTS_CONFIRMED') {
+      if (srcFinishedAt === null) {
+        throw new RunExportValidationError(
+          "Source with status 'ZERO_RESULTS_CONFIRMED' must have a valid non-null finishedAt",
+          `${path}.finishedAt`,
+        );
+      }
+      if (itemsCount !== 0) {
+        throw new RunExportValidationError(
+          `Source with status 'ZERO_RESULTS_CONFIRMED' must have itemsCount === 0, got ${itemsCount === null ? 'null' : String(itemsCount)}`,
+          `${path}.itemsCount`,
+        );
+      }
+      if (srcError !== null) {
+        throw new RunExportValidationError(
+          "Source with status 'ZERO_RESULTS_CONFIRMED' must have error === null",
+          `${path}.error`,
+        );
+      }
+      if (srcMetrics === null) {
+        throw new RunExportValidationError(
+          "Source with status 'ZERO_RESULTS_CONFIRMED' must have non-null metrics",
+          `${path}.metrics`,
+        );
+      }
+      validateCompleteSourceMetrics(srcMetrics, `${path}.metrics`);
+    } else if (FAILURE_SOURCE_STATUSES.has(srcStatus as RunExportSourceStatus)) {
+      if (srcFinishedAt === null) {
+        throw new RunExportValidationError(
+          `Source with status '${srcStatus}' must have a valid non-null finishedAt`,
+          `${path}.finishedAt`,
+        );
+      }
+      if (itemsCount !== null) {
+        throw new RunExportValidationError(
+          `Source with status '${srcStatus}' cannot have itemsCount, got ${itemsCount}`,
+          `${path}.itemsCount`,
+        );
+      }
+      if (srcError === null) {
+        throw new RunExportValidationError(
+          `Source with status '${srcStatus}' must have a non-null error object`,
+          `${path}.error`,
+        );
+      }
+    } else if (srcStatus === 'CANCELLED') {
+      if (srcFinishedAt === null) {
+        throw new RunExportValidationError(
+          "Source with status 'CANCELLED' must have a valid non-null finishedAt",
+          `${path}.finishedAt`,
+        );
+      }
+      if (itemsCount !== null) {
+        throw new RunExportValidationError(
+          `Source with status 'CANCELLED' cannot have itemsCount, got ${itemsCount}`,
+          `${path}.itemsCount`,
+        );
+      }
+      // srcError is nullable
     }
   }
 
