@@ -47,7 +47,13 @@ describe('CLI Binary Executable Entrypoint (BOAI-006)', () => {
     expect(stdout).toContain('1. Ejecutar una búsqueda');
     expect(stdout).toContain('8. Salir');
     expect(stdout).toContain('Saliendo de Busca Ofertas AI. ¡Hasta luego!');
-    expect(stderr).toBe('');
+    // Filter out Node.js engine-level experimental warnings (e.g. node:sqlite in Node 22)
+    const appStderr = stderr
+      .split('\n')
+      .filter((line) => !line.includes('ExperimentalWarning') && !line.includes('--trace-warnings'))
+      .join('')
+      .trim();
+    expect(appStderr).toBe('');
   });
 
   it('Finding 2: fatal unhandled rejection in bin.ts catch block does NOT print raw message or secrets, outputs safe INTERNAL_ERROR and exit code 70', async () => {
