@@ -207,9 +207,10 @@ const aiSchema = z
 
 const retentionSchema = z
   .object({
-    rawArtifacts: z.enum(['ERRORS_AND_REVIEW', 'ALL', 'NONE'], {
+    rawArtifacts: z.enum(['NONE', 'ERRORS_ONLY', 'ERRORS_AND_REVIEW', 'ALL_LIMITED', 'ALL'], {
       errorMap: () => ({
-        message: 'retention.rawArtifacts must be ERRORS_AND_REVIEW, ALL, or NONE.',
+        message:
+          'retention.rawArtifacts must be NONE, ERRORS_ONLY, ERRORS_AND_REVIEW, ALL_LIMITED, or ALL.',
       }),
     }),
     rawDataDays: z

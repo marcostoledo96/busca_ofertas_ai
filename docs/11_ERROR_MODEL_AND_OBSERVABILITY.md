@@ -103,6 +103,19 @@ Cuando cambie un contrato:
 - artifact opcional con vencimiento;
 - versión del adapter y fixture más cercano.
 
+## Errores de almacenamiento de artifacts
+
+Para garantizar el principio de fallo explícito (`fail-closed`) y la seguridad del sistema local-first, las fallas en el ciclo de vida de artifacts crudos se modelan con tipos de error dedicados:
+
+- `ArtifactSizeLimitExceededError`: el artifact individual supera el tamaño máximo permitido (5 MB).
+- `RunArtifactBudgetExceededError`: el run ha consumido su presupuesto total en bytes (50 MB) o cantidad de artifacts (100).
+- `ArtifactPathTraversalError`: la ruta relativa contiene secuencias prohibidas (`..`, `/`, `\`, control chars, NUL).
+- `ArtifactSymlinkEscapeError`: se detecta un symlink en cualquier componente del directorio o en el destino, impidiendo escapes del sandbox.
+- `ArtifactIdentityCollisionError`: intento de escribir sobre un archivo existente en el storage físico sin sobrescritura autorizada.
+- `UnsupportedArtifactContentError`: el contenido no es texto plano UTF-8 ni un objeto JSON serializable.
+- `RawArtifactIdentityCollisionError`: colisión de clave primaria al insertar el registro en SQLite.
+- `SensitiveDataDetectedError`: detección de secretos remanentes tras sanitización, abortando fail-closed con 0 bytes escritos.
+
 ## Timeouts y cancelación
 
 Cada operación externa usa:

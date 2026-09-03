@@ -8,6 +8,7 @@ import {
   type SourceRegistry,
   type SavedSearchConfigurationV1,
 } from '@busca-ofertas-ai/configuration';
+import type { RawArtifactService } from '@busca-ofertas-ai/core';
 import type { TerminalPort } from '../runtime/terminal.js';
 import type { SavedSearchConfigStore } from '../storage/saved-search-store.js';
 import type { TextFilePort } from '../storage/text-file-port.js';
@@ -22,6 +23,7 @@ export interface ConfigurationSubmenuOptions {
   readonly sourceRegistry: SourceRegistry;
   readonly configStore: SavedSearchConfigStore;
   readonly textFilePort: TextFilePort;
+  readonly rawArtifactService?: RawArtifactService | undefined;
 }
 
 export class ConfigurationSubmenu {
@@ -30,6 +32,7 @@ export class ConfigurationSubmenu {
   private readonly sourceRegistry: SourceRegistry;
   private readonly configStore: SavedSearchConfigStore;
   private readonly textFilePort: TextFilePort;
+  private readonly rawArtifactService?: RawArtifactService | undefined;
   private readonly prompter: WizardPrompter;
 
   constructor(options: ConfigurationSubmenuOptions) {
@@ -38,6 +41,7 @@ export class ConfigurationSubmenu {
     this.sourceRegistry = options.sourceRegistry;
     this.configStore = options.configStore;
     this.textFilePort = options.textFilePort;
+    this.rawArtifactService = options.rawArtifactService;
     this.prompter = new WizardPrompter(options.terminal, options.signal);
   }
 
@@ -53,6 +57,9 @@ export class ConfigurationSubmenu {
         { label: 'Importar búsqueda desde archivo YAML', value: 'import' },
         { label: 'Exportar búsqueda a archivo YAML', value: 'export' },
         { label: 'Eliminar una búsqueda', value: 'delete' },
+        ...(this.rawArtifactService
+          ? [{ label: 'Limpiar artifacts vencidos', value: 'cleanup-artifacts' }]
+          : []),
         { label: 'Volver al menú principal', value: 'back' },
       ];
 
@@ -71,6 +78,9 @@ export class ConfigurationSubmenu {
           break;
         case 'delete':
           await this.handleDelete();
+          break;
+        case 'cleanup-artifacts':
+          await this.handleCleanupArtifacts();
           break;
         case 'back':
           inSubmenu = false;
@@ -283,5 +293,46 @@ export class ConfigurationSubmenu {
 
     await this.configStore.remove(selectedId, { signal: this.signal });
     this.terminal.writeLine(`\n✓ Búsqueda "${sanitizeString(selectedId)}" eliminada exitosamente.`);
+  }
+
+  private async handleCleanupArtifacts(): Promise<void> {
+    if (!this.rawArtifactService) {
+      return;
+    }
+
+    this.terminal.writeLine('\n--- Limpieza de Artifacts Vencidos ---');
+    try {
+      const preview = await this.rawArtifactService.inspectExpired();
+      if (preview.count === 0) {
+        this.terminal.writeLine('No se encontraron artifacts vencidos para limpiar.');
+        return;
+      }
+
+      const sizeMb = (preview.totalSizeBytes / (1024 * 1024)).toFixed(2);
+      this.terminal.writeLine(
+        `Se encontraron ${preview.count} artifacts vencidos (${preview.totalSizeBytes} bytes / ~${sizeMb} MB).`,
+      );
+
+      const confirmed = await this.prompter.promptBoolean(
+        '¿Deseás proceder con la eliminación de los artifacts vencidos?',
+        false,
+      );
+
+      if (!confirmed) {
+        this.terminal.writeLine('\nOperación cancelada. No se eliminó ningún artifact.');
+        return;
+      }
+
+      const summary = await this.rawArtifactService.cleanupExpiredArtifacts();
+      this.terminal.writeLine('\nResumen de limpieza:');
+      this.terminal.writeLine(`  - Encontrados:   ${summary.found}`);
+      this.terminal.writeLine(`  - Eliminados:    ${summary.deleted}`);
+      this.terminal.writeLine(`  - Ya ausentes:   ${summary.alreadyMissing}`);
+      this.terminal.writeLine(`  - Fallidos:      ${summary.failed}`);
+    } catch (err) {
+      this.terminal.writeLine(
+        `\n[!] Error durante la limpieza de artifacts: ${sanitizeString(err instanceof Error ? err.message : String(err))}`,
+      );
+    }
   }
 }

@@ -138,7 +138,8 @@ export const toDomainSavedSearch = (
       maxEvaluationsPerRun: config.ai.maxEvaluationsPerRun,
     },
     retention: {
-      rawArtifacts: config.retention.rawArtifacts,
+      rawArtifacts:
+        config.retention.rawArtifacts === 'ALL' ? 'ALL_LIMITED' : config.retention.rawArtifacts,
       rawDataDays: config.retention.rawDataDays,
     },
     createdAt,

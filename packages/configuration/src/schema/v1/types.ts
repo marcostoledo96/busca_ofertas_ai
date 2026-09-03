@@ -12,7 +12,8 @@ export type LocationModeV1 = 'REGION' | 'RADIUS' | 'CUSTOM';
 
 export type PrecisionProfileV1 = 'STRICT' | 'BALANCED' | 'PERMISSIVE' | 'MIXED';
 
-export type RawArtifactsRetentionV1 = 'ERRORS_AND_REVIEW' | 'ALL' | 'NONE';
+export type RawArtifactsRetentionV1 =
+  'NONE' | 'ERRORS_ONLY' | 'ERRORS_AND_REVIEW' | 'ALL_LIMITED' | 'ALL';
 
 export type ReportIncludeRejectedV1 = 'COLLAPSED' | 'EXPANDED' | 'OMITTED';
 

@@ -108,6 +108,7 @@ export {
   type EvaluationPolicy,
   type AiPolicy,
   type RetentionPolicy,
+  type RawArtifactRetentionPolicy,
   type SavedSearch,
   type CreateSavedSearchParams,
   createSavedSearch,
@@ -176,6 +177,8 @@ export {
   type RunRepository,
 } from './ports/repositories.js';
 
+export { type RawArtifactRepository } from './ports/repositories.js';
+
 export {
   type ExecutionLockInfo,
   type ExecutionLockHandle,
@@ -183,6 +186,43 @@ export {
 } from './ports/execution-lock.js';
 
 export { type ExternalUrlOpenerPort } from './ports/external-url-opener.js';
+
+// Raw Artifacts (Domain, Ports, Errors, Service)
+export {
+  type RawArtifactReason,
+  type RawArtifact,
+  type CreateRawArtifactParams,
+  VALID_RAW_ARTIFACT_REASONS,
+  DEFAULT_RAW_ARTIFACT_RETENTION_DAYS,
+  validateRelativeArtifactPath,
+  createRawArtifact,
+  isArtifactRetainable,
+  calculateArtifactExpirationDate,
+} from './domain/artifact/raw-artifact.js';
+
+export { type ArtifactSanitizerPort } from './domain/artifact/sanitizer-port.js';
+
+export {
+  ArtifactStorageError,
+  ArtifactSizeLimitExceededError,
+  RunArtifactBudgetExceededError,
+  ArtifactPathTraversalError,
+  ArtifactSymlinkEscapeError,
+  ArtifactIdentityCollisionError,
+  ArtifactNotFoundError,
+  DiskFullError,
+  UnsupportedArtifactContentError,
+  type ArtifactFileSystemPort,
+} from './ports/artifact-storage-port.js';
+
+export {
+  type RawArtifactLimits,
+  DEFAULT_RAW_ARTIFACT_LIMITS,
+  type RawArtifactServiceOptions,
+  type StoreArtifactParams,
+  type CleanupSummary,
+  RawArtifactService,
+} from './domain/artifact/raw-artifact-service.js';
 
 // Review Use Cases, Queue Services & Rule Suggestions
 export * from './review/index.js';

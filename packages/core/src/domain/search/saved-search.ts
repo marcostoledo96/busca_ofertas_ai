@@ -61,8 +61,11 @@ export interface AiPolicy {
   readonly maxEvaluationsPerRun: number;
 }
 
+export type RawArtifactRetentionPolicy =
+  'NONE' | 'ERRORS_ONLY' | 'ERRORS_AND_REVIEW' | 'ALL_LIMITED';
+
 export interface RetentionPolicy {
-  readonly rawArtifacts: 'ERRORS_AND_REVIEW' | 'ALL' | 'NONE';
+  readonly rawArtifacts: RawArtifactRetentionPolicy;
   readonly rawDataDays: number;
 }
 
@@ -165,6 +168,27 @@ export const createSavedSearch = (params: CreateSavedSearchParams): SavedSearch 
   }
   if (!(params.updatedAt instanceof Date) || Number.isNaN(params.updatedAt.getTime())) {
     throw new InvariantViolationError('SavedSearch updatedAt must be a valid Date');
+  }
+
+  const validPolicies: RawArtifactRetentionPolicy[] = [
+    'NONE',
+    'ERRORS_ONLY',
+    'ERRORS_AND_REVIEW',
+    'ALL_LIMITED',
+  ];
+  if (!params.retention || !validPolicies.includes(params.retention.rawArtifacts)) {
+    throw new InvariantViolationError(
+      `SavedSearch retention.rawArtifacts must be one of: ${validPolicies.join(', ')}`,
+    );
+  }
+  if (
+    typeof params.retention.rawDataDays !== 'number' ||
+    !Number.isInteger(params.retention.rawDataDays) ||
+    params.retention.rawDataDays <= 0
+  ) {
+    throw new InvariantViolationError(
+      'SavedSearch retention.rawDataDays must be a positive integer',
+    );
   }
 
   const mappedSourceConfigs: SourceSearchConfig[] = params.sourceConfigs.map(

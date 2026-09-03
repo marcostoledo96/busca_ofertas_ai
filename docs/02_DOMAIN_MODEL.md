@@ -210,6 +210,28 @@ interface SourceHealth {
 }
 ```
 
+### RawArtifact
+
+```typescript
+type RawArtifactReason = "ERROR" | "REVIEW" | "DIAGNOSTIC";
+type RawArtifactRetentionPolicy = "NONE" | "ERRORS_ONLY" | "ERRORS_AND_REVIEW" | "ALL_LIMITED";
+
+interface RawArtifact {
+  readonly id: string;
+  readonly relativePath: string;
+  readonly kind: string;
+  readonly sizeBytes: number;
+  readonly fingerprint: string;
+  readonly reason: RawArtifactReason;
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+  readonly runId?: string | null;
+  readonly sourceRunId?: string | null;
+  readonly contentType: string;
+  readonly metadata?: Readonly<Record<string, unknown>> | null;
+}
+```
+
 ## Estados de ejecución
 
 ### Run
@@ -253,3 +275,6 @@ TIMEOUT
 9. La eliminación por retención no borra el historial normalizado necesario para auditoría.
 10. Una fuente puede implementar capacidades parciales y debe declararlas explícitamente.
 11. El feedback humano es estrictamente append-only e inmutable, sin alterar jamás observaciones ni evaluaciones previas.
+12. La persistencia física de `RawArtifact` no utiliza entradas externas ni parámetros del usuario para nombres de archivo; la ruta es generada y confinada al root de artifacts con permisos restrictivos (`0700` directorios, `0600` archivos) y validación estricta contra symlinks y path traversal.
+13. La coherencia relacional entre `sourceRunId` y `runId` se garantiza a nivel de base de datos mediante clave foránea compuesta `(source_run_id, run_id) REFERENCES source_runs(id, run_id)`.
+14. Ante cualquier detección de datos sensibles o secretos en el contenido crudo, el almacenamiento aborta fail-closed con 0 bytes escritos.

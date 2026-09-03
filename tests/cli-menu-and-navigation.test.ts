@@ -112,8 +112,8 @@ describe('CLI Menu and Navigation (BOAI-006)', () => {
     expect(await app5.run()).toBe(EXIT_CODES.SUCCESS);
     expect(term5.getRawOutput()).toContain('Revisión de Publicaciones Dudosas (REVIEW)');
 
-    // Option 7: Configuración -> 4. Volver -> 8. Salir
-    const term7 = new FakeTerminal(['7', '4', '8']);
+    // Option 7: Configuración -> 5. Volver -> 8. Salir
+    const term7 = new FakeTerminal(['7', '5', '8']);
     const app7 = createCliApplication({ terminal: term7, formatter });
     expect(await app7.run()).toBe(EXIT_CODES.SUCCESS);
     expect(term7.getRawOutput()).toContain('CONFIGURACIÓN DE BÚSQUEDAS');

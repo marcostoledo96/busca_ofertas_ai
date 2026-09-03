@@ -16,6 +16,7 @@ export interface AppPaths {
   readonly searchesDir: string;
   readonly dataRoot: string;
   readonly reportsDir: string;
+  readonly artifactsDir: string;
   readonly databasePath: string;
   readonly stateRoot: string;
   readonly sessionsDir: string;
@@ -71,6 +72,7 @@ export function resolveXdgAppPaths(options?: ResolveXdgAppPathsOptions): AppPath
     searchesDir: path.join(configRoot, 'searches'),
     dataRoot,
     reportsDir: path.join(dataRoot, 'reports'),
+    artifactsDir: path.join(dataRoot, 'artifacts'),
     databasePath: path.join(dataRoot, DEFAULT_DATABASE_FILENAME),
     stateRoot,
     sessionsDir: path.join(stateRoot, 'sessions'),

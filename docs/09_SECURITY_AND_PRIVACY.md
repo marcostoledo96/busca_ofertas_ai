@@ -90,13 +90,30 @@ No construir perfiles de vendedores ni conservar datos personales no necesarios.
 
 ## Raw artifacts
 
-- desactivables por fuente;
-- predeterminado: solo errores y `REVIEW`;
-- retención predeterminada: 30 días;
-- sanitización antes de escribir;
-- inventario en SQLite;
-- cleanup explícito y testeado;
-- jamás incluir secretos de request/response.
+- **Políticas canónicas**: `NONE`, `ERRORS_ONLY`, `ERRORS_AND_REVIEW` (default) y `ALL_LIMITED`. Configuraciones existentes con legacy `ALL` se canonicalizan a `ALL_LIMITED` en la proyección de dominio sin perder compatibilidad.
+- **Retención y vencimiento**: Configuración predeterminada de 30 días (`rawDataDays: 30`). El cálculo del vencimiento se realiza al momento de la creación (`expiresAt = createdAt + rawDataDays * 86400000`) y se almacena en SQLite en formato canónico ISO UTC.
+- **Sanitización estricta y Fail-Closed**: Todo contenido de texto o JSON pasa por `ArtifactSanitizerPort` antes de ser almacenado. Patrones sensibles (tokens Bearer, claves de API, cookies, contraseñas) se redactan determinísticamente a `[REDACTED]`. Si `validateNoSensitiveData()` detecta secretos remanentes, la operación aborta fail-closed inmediatamente (0 bytes escritos en disco y 0 filas insertadas en la base).
+- **Tipos de contenido soportados**: Exclusivamente texto codificado en UTF-8 (`text/plain`, `text/html`, etc.) y estructuras serializables JSON (`application/json`). Se rechazan tipos no soportados o blobs binarios arbitrarios.
+- **Límites de tamaño y presupuesto**:
+  - Límite por artifact: 5 MB (`maxArtifactSizeBytes`).
+  - Presupuesto por run: 50 MB o 100 artifacts (`maxRunBudgetBytes` y `maxArtifactsPerRun`). Superar estos límites emite errores tipados (`ArtifactSizeLimitExceededError` o `RunArtifactBudgetExceededError`).
+- **Ubicación y permisos restrictivos**:
+  - Directorio base: `$XDG_DATA_HOME/busca-ofertas-ai/artifacts/`.
+  - Estructura: subdirectorios mensuales `YYYY-MM/` con permisos `0700` y archivos `art_<uuid>.<ext>` con permisos `0600`.
+  - Los nombres de archivo se generan internamente mediante UUIDs criptográficos. Jamás se utiliza input externo, títulos ni URLs como nombres de archivo.
+- **Defensa contra Path Traversal y Symlinks**:
+  - El adapter filesystem valida estrictamente la ruta relativa (rechaza paths absolutos `/`, segmentos `..`, separadores `\`, caracteres de control y bytes nulos).
+  - Cada componente del path se inspecciona mediante `lstat` para prohibir escapes a través de symlinks tanto en directorios intermedios como en el archivo destino.
+- **Escritura atómica e inmutabilidad**:
+  - Los archivos se escriben primero en un directorio temporal `.tmp/` bajo el root de artifacts con flag exclusivo `wx`, permisos `0600`, sincronización a disco vía `fsync()` y renombrado atómico (`rename`).
+  - Detección de colisión de identidad: Si el archivo destino ya existe, se aborta con `ArtifactIdentityCollisionError` sin sobrescribir el archivo preexistente.
+- **Coherencia relacional en SQLite**:
+  - Tabla `raw_artifacts` creada mediante la migración 005 con clave foránea compuesta `(source_run_id, run_id) REFERENCES source_runs(id, run_id) ON DELETE SET NULL` y clave foránea `run_id REFERENCES runs(id) ON DELETE SET NULL`.
+  - Impide cross-association accidental entre `source_run_id` y `run_id` dispares.
+- **Limpieza (Cleanup)**:
+  - **Limpieza manual**: Accesible desde el submenú de Configuración ("Limpiar artifacts vencidos"). Muestra un conteo y tamaño estimado de artifacts expirados, solicita confirmación explícita (cancelar no borra nada) y ejecuta la eliminación reportando un resumen sanitizado (`encontrados`, `eliminados`, `ya ausentes`, `fallidos`).
+  - **Limpieza al inicio**: Configurable mediante `cleanupOnStartup: boolean` (deshabilitada por defecto `false`). Cuando se activa, depura artifacts vencidos consultando directamente el campo `expiresAt` de SQLite.
+  - **Orden de limpieza y convergencia**: Primero se valida y elimina el archivo físico en disco, y luego se borra el registro en SQLite. Si el archivo físico ya no existía en disco, el registro en SQLite se depura convergiendo el estado (`alreadyMissing++`). Si la eliminación del archivo falla, el registro en SQLite se preserva (`failed++`).
 
 ## HTML local
 
