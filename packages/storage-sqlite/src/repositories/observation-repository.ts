@@ -98,16 +98,16 @@ function isRecord(val: unknown): val is Record<string, unknown> {
   return typeof val === 'object' && val !== null && !Array.isArray(val);
 }
 
-const ISO_CANONICAL_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+const EXACT_CANONICAL_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 function parseIsoDate(isoString: string, fieldName: string, entityId: string): Date {
-  if (typeof isoString !== 'string' || !ISO_CANONICAL_UTC_REGEX.test(isoString)) {
+  if (typeof isoString !== 'string' || !EXACT_CANONICAL_UTC_REGEX.test(isoString)) {
     throw new StorageCorruptionError(
-      `Corrupted persisted entity '${entityId}': '${fieldName}' must be a canonical ISO UTC date string ending with 'Z', got '${String(isoString)}'`,
+      `Corrupted persisted entity '${entityId}': '${fieldName}' must be a canonical ISO UTC date string in 'YYYY-MM-DDTHH:mm:ss.sssZ' format, got '${String(isoString)}'`,
     );
   }
   const date = new Date(isoString);
-  if (Number.isNaN(date.getTime())) {
+  if (Number.isNaN(date.getTime()) || date.toISOString() !== isoString) {
     throw new StorageCorruptionError(
       `Corrupted persisted entity '${entityId}': '${fieldName}' is not a valid ISO date ('${isoString}')`,
     );
@@ -901,7 +901,32 @@ export class SqliteObservationRepository implements ObservationRepository {
           }
         }
 
-        // 3. Observation deduplication check within same run
+        // 3. Query latest Observation for effectiveListing.id and validate chronological ordering
+        const findLatestObsStmt = tx.prepare<ObservationRow, [string]>(
+          `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
+           FROM observations
+           WHERE listing_id = ?
+           ORDER BY observed_at DESC, id DESC
+           LIMIT 1`,
+        );
+        const latestObsRow = findLatestObsStmt.get(effectiveListing.id);
+
+        let latestObs: Observation | null = null;
+        if (latestObsRow) {
+          latestObs = rehydrateObservation(latestObsRow);
+
+          // Out-of-order defense: reject fail-closed if incoming observation is older than latest persisted observation
+          if (incomingObs.observedAt.getTime() < latestObs.observedAt.getTime()) {
+            throw new RecordObservationCoherenceError({
+              kind: 'OUT_OF_ORDER_OBSERVED_AT',
+              listingId: effectiveListing.id,
+              incomingObservedAt: incomingObs.observedAt.toISOString(),
+              latestPersistedObservedAt: latestObs.observedAt.toISOString(),
+            });
+          }
+        }
+
+        // 4. Observation deduplication check within same run
         const findExistingInRunStmt = tx.prepare<ObservationRow, [string, string, string]>(
           `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
            FROM observations
@@ -938,35 +963,11 @@ export class SqliteObservationRepository implements ObservationRepository {
           });
         }
 
-        // 4. Query previous latest Observation for effectiveListing.id
-        const findLatestObsStmt = tx.prepare<ObservationRow, [string]>(
-          `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
-           FROM observations
-           WHERE listing_id = ?
-           ORDER BY observed_at DESC, id DESC
-           LIMIT 1`,
-        );
-        const latestObsRow = findLatestObsStmt.get(effectiveListing.id);
-
         // 5. Determine novelty / change classification
         let changeKind: ObservationChangeKind;
-        let latestObs: Observation | null = null;
-
-        if (!latestObsRow) {
+        if (!latestObs) {
           changeKind = 'NEW';
         } else {
-          latestObs = rehydrateObservation(latestObsRow);
-
-          // Out-of-order defense: reject if incoming observation is older than latest persisted observation
-          if (incomingObs.observedAt.getTime() < latestObs.observedAt.getTime()) {
-            throw new RecordObservationCoherenceError({
-              kind: 'OUT_OF_ORDER_OBSERVED_AT',
-              listingId: effectiveListing.id,
-              incomingObservedAt: incomingObs.observedAt.toISOString(),
-              latestPersistedObservedAt: latestObs.observedAt.toISOString(),
-            });
-          }
-
           // Priority 1: REAPPEARED
           const wasGone = latestObs.availability === 'SOLD' || latestObs.availability === 'REMOVED';
           const isNowBack =

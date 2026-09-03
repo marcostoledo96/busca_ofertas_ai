@@ -520,6 +520,92 @@ describe('SqliteObservationRepository (BOAI-012)', () => {
     });
   });
 
+  it('enforces exact canonical UTC format (YYYY-MM-DDTHH:mm:ss.sssZ) with roundtrip validation and fixed 24-char width for lexicographic order (Finding A)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const { sourceRun } = await setupPrerequisites(db);
+      const obsRepo = new SqliteObservationRepository(db);
+      const listingRepo = new SqliteListingRepository(db);
+
+      const listing = createListing({
+        id: 'listing-exact-utc',
+        sourceId: 'synthetic',
+        externalId: 'syn-exact-utc',
+        canonicalUrl: 'https://synthetic.invalid/listings/syn-exact-utc',
+        firstSeenAt: new Date('2026-08-30T10:00:00.000Z'),
+        lastSeenAt: new Date('2026-08-30T10:00:00.000Z'),
+      });
+      await listingRepo.save(listing);
+
+      const validPrice = {
+        rawText: '$100',
+        amount: 100,
+        currency: 'ARS',
+        resolution: 'EXPLICIT',
+        confidence: 0.9,
+        evidence: ['$100'],
+        kind: 'TOTAL',
+      };
+      const validLocation = {
+        rawText: 'Palermo',
+        resolution: 'EXPLICIT',
+        confidence: 0.9,
+        evidence: ['Palermo'],
+      };
+
+      // 1. Mandatory test: 2026-08-30T10:00:00Z -> StorageCorruptionError
+      db.exec(`
+        INSERT INTO observations (id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint)
+        VALUES ('obs-no-millis', '${listing.id}', '${sourceRun.id}', '2026-08-30T10:00:00Z', 'Title', NULL, '${JSON.stringify(validPrice)}', '${JSON.stringify(validLocation)}', NULL, 'AVAILABLE', '[]', NULL, 'fp-no-millis');
+      `);
+      await expect(obsRepo.getById('obs-no-millis')).rejects.toThrow(StorageCorruptionError);
+
+      // 2. Mandatory test: 2026-08-30T10:00:00.1Z -> StorageCorruptionError
+      db.exec(`
+        INSERT INTO observations (id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint)
+        VALUES ('obs-1-millis', '${listing.id}', '${sourceRun.id}', '2026-08-30T10:00:00.1Z', 'Title', NULL, '${JSON.stringify(validPrice)}', '${JSON.stringify(validLocation)}', NULL, 'AVAILABLE', '[]', NULL, 'fp-1-millis');
+      `);
+      await expect(obsRepo.getById('obs-1-millis')).rejects.toThrow(StorageCorruptionError);
+
+      // 3. Mandatory test: 2026-08-30T10:00:00.1234Z -> StorageCorruptionError
+      db.exec(`
+        INSERT INTO observations (id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint)
+        VALUES ('obs-4-millis', '${listing.id}', '${sourceRun.id}', '2026-08-30T10:00:00.1234Z', 'Title', NULL, '${JSON.stringify(validPrice)}', '${JSON.stringify(validLocation)}', NULL, 'AVAILABLE', '[]', NULL, 'fp-4-millis');
+      `);
+      await expect(obsRepo.getById('obs-4-millis')).rejects.toThrow(StorageCorruptionError);
+
+      // 4. Mandatory test: 2026-08-30T10:00:00.000Z -> accepted
+      db.exec(`
+        INSERT INTO observations (id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint)
+        VALUES ('obs-exact-accepted', '${listing.id}', '${sourceRun.id}', '2026-08-30T10:00:00.000Z', 'Title', NULL, '${JSON.stringify(validPrice)}', '${JSON.stringify(validLocation)}', NULL, 'AVAILABLE', '[]', NULL, 'fp-exact-accepted');
+      `);
+      const acceptedObs = await obsRepo.getById('obs-exact-accepted');
+      expect(acceptedObs).not.toBeNull();
+      expect(acceptedObs!.observedAt.toISOString()).toBe('2026-08-30T10:00:00.000Z');
+
+      // 5. Test fixed-width 24-character guarantee across multiple observations enabling lexicographic == chronological order
+      const times = [
+        '2026-08-30T09:00:00.000Z',
+        '2026-08-30T09:30:00.500Z',
+        '2026-08-30T10:00:00.000Z',
+        '2026-08-30T10:00:00.050Z',
+        '2026-08-30T10:00:00.500Z',
+      ];
+      for (const t of times) {
+        expect(t.length).toBe(24);
+        expect(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(t)).toBe(true);
+        expect(new Date(t).toISOString()).toBe(t);
+      }
+      // Lexicographic compare === chronological compare
+      for (let i = 0; i < times.length - 1; i++) {
+        const a = times[i]!;
+        const b = times[i + 1]!;
+        expect(a < b).toBe(true);
+        expect(new Date(a).getTime() < new Date(b).getTime()).toBe(true);
+      }
+    });
+  });
+
   it('enforces complete immutability: same id/fp/price amount but different resolution/confidence/evidence/converted fields reject with ObservationIdentityCollisionError (Finding 2)', async () => {
     const hasher = createNodeCryptoHasher();
 

@@ -405,13 +405,13 @@ describe('SQLite Concurrency & Multi-Threaded Deduplication (BOAI-012 / Finding 
           externalId: 'syn-item-scenario-2',
           canonicalUrl: 'https://synthetic.invalid/listings/syn-item-scenario-2',
           firstSeenAt: '2026-08-30T10:00:00.000Z',
-          lastSeenAt: '2026-08-30T10:05:00.000Z',
+          lastSeenAt: '2026-08-30T10:00:00.000Z',
         },
         observation: {
           id: 'obs-scenario-2-b',
           listingId: 'listing-scenario-2',
           sourceRunId: 'source-run-conc-shared',
-          observedAt: '2026-08-30T10:05:00.000Z',
+          observedAt: '2026-08-30T10:00:00.000Z',
           title: 'Nintendo Switch Concurrent Dedup',
           price: {
             rawText: '$250.000',

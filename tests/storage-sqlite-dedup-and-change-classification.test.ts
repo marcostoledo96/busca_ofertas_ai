@@ -716,4 +716,80 @@ describe('Deduplication & Change Classification (BOAI-012)', () => {
       expect(history[0]!.observedAt.toISOString()).toBe('2026-08-30T10:30:00.000Z');
     });
   });
+
+  it('rejects out-of-order incoming observation even when exact identical intra-run dedup match is present (Finding B regression)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const { sourceRun } = await setupPrerequisites(db);
+      const obsRepo = new SqliteObservationRepository(db);
+      const listingRepo = new SqliteListingRepository(db);
+
+      const listing = createListing({
+        id: 'listing-dedup-chrono-test',
+        sourceId: 'synthetic',
+        externalId: 'syn-dedup-chrono',
+        canonicalUrl: 'https://synthetic.invalid/listings/syn-dedup-chrono',
+        firstSeenAt: new Date('2026-08-30T10:30:00.000Z'),
+        lastSeenAt: new Date('2026-08-30T10:30:00.000Z'),
+      });
+
+      const fp = computeObservationFingerprint({ title: 'Identical Item', price: null }, hasher);
+
+      // 1. Persist initial observation at 10:30:00.000Z
+      const obsInitial = createObservation({
+        id: 'obs-initial-1030',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:30:00.000Z'),
+        title: 'Identical Item',
+        rawFingerprint: fp,
+      });
+      const res1 = await obsRepo.recordObservation({ listing, observation: obsInitial });
+      expect(res1.isNewObservation).toBe(true);
+      expect(res1.changeKind).toBe('NEW');
+
+      // 2. Incoming identical observation with older timestamp 09:30:00.000Z
+      // Same sourceRun, same fingerprint, same canonical payload, different ephemeral Observation.id
+      const obsOlderIdentical = createObservation({
+        id: 'obs-older-identical-0930',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T09:30:00.000Z'), // older than latest persisted 10:30!
+        title: 'Identical Item',
+        rawFingerprint: fp,
+      });
+
+      // Must reject fail-closed and must NOT return UNCHANGED / isNewObservation: false
+      await expect(
+        obsRepo.recordObservation({ listing, observation: obsOlderIdentical }),
+      ).rejects.toThrow(RecordObservationCoherenceError);
+
+      try {
+        await obsRepo.recordObservation({ listing, observation: obsOlderIdentical });
+      } catch (err) {
+        expect(err).toBeInstanceOf(RecordObservationCoherenceError);
+        if (err instanceof RecordObservationCoherenceError) {
+          expect(err.code).toBe('RECORD_OBSERVATION_COHERENCE_ERROR');
+          expect(err.details.kind).toBe('OUT_OF_ORDER_OBSERVED_AT');
+          expect(err.details.incomingObservedAt).toBe('2026-08-30T09:30:00.000Z');
+          expect(err.details.latestPersistedObservedAt).toBe('2026-08-30T10:30:00.000Z');
+          expect(err.details.listingId).toBe(listing.id);
+        }
+      }
+
+      // 3. Verify zero mutation and complete rollback:
+      // observations count unchanged
+      const history = await obsRepo.listByListingId(listing.id);
+      expect(history).toHaveLength(1);
+      expect(history[0]!.id).toBe('obs-initial-1030');
+      expect(history[0]!.observedAt.toISOString()).toBe('2026-08-30T10:30:00.000Z');
+
+      // Listing.firstSeenAt, Listing.lastSeenAt, canonicalUrl unchanged
+      const persistedListing = await listingRepo.getById(listing.id);
+      expect(persistedListing).not.toBeNull();
+      expect(persistedListing!.firstSeenAt.toISOString()).toBe('2026-08-30T10:30:00.000Z');
+      expect(persistedListing!.lastSeenAt.toISOString()).toBe('2026-08-30T10:30:00.000Z');
+      expect(persistedListing!.canonicalUrl).toBe(listing.canonicalUrl);
+    });
+  });
 });
