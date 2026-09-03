@@ -52,7 +52,13 @@ interface Listing {
 }
 ```
 
-La identidad estable es `(sourceId, externalId)`. La URL canónica actúa como respaldo y diagnóstico, no como única identidad cuando existe un ID externo confiable.
+#### Identidad canónica y fallback seguro
+
+1. **Identidad primaria**: el par natural `(sourceId, externalId)` es la clave única y estable de una `Listing`.
+2. **Identidad de fallback**: cuando una fuente externa no expone un identificador nativo estable, se deriva un `externalId` sintético con el namespace reservado `urn:boai:fallback:url:<sha256(canonicalUrl)>`.
+3. **Precondición de hash**: el hash SHA-256 se calcula estrictamente sobre la `canonicalUrl` normalizada (sin parámetros de tracking ni fragmentos y con query params ordenados), nunca sobre la URL cruda.
+4. **Aislamiento por fuente**: la identidad compuesta `(sourceId, externalId)` garantiza que el mismo fallback hash en fuentes distintas no se mezcle.
+5. **Detección de colisiones (fail-closed)**: si una publicación entrante con fallback externalId colisiona con una `Listing` existente que posee una `canonicalUrl` distinta, el sistema rechaza la mutación emitiendo `ListingIdentityCollisionError` y preservando el registro original.
 
 ### Observation
 
@@ -74,7 +80,29 @@ interface Observation {
 }
 ```
 
-No se sobrescribe el historial: cada cambio relevante produce una nueva Observation. Se puede deduplicar una observación idéntica dentro del mismo run.
+#### Fingerprint determinístico de Observation
+
+- **Representación**: hash SHA-256 sobre la serialización canónica JSON de los datos semánticos observables.
+- **Campos incluidos**: `title` (normalizado en espacios), `description`, `price` (`amount`, `currency`, `kind`), `location` (`rawText`, `region`, `city`, `neighborhood`, `coordinates` redondeadas a 5 decimales), `condition`, `availability`, `imageUrls` (deduplicadas y ordenadas lexicográficamente) y `publishedAt`.
+- **Campos excluidos**: metadatos de infraestructura y variables por ejecución (`id`, `listingId`, `sourceRunId`, `observedAt`).
+- **Invariante de contenido**: un fingerprint idéntico actúa como acelerador de equivalencia pero **no autoriza** a descartar contenido contradictorio. Si dos observaciones bajo la misma `(listingId, sourceRunId, rawFingerprint)` poseen payloads semánticos dispares, se emite un error tipado de colisión (`ObservationFingerprintCollisionError`) con mutación cero.
+
+#### Inmutabilidad e historial de observaciones
+
+- Toda `Observation` persistida es estrictamente **inmutable**. Guardar un `Observation.id` existente solo es una operación idempotente si el contenido completo persistido es idéntico. Cualquier divergencia emite `ObservationIdentityCollisionError`.
+- **Deduplicación intra-run**: si en el mismo `sourceRunId` se observa la misma `Listing` con idéntico payload y fingerprint, se actualiza `lastSeenAt` de la `Listing` y no se inserta una fila redundante (`isNewObservation = false`).
+- **Monotonicidad temporal de Listing**: `Listing.firstSeenAt` es monótonamente la fecha más temprana observada (nunca avanza); `Listing.lastSeenAt` es monótonamente la fecha más reciente observada (nunca retrocede).
+
+#### Clasificación de novedad (`changeKind`)
+
+La clasificación de cambios durante `recordObservation` evalúa la transición respecto de la última observación cronológica de la publicación:
+
+1. `NEW`: primera observación registrada para la publicación en el sistema (`isNewObservation = true`).
+2. `REAPPEARED`: la publicación estaba previamente en estado `SOLD` o `REMOVED` y ahora vuelve a observarse en estado `AVAILABLE` o `PENDING` (`isNewObservation = true`).
+3. `PRICE_CHANGED`: el precio resolvió un importe, moneda o tipo diferente respecto de la última observación (`isNewObservation = true`).
+4. `UNCHANGED`: no ocurrió un cambio de precio ni una reaparición ni es un nuevo ítem.
+   - **Semántica crítica**: `UNCHANGED != no new Observation`. Si cambian atributos no relacionados al precio (título, descripción, ubicación, condición), se persiste una nueva `Observation` en el historial (`isNewObservation = true`) mientras que `changeKind` permanece `UNCHANGED`. Solo cuando el fingerprint semántico es idéntico dentro del mismo run se concluye `isNewObservation = false`.
+5. **Política de reaparición**: la transición a `REAPPEARED` requiere evidencia positiva de disponibilidad (`AVAILABLE`/`PENDING`) posterior a un estado terminal explícito (`SOLD`/`REMOVED`). La mera ausencia en los resultados de una búsqueda **no** se infiere como eliminación ni autoriza a declarar reaparición.
 
 ### Opportunity
 

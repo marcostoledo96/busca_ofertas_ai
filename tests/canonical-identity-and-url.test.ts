@@ -25,11 +25,27 @@ describe('Canonical Identity & URL Canonicalization (BOAI-012)', () => {
       expect(normalizedHttps).toBe('https://shop.example.com/products');
     });
 
-    it('strips common marketing and tracking parameters', () => {
+    it('strips common marketing and tracking parameters while preserving semantic query parameters', () => {
       const urlWithTracking =
-        'https://example.com/items/123?utm_source=facebook&utm_medium=cpc&utm_campaign=summer&fbclid=IwAR123&gclid=xyz&ref=search&id=product-99';
+        'https://example.com/items/123?utm_source=facebook&utm_medium=cpc&utm_campaign=summer&fbclid=IwAR123&gclid=xyz&id=product-99';
       const normalized = normalizeGenericUrl(urlWithTracking);
       expect(normalized).toBe('https://example.com/items/123?id=product-99');
+    });
+
+    it('conservatively preserves ambiguous query parameters (such as ref) for unregistered sources', () => {
+      const urlA = 'https://unregistered-source.example/items/42?ref=seller-alpha';
+      const urlB = 'https://unregistered-source.example/items/42?ref=seller-beta';
+
+      const canonicalA = normalizeGenericUrl(urlA);
+      const canonicalB = normalizeGenericUrl(urlB);
+
+      expect(canonicalA).toBe('https://unregistered-source.example/items/42?ref=seller-alpha');
+      expect(canonicalB).toBe('https://unregistered-source.example/items/42?ref=seller-beta');
+      expect(canonicalA).not.toBe(canonicalB);
+
+      const fallbackIdA = createFallbackExternalId(canonicalA, hasher);
+      const fallbackIdB = createFallbackExternalId(canonicalB, hasher);
+      expect(fallbackIdA).not.toBe(fallbackIdB);
     });
 
     it('sorts remaining query parameters deterministically', () => {

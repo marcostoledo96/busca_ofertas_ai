@@ -6,6 +6,7 @@ import {
   createRun,
   createSourceRun,
   createResolvedPrice,
+  computeObservationFingerprint,
 } from '@busca-ofertas-ai/core';
 import {
   openSqliteDatabase,
@@ -14,7 +15,9 @@ import {
   SqliteSavedSearchRepository,
   SqliteRunRepository,
   ObservationIdentityCollisionError,
+  RecordObservationCoherenceError,
   StorageCorruptionError,
+  createNodeCryptoHasher,
 } from '@busca-ofertas-ai/storage-sqlite';
 import {
   createTempDatabaseContext,
@@ -351,6 +354,386 @@ describe('SqliteObservationRepository (BOAI-012)', () => {
       `);
 
       await expect(repo.getById('obs-corrupt-price')).rejects.toThrow(StorageCorruptionError);
+    });
+  });
+
+  it('fails closed on direct row manipulation with corrupted price or location fields (Finding 1)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const { listing, sourceRun } = await setupPrerequisites(db);
+      const repo = new SqliteObservationRepository(db);
+
+      const validPrice = {
+        rawText: '$100',
+        amount: 100,
+        currency: 'ARS',
+        resolution: 'EXPLICIT',
+        confidence: 0.9,
+        evidence: ['$100'],
+        kind: 'TOTAL',
+      };
+
+      const validLocation = {
+        rawText: 'Palermo',
+        region: 'CABA',
+        city: 'Buenos Aires',
+        neighborhood: 'Palermo',
+        coordinates: { latitude: -34.58, longitude: -58.43 },
+      };
+
+      const corruptionScenarios = [
+        {
+          id: 'corrupt-price-amount-string',
+          price: { ...validPrice, amount: 'CORRUPT' },
+          location: validLocation,
+        },
+        {
+          id: 'corrupt-price-amount-missing',
+          price: {
+            rawText: '$100',
+            currency: 'ARS',
+            resolution: 'EXPLICIT',
+            confidence: 0.9,
+            evidence: ['$100'],
+            kind: 'TOTAL',
+          },
+          location: validLocation,
+        },
+        {
+          id: 'corrupt-price-kind-broken',
+          price: { ...validPrice, kind: 'BROKEN' },
+          location: validLocation,
+        },
+        {
+          id: 'corrupt-price-kind-missing',
+          price: {
+            rawText: '$100',
+            amount: 100,
+            currency: 'ARS',
+            resolution: 'EXPLICIT',
+            confidence: 0.9,
+            evidence: ['$100'],
+          },
+          location: validLocation,
+        },
+        {
+          id: 'corrupt-price-confidence-out-of-range',
+          price: { ...validPrice, confidence: 2 },
+          location: validLocation,
+        },
+        {
+          id: 'corrupt-location-region-number',
+          price: validPrice,
+          location: { ...validLocation, region: 123 },
+        },
+        {
+          id: 'corrupt-location-city-object',
+          price: validPrice,
+          location: { ...validLocation, city: {} },
+        },
+        {
+          id: 'corrupt-location-neighborhood-bool',
+          price: validPrice,
+          location: { ...validLocation, neighborhood: false },
+        },
+        {
+          id: 'corrupt-coordinates-lat-invalid',
+          price: validPrice,
+          location: { ...validLocation, coordinates: { latitude: 999, longitude: -58.43 } },
+        },
+      ];
+
+      for (const scenario of corruptionScenarios) {
+        db.exec(`
+          INSERT INTO observations (id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint)
+          VALUES ('${scenario.id}', '${listing.id}', '${sourceRun.id}', '2026-08-30T10:00:00.000Z', 'Title', NULL, '${JSON.stringify(scenario.price)}', '${JSON.stringify(scenario.location)}', NULL, 'AVAILABLE', '[]', NULL, 'fp-${scenario.id}');
+        `);
+
+        await expect(repo.getById(scenario.id)).rejects.toThrow(StorageCorruptionError);
+      }
+
+      // listByListingId must also fail closed when a corrupted observation row is present
+      await expect(repo.listByListingId(listing.id)).rejects.toThrow(StorageCorruptionError);
+    });
+  });
+
+  it('enforces complete immutability: same id/fp/price amount but different resolution/confidence/evidence/converted fields reject with ObservationIdentityCollisionError (Finding 2)', async () => {
+    const hasher = createNodeCryptoHasher();
+
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const { listing, sourceRun } = await setupPrerequisites(db);
+      const repo = new SqliteObservationRepository(db);
+
+      const basePrice = createResolvedPrice({
+        rawText: '$250.000',
+        amount: 250000,
+        currency: 'ARS',
+        resolution: 'EXPLICIT',
+        confidence: 0.9,
+        evidence: ['$250.000'],
+        kind: 'TOTAL',
+        converted: {
+          amount: 250000,
+          currency: 'ARS',
+          exchangeRate: 1.0,
+          exchangeRateOrigin: 'MANUAL',
+          convertedAt: new Date('2026-08-30T10:00:00Z'),
+        },
+      });
+
+      const fp = computeObservationFingerprint(
+        { title: 'Nintendo Switch Immutability Test', price: basePrice },
+        hasher,
+      );
+
+      const canonicalObs = createObservation({
+        id: 'obs-immutability-full',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:00:00Z'),
+        title: 'Nintendo Switch Immutability Test',
+        price: basePrice,
+        rawFingerprint: fp,
+      });
+
+      // 1. Initial save
+      await repo.save(canonicalObs);
+
+      // 2. Exactly identical save must continue to be idempotent
+      await expect(repo.save(canonicalObs)).resolves.toBeUndefined();
+
+      // 3. Same id + same rawFingerprint + same amount/currency/kind, but:
+      // a) different resolution (EXPLICIT vs SOURCE_METADATA)
+      const diffResolutionObs = createObservation({
+        id: 'obs-immutability-full',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:00:00Z'),
+        title: 'Nintendo Switch Immutability Test',
+        price: createResolvedPrice({
+          rawText: '$250.000',
+          amount: 250000,
+          currency: 'ARS',
+          resolution: 'SOURCE_METADATA', // differing
+          confidence: 0.9,
+          evidence: ['$250.000'],
+          kind: 'TOTAL',
+          ...(basePrice.converted ? { converted: basePrice.converted } : {}),
+        }),
+        rawFingerprint: fp,
+      });
+      await expect(repo.save(diffResolutionObs)).rejects.toThrow(ObservationIdentityCollisionError);
+
+      // b) different confidence (0.9 vs 0.8)
+      const diffConfidenceObs = createObservation({
+        id: 'obs-immutability-full',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:00:00Z'),
+        title: 'Nintendo Switch Immutability Test',
+        price: createResolvedPrice({
+          rawText: '$250.000',
+          amount: 250000,
+          currency: 'ARS',
+          resolution: 'EXPLICIT',
+          confidence: 0.8, // differing
+          evidence: ['$250.000'],
+          kind: 'TOTAL',
+          ...(basePrice.converted ? { converted: basePrice.converted } : {}),
+        }),
+        rawFingerprint: fp,
+      });
+      await expect(repo.save(diffConfidenceObs)).rejects.toThrow(ObservationIdentityCollisionError);
+
+      // c) different evidence (['$250.000'] vs ['$250.000', 'promo tag'])
+      const diffEvidenceObs = createObservation({
+        id: 'obs-immutability-full',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:00:00Z'),
+        title: 'Nintendo Switch Immutability Test',
+        price: createResolvedPrice({
+          rawText: '$250.000',
+          amount: 250000,
+          currency: 'ARS',
+          resolution: 'EXPLICIT',
+          confidence: 0.9,
+          evidence: ['$250.000', 'promo tag'], // differing
+          kind: 'TOTAL',
+          ...(basePrice.converted ? { converted: basePrice.converted } : {}),
+        }),
+        rawFingerprint: fp,
+      });
+      await expect(repo.save(diffEvidenceObs)).rejects.toThrow(ObservationIdentityCollisionError);
+
+      // d) different converted.exchangeRate (1.0 vs 1.15)
+      const diffRateObs = createObservation({
+        id: 'obs-immutability-full',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:00:00Z'),
+        title: 'Nintendo Switch Immutability Test',
+        price: createResolvedPrice({
+          rawText: '$250.000',
+          amount: 250000,
+          currency: 'ARS',
+          resolution: 'EXPLICIT',
+          confidence: 0.9,
+          evidence: ['$250.000'],
+          kind: 'TOTAL',
+          converted: {
+            amount: 250000,
+            currency: 'ARS',
+            exchangeRate: 1.15, // differing
+            exchangeRateOrigin: 'MANUAL',
+            convertedAt: new Date('2026-08-30T10:00:00Z'),
+          },
+        }),
+        rawFingerprint: fp,
+      });
+      await expect(repo.save(diffRateObs)).rejects.toThrow(ObservationIdentityCollisionError);
+
+      // e) different converted.convertedAt
+      const diffConvertedAtObs = createObservation({
+        id: 'obs-immutability-full',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:00:00Z'),
+        title: 'Nintendo Switch Immutability Test',
+        price: createResolvedPrice({
+          rawText: '$250.000',
+          amount: 250000,
+          currency: 'ARS',
+          resolution: 'EXPLICIT',
+          confidence: 0.9,
+          evidence: ['$250.000'],
+          kind: 'TOTAL',
+          converted: {
+            amount: 250000,
+            currency: 'ARS',
+            exchangeRate: 1.0,
+            exchangeRateOrigin: 'MANUAL',
+            convertedAt: new Date('2026-08-30T14:30:00Z'), // differing
+          },
+        }),
+        rawFingerprint: fp,
+      });
+      await expect(repo.save(diffConvertedAtObs)).rejects.toThrow(
+        ObservationIdentityCollisionError,
+      );
+
+      // Verify original row in DB remains 100% intact
+      const preserved = await repo.getById('obs-immutability-full');
+      expect(preserved!.price?.confidence).toBe(0.9);
+      expect(preserved!.price?.resolution).toBe('EXPLICIT');
+      expect(preserved!.price?.evidence).toEqual(['$250.000']);
+      expect(preserved!.price?.converted?.exchangeRate).toBe(1.0);
+      expect(preserved!.price?.converted?.convertedAt.toISOString()).toBe(
+        '2026-08-30T10:00:00.000Z',
+      );
+
+      // 4. recordObservation attempting to insert existing ID with differing content also throws ObservationIdentityCollisionError
+      await expect(
+        repo.recordObservation({
+          listing,
+          observation: diffResolutionObs,
+        }),
+      ).rejects.toThrow(ObservationIdentityCollisionError);
+    });
+  });
+
+  it('enforces input coherence in recordObservation: listingId mismatch and sourceId mismatch reject fail-closed (Coherence)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const { run } = await setupPrerequisites(db);
+      const runRepo = new SqliteRunRepository(db);
+      const obsRepo = new SqliteObservationRepository(db);
+
+      // Create a source run for source 'other-source'
+      const otherSourceRun = createSourceRun({
+        id: 'source-run-other-source',
+        runId: run.id,
+        sourceId: 'other-source',
+        startedAt: new Date('2026-08-30T10:00:00Z'),
+      });
+      await runRepo.saveSourceRun(otherSourceRun, { adapterVersion: '0.1.0' });
+
+      const listing = createListing({
+        id: 'listing-coherence-1',
+        sourceId: 'synthetic',
+        externalId: 'syn-coherence',
+        canonicalUrl: 'https://synthetic.invalid/listings/syn-coherence',
+        firstSeenAt: new Date('2026-08-30T10:00:00Z'),
+        lastSeenAt: new Date('2026-08-30T10:00:00Z'),
+      });
+
+      // 1. Incoming listing.id !== observation.listingId
+      const mismatchedIdObs = createObservation({
+        id: 'obs-mismatched-id',
+        listingId: 'different-provisional-id', // mismatch!
+        sourceRunId: 'source-run-1',
+        observedAt: new Date('2026-08-30T10:00:00Z'),
+        title: 'Mismatched ID',
+        rawFingerprint: 'fp-mismatch',
+      });
+
+      await expect(
+        obsRepo.recordObservation({
+          listing,
+          observation: mismatchedIdObs,
+        }),
+      ).rejects.toThrow(RecordObservationCoherenceError);
+
+      try {
+        await obsRepo.recordObservation({ listing, observation: mismatchedIdObs });
+      } catch (err) {
+        expect(err).toBeInstanceOf(RecordObservationCoherenceError);
+        if (err instanceof RecordObservationCoherenceError) {
+          expect(err.code).toBe('RECORD_OBSERVATION_COHERENCE_ERROR');
+          expect(err.details.kind).toBe('LISTING_ID_MISMATCH');
+        }
+      }
+
+      // 2. Listing source 'synthetic' recorded under SourceRun of source 'other-source'
+      const mismatchedSourceObs = createObservation({
+        id: 'obs-mismatched-source',
+        listingId: listing.id,
+        sourceRunId: otherSourceRun.id, // source is 'other-source', listing source is 'synthetic'
+        observedAt: new Date('2026-08-30T10:00:00Z'),
+        title: 'Mismatched Source',
+        rawFingerprint: 'fp-source-mismatch',
+      });
+
+      await expect(
+        obsRepo.recordObservation({
+          listing,
+          observation: mismatchedSourceObs,
+        }),
+      ).rejects.toThrow(RecordObservationCoherenceError);
+
+      try {
+        await obsRepo.recordObservation({ listing, observation: mismatchedSourceObs });
+      } catch (err) {
+        expect(err).toBeInstanceOf(RecordObservationCoherenceError);
+        if (err instanceof RecordObservationCoherenceError) {
+          expect(err.code).toBe('RECORD_OBSERVATION_COHERENCE_ERROR');
+          expect(err.details.kind).toBe('SOURCE_ID_MISMATCH');
+        }
+      }
+
+      // Assert zero mutation / zero writes
+      const listingCount = db
+        .prepare<{ total: number }, [string]>('SELECT COUNT(*) as total FROM listings WHERE id = ?')
+        .get('listing-coherence-1');
+      expect(listingCount?.total).toBe(0);
+
+      const obsCount = db
+        .prepare<{ total: number }, [string, string]>(
+          'SELECT COUNT(*) as total FROM observations WHERE id IN (?, ?)',
+        )
+        .get('obs-mismatched-id', 'obs-mismatched-source');
+      expect(obsCount?.total).toBe(0);
     });
   });
 });

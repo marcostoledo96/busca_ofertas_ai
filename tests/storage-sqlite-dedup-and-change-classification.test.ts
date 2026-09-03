@@ -18,6 +18,7 @@ import {
   SqliteRunRepository,
   createNodeCryptoHasher,
   ListingIdentityCollisionError,
+  ObservationFingerprintCollisionError,
 } from '@busca-ofertas-ai/storage-sqlite';
 import { withTempDatabase } from '@busca-ofertas-ai/storage-sqlite/testing';
 
@@ -559,6 +560,87 @@ describe('Deduplication & Change Classification (BOAI-012)', () => {
       const listingRepo = new SqliteListingRepository(db);
       const preserved = await listingRepo.getById('listing-alpha');
       expect(preserved!.canonicalUrl).toBe(canonicalUrlA);
+    });
+  });
+
+  it('rejects fingerprint collision with ObservationFingerprintCollisionError when fake hasher collides on differing content (Finding 3)', async () => {
+    await withTempDatabase(async (db) => {
+      db.migrate();
+      const { sourceRun } = await setupPrerequisites(db);
+      const obsRepo = new SqliteObservationRepository(db);
+
+      const fakeHasher: Hasher = {
+        hash: () => 'identical-fingerprint-hash',
+      };
+
+      const listing = createListing({
+        id: 'listing-fp-collision',
+        sourceId: 'synthetic',
+        externalId: 'syn-fp-collision',
+        canonicalUrl: 'https://synthetic.invalid/listings/syn-fp-collision',
+        firstSeenAt: new Date('2026-08-30T10:00:00Z'),
+        lastSeenAt: new Date('2026-08-30T10:00:00Z'),
+      });
+
+      // Observation 1: Title "Item Alpha", condition "NEW"
+      const fp1 = computeObservationFingerprint(
+        { title: 'Item Alpha', condition: 'NEW' },
+        fakeHasher,
+      );
+      const obs1 = createObservation({
+        id: 'obs-fp-col-1',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:00:00Z'),
+        title: 'Item Alpha',
+        condition: 'NEW',
+        rawFingerprint: fp1,
+      });
+
+      // Save obs1 successfully
+      const res1 = await obsRepo.recordObservation({ listing, observation: obs1 });
+      expect(res1.isNewObservation).toBe(true);
+      expect(res1.changeKind).toBe('NEW');
+
+      // Observation 2: same listing, same sourceRun, same rawFingerprint (via fakeHasher), but differing title and condition!
+      const fp2 = computeObservationFingerprint(
+        { title: 'Item Beta Differing Content', condition: 'FOR_PARTS' },
+        fakeHasher,
+      );
+      expect(fp1).toBe(fp2); // Confirms hash collided!
+
+      const obs2 = createObservation({
+        id: 'obs-fp-col-2',
+        listingId: listing.id,
+        sourceRunId: sourceRun.id,
+        observedAt: new Date('2026-08-30T10:05:00Z'),
+        title: 'Item Beta Differing Content',
+        condition: 'FOR_PARTS',
+        rawFingerprint: fp2,
+      });
+
+      await expect(obsRepo.recordObservation({ listing, observation: obs2 })).rejects.toThrow(
+        ObservationFingerprintCollisionError,
+      );
+
+      try {
+        await obsRepo.recordObservation({ listing, observation: obs2 });
+      } catch (err) {
+        expect(err).toBeInstanceOf(ObservationFingerprintCollisionError);
+        if (err instanceof ObservationFingerprintCollisionError) {
+          expect(err.code).toBe('OBSERVATION_FINGERPRINT_COLLISION');
+          expect(err.fingerprint).toBe(fp1);
+          expect(err.listingId).toBe(listing.id);
+          expect(err.sourceRunId).toBe(sourceRun.id);
+        }
+      }
+
+      // Assert zero mutation / corruption: exactly 1 historical observation preserved
+      const history = await obsRepo.listByListingId(listing.id);
+      expect(history).toHaveLength(1);
+      expect(history[0]!.id).toBe('obs-fp-col-1');
+      expect(history[0]!.title).toBe('Item Alpha');
+      expect(history[0]!.condition).toBe('NEW');
     });
   });
 });

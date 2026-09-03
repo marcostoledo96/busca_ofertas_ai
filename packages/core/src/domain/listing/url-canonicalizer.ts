@@ -40,9 +40,6 @@ const COMMON_TRACKING_PARAMS = new Set([
   'mc_eid',
   '_ga',
   '_gl',
-  'ref',
-  'ref_src',
-  'ref_url',
 ]);
 
 export function normalizeGenericUrl(

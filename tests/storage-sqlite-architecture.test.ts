@@ -40,6 +40,8 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(typeof StorageModule.ExecutionLockReleaseError).toBe('function');
     expect(typeof StorageModule.ListingIdentityCollisionError).toBe('function');
     expect(typeof StorageModule.ObservationIdentityCollisionError).toBe('function');
+    expect(typeof StorageModule.ObservationFingerprintCollisionError).toBe('function');
+    expect(typeof StorageModule.RecordObservationCoherenceError).toBe('function');
     expect(typeof StorageModule.SensitiveDataDetectedError).toBe('function');
 
     // Crypto

@@ -18,6 +18,8 @@ export type SqliteStorageErrorCode =
   | 'SOURCE_RUN_IDENTITY_COLLISION'
   | 'SAVED_SEARCH_IDENTITY_COLLISION'
   | 'OBSERVATION_IDENTITY_COLLISION'
+  | 'OBSERVATION_FINGERPRINT_COLLISION'
+  | 'RECORD_OBSERVATION_COHERENCE_ERROR'
   | 'SENSITIVE_DATA_DETECTED';
 
 export interface SqliteStorageErrorOptions {
@@ -363,6 +365,69 @@ export class ObservationIdentityCollisionError extends SqliteStorageError {
     this.observationId = details.observationId;
     this.listingId = details.listingId;
     this.sourceRunId = details.sourceRunId;
+  }
+}
+
+export interface ObservationFingerprintCollisionDetails {
+  readonly observationId: string;
+  readonly listingId: string;
+  readonly sourceRunId: string;
+  readonly fingerprint: string;
+}
+
+export class ObservationFingerprintCollisionError extends SqliteStorageError {
+  readonly observationId: string;
+  readonly listingId: string;
+  readonly sourceRunId: string;
+  readonly fingerprint: string;
+
+  constructor(
+    details: ObservationFingerprintCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Observation fingerprint conflict on listing '${details.listingId}' and run '${details.sourceRunId}': fingerprint '${details.fingerprint}' matches existing observation but fingerprint-covered payload differs. Refusing to overwrite or discard differing content.`;
+    super(msg, 'OBSERVATION_FINGERPRINT_COLLISION', options);
+    this.name = 'ObservationFingerprintCollisionError';
+    this.observationId = details.observationId;
+    this.listingId = details.listingId;
+    this.sourceRunId = details.sourceRunId;
+    this.fingerprint = details.fingerprint;
+  }
+}
+
+export interface RecordObservationCoherenceDetails {
+  readonly kind: 'LISTING_ID_MISMATCH' | 'SOURCE_ID_MISMATCH' | 'SOURCE_RUN_NOT_FOUND';
+  readonly listingId?: string;
+  readonly observationListingId?: string;
+  readonly listingSourceId?: string;
+  readonly sourceRunSourceId?: string;
+  readonly sourceRunId?: string;
+}
+
+export class RecordObservationCoherenceError extends SqliteStorageError {
+  readonly details: RecordObservationCoherenceDetails;
+
+  constructor(
+    details: RecordObservationCoherenceDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    let msg = message;
+    if (!msg) {
+      if (details.kind === 'LISTING_ID_MISMATCH') {
+        msg = `RecordObservation input coherence failure: observation.listingId ('${details.observationListingId}') must match incoming listing.id ('${details.listingId}') before natural key resolution.`;
+      } else if (details.kind === 'SOURCE_ID_MISMATCH') {
+        msg = `RecordObservation input coherence failure: listing.sourceId ('${details.listingSourceId}') does not match sourceRun.sourceId ('${details.sourceRunSourceId}'). SourceRun cannot record observations for a different source.`;
+      } else {
+        msg = `RecordObservation input coherence failure: sourceRun with id '${details.sourceRunId}' was not found.`;
+      }
+    }
+    super(msg, 'RECORD_OBSERVATION_COHERENCE_ERROR', options);
+    this.name = 'RecordObservationCoherenceError';
+    this.details = details;
   }
 }
 

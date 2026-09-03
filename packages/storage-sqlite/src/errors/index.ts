@@ -10,6 +10,8 @@ export {
   type SourceRunIdentityCollisionDetails,
   type SavedSearchIdentityCollisionDetails,
   type ObservationIdentityCollisionDetails,
+  type ObservationFingerprintCollisionDetails,
+  type RecordObservationCoherenceDetails,
   SqliteStorageError,
   DatabaseOpenFailedError,
   DatabaseClosedError,
@@ -29,6 +31,8 @@ export {
   SourceRunIdentityCollisionError,
   SavedSearchIdentityCollisionError,
   ObservationIdentityCollisionError,
+  ObservationFingerprintCollisionError,
+  RecordObservationCoherenceError,
   SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './storage-errors.js';

@@ -17,6 +17,8 @@ export {
   type RunIdentityCollisionDetails,
   type SourceRunIdentityCollisionDetails,
   type ObservationIdentityCollisionDetails,
+  type ObservationFingerprintCollisionDetails,
+  type RecordObservationCoherenceDetails,
   SqliteStorageError,
   DatabaseOpenFailedError,
   DatabaseClosedError,
@@ -36,6 +38,8 @@ export {
   SourceRunIdentityCollisionError,
   SavedSearchIdentityCollisionError,
   ObservationIdentityCollisionError,
+  ObservationFingerprintCollisionError,
+  RecordObservationCoherenceError,
   SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './errors/index.js';

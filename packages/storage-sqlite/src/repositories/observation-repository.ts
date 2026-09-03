@@ -18,10 +18,13 @@ import {
   type PriceResolution,
   type PriceKind,
   isFallbackExternalId,
+  buildCanonicalObservationPayload,
 } from '@busca-ofertas-ai/core';
 import type { SqliteDatabase } from '../database/types.js';
 import {
   ObservationIdentityCollisionError,
+  ObservationFingerprintCollisionError,
+  RecordObservationCoherenceError,
   ListingIdentityCollisionError,
   StorageCorruptionError,
 } from '../errors/storage-errors.js';
@@ -49,6 +52,10 @@ interface ListingRow {
   readonly canonical_url: string;
   readonly first_seen_at: string;
   readonly last_seen_at: string;
+}
+
+interface SourceRunRow {
+  readonly source_id: string;
 }
 
 const VALID_CONDITIONS = new Set<ListingCondition>([
@@ -98,7 +105,7 @@ function parseIsoDate(isoString: string, fieldName: string, entityId: string): D
     );
   }
   const date = new Date(isoString);
-  if (Number.isNaN(date.getTime())) {
+  if (Number.isNaN(date.getTime()) || !isoString.includes('T')) {
     throw new StorageCorruptionError(
       `Corrupted persisted entity '${entityId}': '${fieldName}' is not a valid ISO date ('${isoString}')`,
     );
@@ -123,60 +130,136 @@ function rehydrateResolvedPrice(rawJson: string, entityId: string): ResolvedPric
     throw new StorageCorruptionError(`Corrupted price object in observation '${entityId}'`);
   }
 
+  // 1. rawText: required non-empty string
+  if (!('rawText' in parsed)) {
+    throw new StorageCorruptionError(`Missing price.rawText in observation '${entityId}'`);
+  }
   const rawText = parsed['rawText'];
   if (typeof rawText !== 'string' || rawText.trim().length === 0) {
     throw new StorageCorruptionError(`Corrupted price.rawText in observation '${entityId}'`);
   }
 
+  // 2. amount: required in persisted JSON, must be null OR finite non-negative integer
+  if (!('amount' in parsed)) {
+    throw new StorageCorruptionError(`Missing price.amount in observation '${entityId}'`);
+  }
+  const amountVal = parsed['amount'];
+  if (amountVal !== null) {
+    if (
+      typeof amountVal !== 'number' ||
+      !Number.isInteger(amountVal) ||
+      amountVal < 0 ||
+      !Number.isFinite(amountVal)
+    ) {
+      throw new StorageCorruptionError(
+        `Corrupted price.amount in observation '${entityId}': expected null or non-negative integer, got ${JSON.stringify(amountVal)}`,
+      );
+    }
+  }
+  const amount = amountVal;
+
+  // 3. currency: required valid enum
+  if (!('currency' in parsed)) {
+    throw new StorageCorruptionError(`Missing price.currency in observation '${entityId}'`);
+  }
   const currency = parsed['currency'];
   if (typeof currency !== 'string' || !VALID_CURRENCIES.has(currency as PriceCurrency)) {
-    throw new StorageCorruptionError(`Corrupted price.currency in observation '${entityId}'`);
+    throw new StorageCorruptionError(
+      `Corrupted price.currency in observation '${entityId}': got ${JSON.stringify(currency)}`,
+    );
   }
 
+  // 4. resolution: required valid enum
+  if (!('resolution' in parsed)) {
+    throw new StorageCorruptionError(`Missing price.resolution in observation '${entityId}'`);
+  }
   const resolution = parsed['resolution'];
   if (typeof resolution !== 'string' || !VALID_RESOLUTIONS.has(resolution as PriceResolution)) {
-    throw new StorageCorruptionError(`Corrupted price.resolution in observation '${entityId}'`);
+    throw new StorageCorruptionError(
+      `Corrupted price.resolution in observation '${entityId}': got ${JSON.stringify(resolution)}`,
+    );
   }
 
+  // 5. confidence: required finite number in [0, 1]
+  if (!('confidence' in parsed)) {
+    throw new StorageCorruptionError(`Missing price.confidence in observation '${entityId}'`);
+  }
   const confidence = parsed['confidence'];
-  if (typeof confidence !== 'number' || !Number.isFinite(confidence)) {
-    throw new StorageCorruptionError(`Corrupted price.confidence in observation '${entityId}'`);
+  if (
+    typeof confidence !== 'number' ||
+    !Number.isFinite(confidence) ||
+    confidence < 0 ||
+    confidence > 1
+  ) {
+    throw new StorageCorruptionError(
+      `Corrupted price.confidence in observation '${entityId}': expected [0, 1], got ${String(confidence)}`,
+    );
   }
 
+  // 6. evidence: required array of strings
+  if (!('evidence' in parsed)) {
+    throw new StorageCorruptionError(`Missing price.evidence in observation '${entityId}'`);
+  }
   const rawEvidence = parsed['evidence'];
   if (!Array.isArray(rawEvidence) || !rawEvidence.every((e) => typeof e === 'string')) {
     throw new StorageCorruptionError(`Corrupted price.evidence in observation '${entityId}'`);
   }
   const evidence: readonly string[] = rawEvidence;
 
-  const amountVal = parsed['amount'];
-  const amount = typeof amountVal === 'number' && Number.isFinite(amountVal) ? amountVal : null;
-
+  // 7. kind: required valid enum
+  if (!('kind' in parsed)) {
+    throw new StorageCorruptionError(`Missing price.kind in observation '${entityId}'`);
+  }
   const rawKind = parsed['kind'];
-  const kind: PriceKind =
-    typeof rawKind === 'string' && VALID_PRICE_KINDS.has(rawKind as PriceKind)
-      ? (rawKind as PriceKind)
-      : 'UNKNOWN';
+  if (typeof rawKind !== 'string' || !VALID_PRICE_KINDS.has(rawKind as PriceKind)) {
+    throw new StorageCorruptionError(
+      `Corrupted price.kind in observation '${entityId}': got ${JSON.stringify(rawKind)}`,
+    );
+  }
+  const kind = rawKind as PriceKind;
 
+  // 8. converted: optional, but if present must be strictly valid
   let converted: ConvertedPrice | undefined = undefined;
-  const rawConverted = parsed['converted'];
-  if (rawConverted !== undefined && rawConverted !== null) {
-    if (!isRecord(rawConverted) || rawConverted['currency'] !== 'ARS') {
+  if ('converted' in parsed && parsed['converted'] !== undefined && parsed['converted'] !== null) {
+    const rawConverted = parsed['converted'];
+    if (!isRecord(rawConverted)) {
       throw new StorageCorruptionError(`Corrupted price.converted in observation '${entityId}'`);
     }
+    if (rawConverted['currency'] !== 'ARS') {
+      throw new StorageCorruptionError(
+        `Corrupted price.converted.currency in observation '${entityId}': expected 'ARS', got ${JSON.stringify(rawConverted['currency'])}`,
+      );
+    }
     const convAmount = rawConverted['amount'];
-    const convRate = rawConverted['exchangeRate'];
-    const convOrigin = rawConverted['exchangeRateOrigin'];
-    const convAt = rawConverted['convertedAt'];
-
     if (
       typeof convAmount !== 'number' ||
-      typeof convRate !== 'number' ||
-      convOrigin !== 'MANUAL' ||
-      typeof convAt !== 'string'
+      !Number.isInteger(convAmount) ||
+      convAmount < 0 ||
+      !Number.isFinite(convAmount)
     ) {
       throw new StorageCorruptionError(
-        `Corrupted price.converted details in observation '${entityId}'`,
+        `Corrupted price.converted.amount in observation '${entityId}'`,
+      );
+    }
+
+    const convRate = rawConverted['exchangeRate'];
+    if (typeof convRate !== 'number' || !Number.isFinite(convRate) || convRate <= 0) {
+      throw new StorageCorruptionError(
+        `Corrupted price.converted.exchangeRate in observation '${entityId}': expected finite > 0`,
+      );
+    }
+
+    const convOrigin = rawConverted['exchangeRateOrigin'];
+    if (convOrigin !== 'MANUAL') {
+      throw new StorageCorruptionError(
+        `Corrupted price.converted.exchangeRateOrigin in observation '${entityId}': expected 'MANUAL'`,
+      );
+    }
+
+    const convAt = rawConverted['convertedAt'];
+    if (typeof convAt !== 'string') {
+      throw new StorageCorruptionError(
+        `Corrupted price.converted.convertedAt in observation '${entityId}'`,
       );
     }
 
@@ -212,25 +295,67 @@ function rehydrateResolvedLocation(rawJson: string, entityId: string): ResolvedL
     throw new StorageCorruptionError(`Corrupted location.rawText in observation '${entityId}'`);
   }
 
-  const region = typeof parsed['region'] === 'string' ? parsed['region'] : undefined;
-  const city = typeof parsed['city'] === 'string' ? parsed['city'] : undefined;
-  const neighborhood =
-    typeof parsed['neighborhood'] === 'string' ? parsed['neighborhood'] : undefined;
+  let region: string | undefined = undefined;
+  if ('region' in parsed && parsed['region'] !== undefined && parsed['region'] !== null) {
+    if (typeof parsed['region'] !== 'string') {
+      throw new StorageCorruptionError(
+        `Corrupted location.region in observation '${entityId}': expected string, got ${typeof parsed['region']}`,
+      );
+    }
+    region = parsed['region'];
+  }
+
+  let city: string | undefined = undefined;
+  if ('city' in parsed && parsed['city'] !== undefined && parsed['city'] !== null) {
+    if (typeof parsed['city'] !== 'string') {
+      throw new StorageCorruptionError(
+        `Corrupted location.city in observation '${entityId}': expected string, got ${typeof parsed['city']}`,
+      );
+    }
+    city = parsed['city'];
+  }
+
+  let neighborhood: string | undefined = undefined;
+  if (
+    'neighborhood' in parsed &&
+    parsed['neighborhood'] !== undefined &&
+    parsed['neighborhood'] !== null
+  ) {
+    if (typeof parsed['neighborhood'] !== 'string') {
+      throw new StorageCorruptionError(
+        `Corrupted location.neighborhood in observation '${entityId}': expected string, got ${typeof parsed['neighborhood']}`,
+      );
+    }
+    neighborhood = parsed['neighborhood'];
+  }
 
   let coordinates: { readonly latitude: number; readonly longitude: number } | undefined =
     undefined;
-  const rawCoords = parsed['coordinates'];
-  if (rawCoords !== undefined && rawCoords !== null) {
+  if (
+    'coordinates' in parsed &&
+    parsed['coordinates'] !== undefined &&
+    parsed['coordinates'] !== null
+  ) {
+    const rawCoords = parsed['coordinates'];
     if (!isRecord(rawCoords)) {
       throw new StorageCorruptionError(
-        `Corrupted location.coordinates in observation '${entityId}'`,
+        `Corrupted location.coordinates in observation '${entityId}': expected object`,
       );
     }
     const lat = rawCoords['latitude'];
     const lon = rawCoords['longitude'];
-    if (typeof lat !== 'number' || typeof lon !== 'number') {
+    if (
+      typeof lat !== 'number' ||
+      !Number.isFinite(lat) ||
+      lat < -90 ||
+      lat > 90 ||
+      typeof lon !== 'number' ||
+      !Number.isFinite(lon) ||
+      lon < -180 ||
+      lon > 180
+    ) {
       throw new StorageCorruptionError(
-        `Corrupted coordinates numbers in observation '${entityId}'`,
+        `Corrupted location.coordinates numbers in observation '${entityId}'`,
       );
     }
     coordinates = { latitude: lat, longitude: lon };
@@ -318,6 +443,7 @@ function rehydrateObservation(row: ObservationRow): Observation {
   }
 }
 
+// Semantic equality used EXCLUSIVELY for changeKind = PRICE_CHANGED vs UNCHANGED
 function arePricesSemanticallyEqual(a: ResolvedPrice | null, b: ResolvedPrice | null): boolean {
   if (a === null && b === null) {
     return true;
@@ -333,25 +459,87 @@ function arePricesSemanticallyEqual(a: ResolvedPrice | null, b: ResolvedPrice | 
   );
 }
 
-function areObservationsIdentical(a: Observation, row: ObservationRow): boolean {
-  const b = rehydrateObservation(row);
+// Full semantic equality for ResolvedPrice in immutability verification
+function arePricesFullyIdentical(a: ResolvedPrice | null, b: ResolvedPrice | null): boolean {
+  if (a === null && b === null) return true;
+  if (a === null || b === null) return false;
+  if (
+    a.rawText !== b.rawText ||
+    a.amount !== b.amount ||
+    a.currency !== b.currency ||
+    a.resolution !== b.resolution ||
+    a.confidence !== b.confidence ||
+    a.kind !== b.kind ||
+    a.evidence.length !== b.evidence.length ||
+    !a.evidence.every((ev, i) => ev === b.evidence[i])
+  ) {
+    return false;
+  }
+  if (a.converted === undefined && b.converted === undefined) return true;
+  if (a.converted === undefined || b.converted === undefined) return false;
   return (
-    a.id === b.id &&
-    a.listingId === b.listingId &&
-    a.sourceRunId === b.sourceRunId &&
-    a.observedAt.getTime() === b.observedAt.getTime() &&
-    a.title === b.title &&
-    a.description === b.description &&
-    arePricesSemanticallyEqual(a.price, b.price) &&
-    JSON.stringify(a.location) === JSON.stringify(b.location) &&
-    a.condition === b.condition &&
-    a.availability === b.availability &&
-    JSON.stringify(a.imageUrls) === JSON.stringify(b.imageUrls) &&
-    (a.publishedAt === null
-      ? b.publishedAt === null
-      : a.publishedAt?.getTime() === b.publishedAt?.getTime()) &&
-    a.rawFingerprint === b.rawFingerprint
+    a.converted.amount === b.converted.amount &&
+    a.converted.currency === b.converted.currency &&
+    a.converted.exchangeRate === b.converted.exchangeRate &&
+    a.converted.exchangeRateOrigin === b.converted.exchangeRateOrigin &&
+    a.converted.convertedAt.getTime() === b.converted.convertedAt.getTime()
   );
+}
+
+// Full semantic equality for ResolvedLocation in immutability verification
+function areLocationsFullyIdentical(
+  a: ResolvedLocation | null,
+  b: ResolvedLocation | null,
+): boolean {
+  if (a === null && b === null) return true;
+  if (a === null || b === null) return false;
+  if (
+    a.rawText !== b.rawText ||
+    a.region !== b.region ||
+    a.city !== b.city ||
+    a.neighborhood !== b.neighborhood
+  ) {
+    return false;
+  }
+  if (a.coordinates === undefined && b.coordinates === undefined) return true;
+  if (a.coordinates === undefined || b.coordinates === undefined) return false;
+  return (
+    a.coordinates.latitude === b.coordinates.latitude &&
+    a.coordinates.longitude === b.coordinates.longitude
+  );
+}
+
+// Complete semantic equality for Observation immutability verification (Finding 2)
+function areObservationsFullyIdentical(incoming: Observation, persisted: Observation): boolean {
+  return (
+    incoming.id === persisted.id &&
+    incoming.listingId === persisted.listingId &&
+    incoming.sourceRunId === persisted.sourceRunId &&
+    incoming.observedAt.getTime() === persisted.observedAt.getTime() &&
+    incoming.title === persisted.title &&
+    incoming.description === persisted.description &&
+    arePricesFullyIdentical(incoming.price, persisted.price) &&
+    areLocationsFullyIdentical(incoming.location, persisted.location) &&
+    incoming.condition === persisted.condition &&
+    incoming.availability === persisted.availability &&
+    incoming.imageUrls.length === persisted.imageUrls.length &&
+    incoming.imageUrls.every((url, i) => url === persisted.imageUrls[i]) &&
+    (incoming.publishedAt === null
+      ? persisted.publishedAt === null
+      : persisted.publishedAt !== null &&
+        incoming.publishedAt.getTime() === persisted.publishedAt.getTime()) &&
+    incoming.rawFingerprint === persisted.rawFingerprint
+  );
+}
+
+function isSqliteBusyError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    return (
+      msg.includes('sqlite_busy') || msg.includes('database is locked') || msg.includes('busy')
+    );
+  }
+  return false;
 }
 
 export class SqliteObservationRepository implements ObservationRepository {
@@ -398,40 +586,52 @@ export class SqliteObservationRepository implements ObservationRepository {
            FROM observations
            WHERE id = ?`,
         );
-        const existingById = existingByIdStmt.get(observation.id);
+        const existingByIdRow = existingByIdStmt.get(observation.id);
 
-        if (existingById) {
-          if (areObservationsIdentical(observation, existingById)) {
+        if (existingByIdRow) {
+          const persistedObs = rehydrateObservation(existingByIdRow);
+          if (areObservationsFullyIdentical(observation, persistedObs)) {
             // Idempotent save of identical observation
             return;
           }
           throw new ObservationIdentityCollisionError({
             observationId: observation.id,
-            listingId: existingById.listing_id,
-            sourceRunId: existingById.source_run_id,
+            listingId: existingByIdRow.listing_id,
+            sourceRunId: existingByIdRow.source_run_id,
           });
         }
 
-        // 2. Check if identical observation exists within the same source run
+        // 2. Check if observation exists within the same source run and fingerprint
         const existingByRunFingerprintStmt = tx.prepare<ObservationRow, [string, string, string]>(
           `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
            FROM observations
            WHERE listing_id = ? AND source_run_id = ? AND raw_fingerprint = ?`,
         );
-        const existingByRun = existingByRunFingerprintStmt.get(
+        const existingByRunRow = existingByRunFingerprintStmt.get(
           observation.listingId,
           observation.sourceRunId,
           observation.rawFingerprint,
         );
 
-        if (existingByRun) {
-          if (existingByRun.id === observation.id) {
+        if (existingByRunRow) {
+          if (existingByRunRow.id === observation.id) {
             return;
+          }
+          const existingObs = rehydrateObservation(existingByRunRow);
+          const incomingPayload = buildCanonicalObservationPayload(observation);
+          const existingPayload = buildCanonicalObservationPayload(existingObs);
+          if (incomingPayload !== existingPayload) {
+            throw new ObservationFingerprintCollisionError({
+              observationId: observation.id,
+              listingId: existingByRunRow.listing_id,
+              sourceRunId: existingByRunRow.source_run_id,
+              fingerprint: observation.rawFingerprint,
+            });
           }
           throw new ObservationIdentityCollisionError({
             observationId: observation.id,
-            listingId: existingByRun.listing_id,
-            sourceRunId: existingByRun.source_run_id,
+            listingId: existingByRunRow.listing_id,
+            sourceRunId: existingByRunRow.source_run_id,
           });
         }
 
@@ -457,7 +657,7 @@ export class SqliteObservationRepository implements ObservationRepository {
           observation.publishedAt ? observation.publishedAt.toISOString() : null,
           observation.rawFingerprint,
         );
-      });
+      }, 'IMMEDIATE');
 
       return Promise.resolve();
     } catch (err) {
@@ -466,12 +666,45 @@ export class SqliteObservationRepository implements ObservationRepository {
   }
 
   recordObservation(params: RecordObservationParams): Promise<RecordObservationResult> {
-    try {
+    // 0. Pre-transaction Coherence Check: incoming listing.id must match observation.listingId
+    if (params.observation.listingId !== params.listing.id) {
+      return Promise.reject(
+        new RecordObservationCoherenceError({
+          kind: 'LISTING_ID_MISMATCH',
+          listingId: params.listing.id,
+          observationListingId: params.observation.listingId,
+        }),
+      );
+    }
+
+    const maxAttempts = 5;
+    let attempt = 0;
+
+    const executeTransaction = (): RecordObservationResult => {
       let result!: RecordObservationResult;
 
       this.db.transaction((tx) => {
         const incomingListing = params.listing;
         const incomingObs = params.observation;
+
+        // 0b. SourceRun Coherence Check: sourceRun must exist and source_id must match listing.sourceId
+        const findSourceRunStmt = tx.prepare<SourceRunRow, [string]>(
+          `SELECT source_id FROM source_runs WHERE id = ?`,
+        );
+        const sourceRunRow = findSourceRunStmt.get(incomingObs.sourceRunId);
+        if (!sourceRunRow) {
+          throw new RecordObservationCoherenceError({
+            kind: 'SOURCE_RUN_NOT_FOUND',
+            sourceRunId: incomingObs.sourceRunId,
+          });
+        }
+        if (sourceRunRow.source_id !== incomingListing.sourceId) {
+          throw new RecordObservationCoherenceError({
+            kind: 'SOURCE_ID_MISMATCH',
+            listingSourceId: incomingListing.sourceId,
+            sourceRunSourceId: sourceRunRow.source_id,
+          });
+        }
 
         // 1. Resolve or update Listing
         const findListingStmt = tx.prepare<ListingRow, [string, string]>(
@@ -479,7 +712,7 @@ export class SqliteObservationRepository implements ObservationRepository {
            FROM listings
            WHERE source_id = ? AND external_id = ?`,
         );
-        const existingListingRow = findListingStmt.get(
+        let existingListingRow = findListingStmt.get(
           incomingListing.sourceId,
           incomingListing.externalId,
         );
@@ -561,19 +794,76 @@ export class SqliteObservationRepository implements ObservationRepository {
               id, source_id, external_id, canonical_url, first_seen_at, last_seen_at
             ) VALUES (?, ?, ?, ?, ?, ?)`,
           );
-          insertListingStmt.run(
-            incomingListing.id,
-            incomingListing.sourceId,
-            incomingListing.externalId,
-            incomingListing.canonicalUrl,
-            incomingListing.firstSeenAt.toISOString(),
-            incomingListing.lastSeenAt.toISOString(),
-          );
 
-          effectiveListing = incomingListing;
+          try {
+            insertListingStmt.run(
+              incomingListing.id,
+              incomingListing.sourceId,
+              incomingListing.externalId,
+              incomingListing.canonicalUrl,
+              incomingListing.firstSeenAt.toISOString(),
+              incomingListing.lastSeenAt.toISOString(),
+            );
+            effectiveListing = incomingListing;
+          } catch (insertErr) {
+            // Handle concurrent insert race on uq_listings_source_external
+            existingListingRow = findListingStmt.get(
+              incomingListing.sourceId,
+              incomingListing.externalId,
+            );
+            if (!existingListingRow) {
+              throw insertErr;
+            }
+            // Fallback collision check on concurrently inserted row
+            if (
+              isFallbackExternalId(incomingListing.externalId) &&
+              existingListingRow.canonical_url !== incomingListing.canonicalUrl
+            ) {
+              throw new ListingIdentityCollisionError({
+                sourceId: incomingListing.sourceId,
+                externalId: incomingListing.externalId,
+                existingId: existingListingRow.id,
+                attemptingId: incomingListing.id,
+              });
+            }
+            effectiveListing = createListing({
+              id: existingListingRow.id,
+              sourceId: existingListingRow.source_id,
+              externalId: existingListingRow.external_id,
+              canonicalUrl: incomingListing.canonicalUrl,
+              firstSeenAt: parseIsoDate(
+                existingListingRow.first_seen_at,
+                'first_seen_at',
+                existingListingRow.id,
+              ),
+              lastSeenAt: parseIsoDate(
+                existingListingRow.last_seen_at,
+                'last_seen_at',
+                existingListingRow.id,
+              ),
+            });
+          }
         }
 
-        // 2. Query previous latest Observation for effectiveListing.id
+        // 2. Check if an Observation with incomingObs.id already exists
+        const checkExistingObsByIdStmt = tx.prepare<ObservationRow, [string]>(
+          `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
+           FROM observations
+           WHERE id = ?`,
+        );
+        const existingObsByIdRow = checkExistingObsByIdStmt.get(incomingObs.id);
+        if (existingObsByIdRow) {
+          const persistedObs = rehydrateObservation(existingObsByIdRow);
+          if (!areObservationsFullyIdentical(incomingObs, persistedObs)) {
+            throw new ObservationIdentityCollisionError({
+              observationId: incomingObs.id,
+              listingId: existingObsByIdRow.listing_id,
+              sourceRunId: existingObsByIdRow.source_run_id,
+            });
+          }
+        }
+
+        // 3. Query previous latest Observation for effectiveListing.id
         const findLatestObsStmt = tx.prepare<ObservationRow, [string]>(
           `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
            FROM observations
@@ -583,7 +873,7 @@ export class SqliteObservationRepository implements ObservationRepository {
         );
         const latestObsRow = findLatestObsStmt.get(effectiveListing.id);
 
-        // 3. Determine novelty / change classification
+        // 4. Determine novelty / change classification
         let changeKind: ObservationChangeKind;
         let latestObs: Observation | null = null;
 
@@ -608,7 +898,7 @@ export class SqliteObservationRepository implements ObservationRepository {
           }
         }
 
-        // 4. Observation deduplication check within same run
+        // 5. Observation deduplication check within same run
         const findExistingInRunStmt = tx.prepare<ObservationRow, [string, string, string]>(
           `SELECT id, listing_id, source_run_id, observed_at, title, description, price, location, condition, availability, image_urls, published_at, raw_fingerprint
            FROM observations
@@ -621,19 +911,31 @@ export class SqliteObservationRepository implements ObservationRepository {
         );
 
         if (existingInRunRow) {
-          // Identical observation in the same run -> deduplicate without inserting new row
           const existingObs = rehydrateObservation(existingInRunRow);
-          result = {
-            listing: effectiveListing,
-            observation: existingObs,
-            changeKind,
-            isNewObservation: false,
-          };
-          return;
+          const incomingPayload = buildCanonicalObservationPayload(incomingObs);
+          const existingPayload = buildCanonicalObservationPayload(existingObs);
+
+          if (incomingPayload === existingPayload) {
+            // Exact dedup: identical fingerprint and identical semantic payload within same run
+            result = {
+              listing: effectiveListing,
+              observation: existingObs,
+              changeKind,
+              isNewObservation: false,
+            };
+            return;
+          }
+
+          // Fingerprint Collision (Finding 3): same fingerprint but differing semantic payload!
+          throw new ObservationFingerprintCollisionError({
+            observationId: incomingObs.id,
+            listingId: effectiveListing.id,
+            sourceRunId: incomingObs.sourceRunId,
+            fingerprint: incomingObs.rawFingerprint,
+          });
         }
 
-        // 5. Insert new Observation row
-        // Ensure the observation points to effectiveListing.id
+        // 6. Insert new Observation row pointing to effectiveListing.id
         const observationToInsert: Observation =
           incomingObs.listingId === effectiveListing.id
             ? incomingObs
@@ -681,11 +983,30 @@ export class SqliteObservationRepository implements ObservationRepository {
           changeKind,
           isNewObservation: true,
         };
-      });
+      }, 'IMMEDIATE');
 
-      return Promise.resolve(result);
-    } catch (err) {
-      return Promise.reject(toError(err));
+      return result;
+    };
+
+    while (attempt < maxAttempts) {
+      try {
+        const res = executeTransaction();
+        return Promise.resolve(res);
+      } catch (err) {
+        if (isSqliteBusyError(err) && attempt < maxAttempts - 1) {
+          attempt++;
+          // synchronous small delay before retry
+          const start = Date.now();
+          const delayMs = 10 * attempt + Math.floor(Math.random() * 20);
+          while (Date.now() - start < delayMs) {
+            // busy wait
+          }
+          continue;
+        }
+        return Promise.reject(toError(err));
+      }
     }
+
+    return Promise.reject(new Error('Exceeded maximum retry attempts for SQLITE_BUSY'));
   }
 }
