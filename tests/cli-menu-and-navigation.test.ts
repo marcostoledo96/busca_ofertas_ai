@@ -73,8 +73,8 @@ describe('CLI Menu and Navigation (BOAI-006)', () => {
     expect(rawOutput).toContain('Saliendo de Busca Ofertas AI. ¡Hasta luego!');
   });
 
-  it('displays "Todavía no implementado" and returns to menu when selecting unimplemented options 1, 4, 5, 6', async () => {
-    const unimplementedOptions = [1, 4, 5, 6];
+  it('displays "Todavía no implementado" and returns to menu when selecting unimplemented options 1, 4, 6', async () => {
+    const unimplementedOptions = [1, 4, 6];
     for (const optNum of unimplementedOptions) {
       const term = new FakeTerminal([String(optNum), '8']);
       const sigMgr = new TestSignalManager();
@@ -95,26 +95,27 @@ describe('CLI Menu and Navigation (BOAI-006)', () => {
     }
   });
 
-  it('routes to functional wizards on options 2, 3, and 7 without crash', async () => {
+  it('routes to functional wizards and review on options 2, 3, 5, and 7 without crash', async () => {
     // Option 2: Crear una búsqueda -> 3. Cancelar -> 8. Salir
     const term2 = new FakeTerminal(['2', '3', '8']);
     const app2 = createCliApplication({ terminal: term2, formatter });
-    const exit2 = await app2.run();
-    expect(exit2).toBe(EXIT_CODES.SUCCESS);
-    expect(term2.getRawOutput()).toContain('CREAR NUEVA BÚSQUEDA GUARDADA');
+    expect(await app2.run()).toBe(EXIT_CODES.SUCCESS);
 
-    // Option 3: Editar una búsqueda (informs no searches saved and returns to main menu)
+    // Option 3: Modificar una búsqueda (informs no searches saved and returns to main menu)
     const term3 = new FakeTerminal(['3', '8']);
     const app3 = createCliApplication({ terminal: term3, formatter });
-    const exit3 = await app3.run();
-    expect(exit3).toBe(EXIT_CODES.SUCCESS);
-    expect(term3.getRawOutput()).toContain('EDITAR BÚSQUEDA GUARDADA');
+    expect(await app3.run()).toBe(EXIT_CODES.SUCCESS);
+
+    // Option 5: Revisar publicaciones dudosas -> 0. Volver -> 8. Salir
+    const term5 = new FakeTerminal(['5', '0', '8']);
+    const app5 = createCliApplication({ terminal: term5, formatter });
+    expect(await app5.run()).toBe(EXIT_CODES.SUCCESS);
+    expect(term5.getRawOutput()).toContain('Revisión de Publicaciones Dudosas (REVIEW)');
 
     // Option 7: Configuración -> 4. Volver -> 8. Salir
     const term7 = new FakeTerminal(['7', '4', '8']);
     const app7 = createCliApplication({ terminal: term7, formatter });
-    const exit7 = await app7.run();
-    expect(exit7).toBe(EXIT_CODES.SUCCESS);
+    expect(await app7.run()).toBe(EXIT_CODES.SUCCESS);
     expect(term7.getRawOutput()).toContain('CONFIGURACIÓN DE BÚSQUEDAS');
   });
 

@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { SourceRegistry } from '@busca-ofertas-ai/configuration';
 import {
@@ -7,6 +8,11 @@ import {
   SYNTHETIC_ADAPTER_SDK_VERSION,
   SYNTHETIC_ADAPTER_CAPABILITIES,
 } from '@busca-ofertas-ai/adapter-synthetic';
+import {
+  openSqliteDatabase,
+  createSqliteRepositories,
+  type SqliteDatabase,
+} from '@busca-ofertas-ai/storage-sqlite';
 import { resolveXdgAppPaths } from './platform/xdg-paths.js';
 import type { ExitCode } from './runtime/exit-codes.js';
 import { TerminalPort, NodeTerminalAdapter } from './runtime/terminal.js';
@@ -16,13 +22,22 @@ import { DiagnosticLogger, SanitizedDiagnosticLogger } from './runtime/diagnosti
 import { ErrorPresenter } from './runtime/errors.js';
 import { MenuFormatter, CONTRACTUAL_MENU_OPTIONS } from './presentation/menu-formatter.js';
 import {
+  ReviewQueueService,
+  RecordReviewFeedbackUseCase,
+  SystemClock,
+  UuidIdGenerator,
+  type ExternalUrlOpenerPort,
+} from '@busca-ofertas-ai/core';
+import {
   type MenuAction,
   CreateSearchActionHandler,
   EditSearchActionHandler,
   ConfigurationActionHandler,
+  ReviewListingsActionHandler,
   NotImplementedActionHandler,
   ExitActionHandler,
 } from './shell/menu-actions.js';
+import { NodeExternalUrlOpener } from './platform/node-external-url-opener.js';
 import { CliShell } from './shell/cli-shell.js';
 import {
   type SavedSearchConfigStore,
@@ -42,6 +57,11 @@ export interface CliApplicationOptions {
   readonly configStore?: SavedSearchConfigStore;
   readonly textFilePort?: TextFilePort;
   readonly searchConfigDirectory?: string;
+  readonly databasePath?: string;
+  readonly sqliteDatabase?: SqliteDatabase;
+  readonly reviewQueueService?: ReviewQueueService;
+  readonly recordFeedbackUseCase?: RecordReviewFeedbackUseCase;
+  readonly externalUrlOpener?: ExternalUrlOpenerPort;
 }
 
 export interface CliApplication {
@@ -85,19 +105,24 @@ export function createDefaultSourceRegistry(): SourceRegistry {
   return registry;
 }
 
+export interface CreateDefaultMenuActionsOptions {
+  readonly formatter?: MenuFormatter | undefined;
+  readonly sourceRegistry?: SourceRegistry | undefined;
+  readonly configStore?: SavedSearchConfigStore | undefined;
+  readonly textFilePort?: TextFilePort | undefined;
+  readonly searchConfigDirectory?: string | undefined;
+  readonly databasePath?: string | undefined;
+  readonly sqliteDatabase?: SqliteDatabase | undefined;
+  readonly reviewQueueService?: ReviewQueueService | undefined;
+  readonly recordFeedbackUseCase?: RecordReviewFeedbackUseCase | undefined;
+  readonly externalUrlOpener?: ExternalUrlOpenerPort | undefined;
+}
+
 /**
  * Creates default menu action handlers for the 8 contractual options.
  */
 export function createDefaultMenuActions(
-  param?:
-    | MenuFormatter
-    | {
-        formatter?: MenuFormatter | undefined;
-        sourceRegistry?: SourceRegistry | undefined;
-        configStore?: SavedSearchConfigStore | undefined;
-        textFilePort?: TextFilePort | undefined;
-        searchConfigDirectory?: string | undefined;
-      },
+  param?: MenuFormatter | CreateDefaultMenuActionsOptions,
 ): MenuAction[] {
   const actions: MenuAction[] = [];
   const fmt = param instanceof MenuFormatter ? param : (param?.formatter ?? new MenuFormatter());
@@ -117,6 +142,48 @@ export function createDefaultMenuActions(
       ? new NodeTextFileAdapter()
       : (param?.textFilePort ?? new NodeTextFileAdapter());
 
+  let reviewQueue = param instanceof MenuFormatter ? undefined : param?.reviewQueueService;
+  let recordFeedback = param instanceof MenuFormatter ? undefined : param?.recordFeedbackUseCase;
+  const urlOpener =
+    param instanceof MenuFormatter
+      ? new NodeExternalUrlOpener()
+      : (param?.externalUrlOpener ?? new NodeExternalUrlOpener());
+
+  if (!reviewQueue || !recordFeedback) {
+    const db = param instanceof MenuFormatter ? undefined : param?.sqliteDatabase;
+    const resolvedDb =
+      db ??
+      (() => {
+        const dbPath =
+          (param instanceof MenuFormatter ? undefined : param?.databasePath) ??
+          resolveXdgAppPaths().databasePath;
+        fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+        return openSqliteDatabase({ databasePath: dbPath, createParentDirectory: true });
+      })();
+    resolvedDb.migrate();
+    const repos = createSqliteRepositories(resolvedDb);
+
+    reviewQueue =
+      reviewQueue ??
+      new ReviewQueueService({
+        opportunityRepo: repos.opportunities,
+        evaluationRepo: repos.evaluations,
+        observationRepo: repos.observations,
+        listingRepo: repos.listings,
+        feedbackRepo: repos.feedback,
+      });
+
+    recordFeedback =
+      recordFeedback ??
+      new RecordReviewFeedbackUseCase({
+        opportunityRepo: repos.opportunities,
+        evaluationRepo: repos.evaluations,
+        feedbackRepo: repos.feedback,
+        clock: new SystemClock(),
+        idGenerator: new UuidIdGenerator(),
+      });
+  }
+
   for (const item of CONTRACTUAL_MENU_OPTIONS) {
     if (item.optionNumber === 8) {
       actions.push(new ExitActionHandler(fmt));
@@ -134,6 +201,14 @@ export function createDefaultMenuActions(
           configStore: store,
         }),
       );
+    } else if (item.optionNumber === 5) {
+      actions.push(
+        new ReviewListingsActionHandler({
+          reviewQueueService: reviewQueue,
+          recordFeedbackUseCase: recordFeedback,
+          externalUrlOpener: urlOpener,
+        }),
+      );
     } else if (item.optionNumber === 7) {
       actions.push(
         new ConfigurationActionHandler({
@@ -146,7 +221,6 @@ export function createDefaultMenuActions(
       const idMap: Record<number, string> = {
         1: 'run-search',
         4: 'view-history',
-        5: 'review-listings',
         6: 'source-errors',
       };
       actions.push(
@@ -181,6 +255,43 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
     options?.configStore ?? new NodeFileSystemSavedSearchConfigStore(defaultStorageDir);
   const textFilePort = options?.textFilePort ?? new NodeTextFileAdapter();
 
+  // Wire SQLite persistence for review infrastructure
+  let dbToClose: SqliteDatabase | undefined;
+  let reviewQueueService = options?.reviewQueueService;
+  let recordFeedbackUseCase = options?.recordFeedbackUseCase;
+
+  if (!reviewQueueService || !recordFeedbackUseCase) {
+    let db = options?.sqliteDatabase;
+    if (!db) {
+      const dbPath = options?.databasePath ?? resolveXdgAppPaths().databasePath;
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+      db = openSqliteDatabase({ databasePath: dbPath, createParentDirectory: true });
+      dbToClose = db;
+    }
+    db.migrate();
+    const repos = createSqliteRepositories(db);
+
+    reviewQueueService =
+      reviewQueueService ??
+      new ReviewQueueService({
+        opportunityRepo: repos.opportunities,
+        evaluationRepo: repos.evaluations,
+        observationRepo: repos.observations,
+        listingRepo: repos.listings,
+        feedbackRepo: repos.feedback,
+      });
+
+    recordFeedbackUseCase =
+      recordFeedbackUseCase ??
+      new RecordReviewFeedbackUseCase({
+        opportunityRepo: repos.opportunities,
+        evaluationRepo: repos.evaluations,
+        feedbackRepo: repos.feedback,
+        clock: new SystemClock(),
+        idGenerator: new UuidIdGenerator(),
+      });
+  }
+
   const actions =
     options?.actions ??
     createDefaultMenuActions({
@@ -189,6 +300,11 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
       configStore,
       textFilePort,
       searchConfigDirectory: options?.searchConfigDirectory,
+      databasePath: options?.databasePath,
+      sqliteDatabase: options?.sqliteDatabase ?? dbToClose,
+      reviewQueueService,
+      recordFeedbackUseCase,
+      externalUrlOpener: options?.externalUrlOpener,
     });
 
   // Connect terminal interrupt to central SignalManager and capture unsubscription
@@ -224,6 +340,13 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
           if (unsubscribeInterrupt) {
             unsubscribeInterrupt();
             unsubscribeInterrupt = undefined;
+          }
+          if (dbToClose) {
+            try {
+              dbToClose.close();
+            } catch {
+              // Ignore if already closed
+            }
           }
           await terminal.close();
         });

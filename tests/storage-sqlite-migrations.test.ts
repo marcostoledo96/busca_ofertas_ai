@@ -14,44 +14,47 @@ import {
 } from '@busca-ofertas-ai/storage-sqlite/testing';
 
 describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => {
-  it('migrates empty database to latest production version (v3) idempotently', () => {
+  it('migrates empty database to latest production version (v4) idempotently', () => {
     withTempDatabase((db) => {
       expect(db.getCurrentSchemaVersion()).toBe(0);
       expect(db.getAppliedMigrations()).toEqual([]);
 
-      // First run: applies migration 1, 2, and 3
+      // First run: applies migration 1, 2, 3, and 4
       const result1 = db.migrate();
       expect(result1.previousVersion).toBe(0);
-      expect(result1.currentVersion).toBe(3);
-      expect(result1.newlyAppliedCount).toBe(3);
-      expect(result1.appliedMigrations.length).toBe(3);
+      expect(result1.currentVersion).toBe(4);
+      expect(result1.newlyAppliedCount).toBe(4);
+      expect(result1.appliedMigrations.length).toBe(4);
       expect(result1.appliedMigrations[0]!.version).toBe(1);
       expect(result1.appliedMigrations[0]!.name).toBe('001_create_schema_migrations');
       expect(result1.appliedMigrations[1]!.version).toBe(2);
       expect(result1.appliedMigrations[1]!.name).toBe('002_create_operational_persistence');
       expect(result1.appliedMigrations[2]!.version).toBe(3);
       expect(result1.appliedMigrations[2]!.name).toBe('003_create_observation_history');
+      expect(result1.appliedMigrations[3]!.version).toBe(4);
+      expect(result1.appliedMigrations[3]!.name).toBe('004_create_review_feedback_persistence');
       expect(Date.parse(result1.appliedMigrations[0]!.appliedAt)).toBeGreaterThan(0);
       expect(Date.parse(result1.appliedMigrations[1]!.appliedAt)).toBeGreaterThan(0);
       expect(Date.parse(result1.appliedMigrations[2]!.appliedAt)).toBeGreaterThan(0);
+      expect(Date.parse(result1.appliedMigrations[3]!.appliedAt)).toBeGreaterThan(0);
 
-      expect(db.getCurrentSchemaVersion()).toBe(3);
+      expect(db.getCurrentSchemaVersion()).toBe(4);
 
       // Second run: idempotent no-op
       const result2 = db.migrate();
-      expect(result2.previousVersion).toBe(3);
-      expect(result2.currentVersion).toBe(3);
+      expect(result2.previousVersion).toBe(4);
+      expect(result2.currentVersion).toBe(4);
       expect(result2.newlyAppliedCount).toBe(0);
-      expect(result2.appliedMigrations.length).toBe(3);
+      expect(result2.appliedMigrations.length).toBe(4);
 
       // Third run: still idempotent
       const result3 = db.migrate();
-      expect(result3.currentVersion).toBe(3);
+      expect(result3.currentVersion).toBe(4);
       expect(result3.newlyAppliedCount).toBe(0);
     });
   });
 
-  it('migrates v1 database to latest v3 version seamlessly and retains schema_migrations history', () => {
+  it('migrates v1 database to latest v4 version seamlessly and retains schema_migrations history', () => {
     const ctx = createTempDatabaseContext();
     try {
       // Step 1: Migrate only v1
@@ -66,23 +69,25 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
       expect(dbV1.getCurrentSchemaVersion()).toBe(1);
       dbV1.close();
 
-      // Step 2: Open with full production runner (v1, v2, v3)
+      // Step 2: Open with full production runner (v1, v2, v3, v4)
       const dbLatest = openSqliteDatabase({
         databasePath: ctx.databasePath,
       });
       expect(dbLatest.getCurrentSchemaVersion()).toBe(1);
 
-      const v3Result = dbLatest.migrate();
-      expect(v3Result.previousVersion).toBe(1);
-      expect(v3Result.currentVersion).toBe(3);
-      expect(v3Result.newlyAppliedCount).toBe(2);
-      expect(v3Result.appliedMigrations.length).toBe(3);
-      expect(v3Result.appliedMigrations[1]!.version).toBe(2);
-      expect(v3Result.appliedMigrations[1]!.name).toBe('002_create_operational_persistence');
-      expect(v3Result.appliedMigrations[2]!.version).toBe(3);
-      expect(v3Result.appliedMigrations[2]!.name).toBe('003_create_observation_history');
+      const v4Result = dbLatest.migrate();
+      expect(v4Result.previousVersion).toBe(1);
+      expect(v4Result.currentVersion).toBe(4);
+      expect(v4Result.newlyAppliedCount).toBe(3);
+      expect(v4Result.appliedMigrations.length).toBe(4);
+      expect(v4Result.appliedMigrations[1]!.version).toBe(2);
+      expect(v4Result.appliedMigrations[1]!.name).toBe('002_create_operational_persistence');
+      expect(v4Result.appliedMigrations[2]!.version).toBe(3);
+      expect(v4Result.appliedMigrations[2]!.name).toBe('003_create_observation_history');
+      expect(v4Result.appliedMigrations[3]!.version).toBe(4);
+      expect(v4Result.appliedMigrations[3]!.name).toBe('004_create_review_feedback_persistence');
 
-      expect(dbLatest.getCurrentSchemaVersion()).toBe(3);
+      expect(dbLatest.getCurrentSchemaVersion()).toBe(4);
 
       // Verify all operational tables exist
       const tables = dbLatest
@@ -99,6 +104,9 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
       expect(tableNames).toContain('source_runs');
       expect(tableNames).toContain('listings');
       expect(tableNames).toContain('observations');
+      expect(tableNames).toContain('evaluations');
+      expect(tableNames).toContain('opportunities');
+      expect(tableNames).toContain('feedback');
       expect(tableNames).toContain('execution_lock');
 
       dbLatest.close();
@@ -107,7 +115,7 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
     }
   });
 
-  it('migrates v2 database to latest v3 version seamlessly (incremental migration 003)', () => {
+  it('migrates v2 database to latest v4 version seamlessly (incremental migrations 003 and 004)', () => {
     const ctx = createTempDatabaseContext();
     try {
       // Step 1: Migrate v1 and v2
@@ -125,21 +133,23 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
       expect(dbV2.getCurrentSchemaVersion()).toBe(2);
       dbV2.close();
 
-      // Step 2: Open with full production runner (applies v3)
+      // Step 2: Open with full production runner (applies v3 and v4)
       const dbLatest = openSqliteDatabase({
         databasePath: ctx.databasePath,
       });
       expect(dbLatest.getCurrentSchemaVersion()).toBe(2);
 
-      const v3Result = dbLatest.migrate();
-      expect(v3Result.previousVersion).toBe(2);
-      expect(v3Result.currentVersion).toBe(3);
-      expect(v3Result.newlyAppliedCount).toBe(1);
-      expect(v3Result.appliedMigrations.length).toBe(3);
-      expect(v3Result.appliedMigrations[2]!.version).toBe(3);
-      expect(v3Result.appliedMigrations[2]!.name).toBe('003_create_observation_history');
+      const v4Result = dbLatest.migrate();
+      expect(v4Result.previousVersion).toBe(2);
+      expect(v4Result.currentVersion).toBe(4);
+      expect(v4Result.newlyAppliedCount).toBe(2);
+      expect(v4Result.appliedMigrations.length).toBe(4);
+      expect(v4Result.appliedMigrations[2]!.version).toBe(3);
+      expect(v4Result.appliedMigrations[2]!.name).toBe('003_create_observation_history');
+      expect(v4Result.appliedMigrations[3]!.version).toBe(4);
+      expect(v4Result.appliedMigrations[3]!.name).toBe('004_create_review_feedback_persistence');
 
-      expect(dbLatest.getCurrentSchemaVersion()).toBe(3);
+      expect(dbLatest.getCurrentSchemaVersion()).toBe(4);
 
       dbLatest.close();
     } finally {
@@ -147,15 +157,15 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
     }
   });
 
-  it('rejects unsupported future schema version (>3) with fail-closed error', () => {
+  it('rejects unsupported future schema version (>4) with fail-closed error', () => {
     const ctx = createTempDatabaseContext();
     try {
-      // Create DB with future schema version 4
+      // Create DB with future schema version 5
       const customFutureMigrations: readonly Migration[] = [
         ...PRODUCTION_MIGRATIONS,
         {
-          version: 4,
-          name: '004_future_feature_table',
+          version: 5,
+          name: '005_future_feature_table',
           up: (tx) => {
             tx.exec('CREATE TABLE future_table (id INT PRIMARY KEY);');
           },
@@ -167,10 +177,10 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
         customMigrations: customFutureMigrations,
       });
       dbWithFuture.migrate();
-      expect(dbWithFuture.getCurrentSchemaVersion()).toBe(4);
+      expect(dbWithFuture.getCurrentSchemaVersion()).toBe(5);
       dbWithFuture.close();
 
-      // Now open with standard production runner (which only knows up to version 3)
+      // Now open with standard production runner (which only knows up to version 4)
       const standardDb = openSqliteDatabase({
         databasePath: ctx.databasePath,
       });
@@ -182,9 +192,9 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
         expect(err).toBeInstanceOf(SchemaVersionUnsupportedError);
         if (err instanceof SchemaVersionUnsupportedError) {
           expect(err.code).toBe('SCHEMA_VERSION_UNSUPPORTED');
-          expect(err.foundVersion).toBe(4);
-          expect(err.maxSupportedVersion).toBe(3);
-          expect(err.message).toContain('exceeds maximum version 3');
+          expect(err.foundVersion).toBe(5);
+          expect(err.maxSupportedVersion).toBe(4);
+          expect(err.message).toContain('exceeds maximum version 4');
           expect(err.message).toContain('Please upgrade');
         }
       }
@@ -420,9 +430,12 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
 
       const tableNames = tables.map((t) => t.name).sort();
       expect(tableNames).toEqual([
+        'evaluations',
         'execution_lock',
+        'feedback',
         'listings',
         'observations',
+        'opportunities',
         'runs',
         'saved_search_revisions',
         'saved_searches',
@@ -495,13 +508,7 @@ describe('SQLite Migrations Framework & Contracts (BOAI-010 & BOAI-011)', () => 
       expect(adapterVerCol?.notnull).toBe(1);
 
       // Explicit assertions that out-of-scope tables do NOT exist
-      const outOfScopeTables = [
-        'opportunities',
-        'evaluations',
-        'feedback',
-        'raw_artifacts',
-        'reports',
-      ];
+      const outOfScopeTables = ['raw_artifacts', 'reports', 'raw_payloads'];
 
       for (const table of outOfScopeTables) {
         const check = db

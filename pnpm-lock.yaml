@@ -80,12 +80,18 @@ importers:
       '@busca-ofertas-ai/configuration':
         specifier: workspace:*
         version: link:../../packages/configuration
+      '@busca-ofertas-ai/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@busca-ofertas-ai/report-html':
         specifier: workspace:*
         version: link:../../packages/report-html
       '@busca-ofertas-ai/run-export':
         specifier: workspace:*
         version: link:../../packages/run-export
+      '@busca-ofertas-ai/storage-sqlite':
+        specifier: workspace:*
+        version: link:../../packages/storage-sqlite
 
   packages/adapter-sdk:
     dependencies:

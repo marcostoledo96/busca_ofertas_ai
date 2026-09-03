@@ -182,3 +182,8 @@ export class ExitActionHandler implements MenuAction {
     return Promise.resolve({ kind: 'finish', exitCode: EXIT_CODES.SUCCESS });
   }
 }
+
+export {
+  type ReviewListingsActionHandlerParams,
+  ReviewListingsActionHandler,
+} from './review-listings-action.js';

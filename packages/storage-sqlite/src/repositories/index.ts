@@ -3,6 +3,9 @@ import { SqliteSavedSearchRepository } from './saved-search-repository.js';
 import { SqliteRunRepository } from './run-repository.js';
 import { SqliteListingRepository } from './listing-repository.js';
 import { SqliteObservationRepository } from './observation-repository.js';
+import { SqliteEvaluationRepository } from './evaluation-repository.js';
+import { SqliteOpportunityRepository } from './opportunity-repository.js';
+import { SqliteFeedbackRepository } from './feedback-repository.js';
 import { SqliteExecutionLock } from './execution-lock.js';
 
 export {
@@ -10,6 +13,9 @@ export {
   SqliteRunRepository,
   SqliteListingRepository,
   SqliteObservationRepository,
+  SqliteEvaluationRepository,
+  SqliteOpportunityRepository,
+  SqliteFeedbackRepository,
   SqliteExecutionLock,
 };
 
@@ -18,6 +24,9 @@ export interface SqliteRepositories {
   readonly runs: SqliteRunRepository;
   readonly listings: SqliteListingRepository;
   readonly observations: SqliteObservationRepository;
+  readonly evaluations: SqliteEvaluationRepository;
+  readonly opportunities: SqliteOpportunityRepository;
+  readonly feedback: SqliteFeedbackRepository;
   readonly executionLock: SqliteExecutionLock;
 }
 
@@ -27,6 +36,9 @@ export function createSqliteRepositories(db: SqliteDatabase): SqliteRepositories
     runs: new SqliteRunRepository(db),
     listings: new SqliteListingRepository(db),
     observations: new SqliteObservationRepository(db),
+    evaluations: new SqliteEvaluationRepository(db),
+    opportunities: new SqliteOpportunityRepository(db),
+    feedback: new SqliteFeedbackRepository(db),
     executionLock: new SqliteExecutionLock(db),
   };
 }

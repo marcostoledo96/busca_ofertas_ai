@@ -194,6 +194,11 @@ class InMemoryOpportunityRepository implements OpportunityRepository {
     return Promise.resolve(list);
   }
 
+  public listByRunId(_runId: string): Promise<readonly Opportunity[]> {
+    void _runId;
+    return Promise.resolve(Array.from(this.opportunities.values()));
+  }
+
   public save(opportunity: Opportunity): Promise<void> {
     this.opportunities.set(opportunity.id, opportunity);
     return Promise.resolve();
@@ -378,6 +383,8 @@ describe('Domain Ports, Clock and IdGenerator Injectability (BOAI-002)', () => {
     const fb = createFeedback({
       id: 'fb-1',
       opportunityId: opp.id,
+      previousEvaluationId: 'eval-1',
+      actor: 'LOCAL_USER',
       decision: 'CONFIRMED_MATCH',
       createdAt: baseDate,
     });

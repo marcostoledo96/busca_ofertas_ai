@@ -20,6 +20,9 @@ export type SqliteStorageErrorCode =
   | 'OBSERVATION_IDENTITY_COLLISION'
   | 'OBSERVATION_FINGERPRINT_COLLISION'
   | 'RECORD_OBSERVATION_COHERENCE_ERROR'
+  | 'EVALUATION_IDENTITY_COLLISION'
+  | 'OPPORTUNITY_IDENTITY_COLLISION'
+  | 'FEEDBACK_IDENTITY_COLLISION'
   | 'SENSITIVE_DATA_DETECTED';
 
 export interface SqliteStorageErrorOptions {
@@ -436,6 +439,69 @@ export class RecordObservationCoherenceError extends SqliteStorageError {
     super(msg, 'RECORD_OBSERVATION_COHERENCE_ERROR', options);
     this.name = 'RecordObservationCoherenceError';
     this.details = details;
+  }
+}
+
+export interface EvaluationIdentityCollisionDetails {
+  readonly evaluationId: string;
+}
+
+export class EvaluationIdentityCollisionError extends SqliteStorageError {
+  readonly evaluationId: string;
+
+  constructor(
+    details: EvaluationIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Evaluation identity conflict on evaluation ID '${details.evaluationId}': existing record is immutable and cannot be overwritten with different content.`;
+    super(msg, 'EVALUATION_IDENTITY_COLLISION', options);
+    this.name = 'EvaluationIdentityCollisionError';
+    this.evaluationId = details.evaluationId;
+  }
+}
+
+export interface OpportunityIdentityCollisionDetails {
+  readonly opportunityId: string;
+}
+
+export class OpportunityIdentityCollisionError extends SqliteStorageError {
+  readonly opportunityId: string;
+
+  constructor(
+    details: OpportunityIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Opportunity identity conflict on opportunity ID '${details.opportunityId}': existing record is immutable and cannot be overwritten with different content.`;
+    super(msg, 'OPPORTUNITY_IDENTITY_COLLISION', options);
+    this.name = 'OpportunityIdentityCollisionError';
+    this.opportunityId = details.opportunityId;
+  }
+}
+
+export interface FeedbackIdentityCollisionDetails {
+  readonly feedbackId: string;
+}
+
+export class FeedbackIdentityCollisionError extends SqliteStorageError {
+  readonly feedbackId: string;
+
+  constructor(
+    details: FeedbackIdentityCollisionDetails,
+    message?: string,
+    options?: SqliteStorageErrorOptions,
+  ) {
+    const msg =
+      message ??
+      `Feedback identity conflict on feedback ID '${details.feedbackId}': existing record is immutable and cannot be overwritten with different content.`;
+    super(msg, 'FEEDBACK_IDENTITY_COLLISION', options);
+    this.name = 'FeedbackIdentityCollisionError';
+    this.feedbackId = details.feedbackId;
   }
 }
 

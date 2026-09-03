@@ -2,6 +2,7 @@ import { SavedSearch } from '../domain/search/saved-search.js';
 import { Listing } from '../domain/listing/listing.js';
 import { Observation } from '../domain/listing/observation.js';
 import { Opportunity } from '../domain/opportunity/opportunity.js';
+import { Evaluation } from '../domain/evaluation/evaluation.js';
 import { Feedback } from '../domain/opportunity/feedback.js';
 import { Run } from '../domain/run/run.js';
 import { SourceRun } from '../domain/run/source-run.js';
@@ -59,9 +60,15 @@ export interface ObservationRepository {
   recordObservation(params: RecordObservationParams): Promise<RecordObservationResult>;
 }
 
+export interface EvaluationRepository {
+  getById(id: string): Promise<Evaluation | null>;
+  save(evaluation: Evaluation): Promise<void>;
+}
+
 export interface OpportunityRepository {
   getById(id: string): Promise<Opportunity | null>;
   listBySavedSearchId(savedSearchId: string): Promise<readonly Opportunity[]>;
+  listByRunId(runId: string): Promise<readonly Opportunity[]>;
   save(opportunity: Opportunity): Promise<void>;
 }
 

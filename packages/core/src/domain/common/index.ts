@@ -20,3 +20,15 @@ export interface Clock {
 export interface IdGenerator {
   generate(): string;
 }
+
+export class SystemClock implements Clock {
+  now(): Date {
+    return new Date();
+  }
+}
+
+export class UuidIdGenerator implements IdGenerator {
+  generate(): string {
+    return crypto.randomUUID();
+  }
+}

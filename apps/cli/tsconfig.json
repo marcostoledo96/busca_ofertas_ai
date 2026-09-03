@@ -8,9 +8,11 @@
   },
   "include": ["src/**/*"],
   "references": [
+    { "path": "../../packages/core" },
     { "path": "../../packages/configuration" },
     { "path": "../../packages/report-html" },
     { "path": "../../packages/run-export" },
+    { "path": "../../packages/storage-sqlite" },
     { "path": "../../adapters/synthetic" }
   ]
 }
