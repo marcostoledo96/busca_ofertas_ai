@@ -44,6 +44,7 @@ adapters/*
 apps/cli ───────────────┐
 adapters/* ─────────────┤
 packages/storage-sqlite ┤
+packages/rules-engine ──┤
 packages/report-html ───┤
 packages/exports ───────┤
 packages/ai ────────────┤
