@@ -7,6 +7,7 @@ import {
   EvaluationReasonCodes,
   createEngineReason,
   evaluateRules,
+  RequiredTermsRule,
 } from '@busca-ofertas-ai/rules-engine';
 import {
   createMockRuleEvaluationContext,
@@ -168,5 +169,53 @@ describe('packages/rules-engine — Contract & Reason Code Stability', () => {
     // Reason code is the primary key identity
     expect(reasonV1.code).toBe(reasonV2.code);
     expect(reasonV1.message).not.toBe(reasonV2.message);
+  });
+
+  it('enforces that EvaluationReasonCodes is runtime immutable (frozen) and immune to mutation attempts', () => {
+    // 1. Runtime freeze check
+    expect(Object.isFrozen(EvaluationReasonCodes)).toBe(true);
+
+    // 2. Attempting to mutate REQUIRED_TERM_MATCH throws in strict mode
+    expect(() => {
+      // @ts-expect-error - testing runtime immutability against mutation
+      EvaluationReasonCodes.REQUIRED_TERM_MATCH = 'MUTATED_CODE';
+    }).toThrow(TypeError);
+
+    // 3. Create a RequiredTermsRule with fixed inputs and evaluate
+    const rule = new RequiredTermsRule({
+      terms: ['Nintendo'],
+      impactPerTerm: 30,
+    });
+    const evalContext = createMockRuleEvaluationContext({
+      observationOverrides: {
+        title: 'Nintendo Switch Lite Azul',
+        description: 'Impecable estado con cargador',
+      },
+    });
+
+    const eval1 = evaluateRules([rule], evalContext, defaultPolicy);
+    expect(eval1.reasons[0]?.code).toBe(EvaluationReasonCodes.REQUIRED_TERM_MATCH);
+    expect(eval1.reasons[0]?.code).toBe('RULES_REQUIRED_TERM_MATCH');
+
+    // 4. Attempt to mutate the catalog again
+    expect(() => {
+      // @ts-expect-error - testing runtime immutability against mutation
+      EvaluationReasonCodes.DEFAULT_BASELINE = 'MUTATED_BASELINE';
+    }).toThrow(TypeError);
+
+    // 5. Re-evaluate with exact same inputs
+    const eval2 = evaluateRules([rule], evalContext, defaultPolicy);
+
+    // 6. Complete semantic identity
+    expect(eval2.decision).toBe(eval1.decision);
+    expect(eval2.score).toBe(eval1.score);
+    expect(eval2.reasons).toEqual(eval1.reasons);
+    expect(eval2.evaluatedBy).toEqual(eval1.evaluatedBy);
+    expect(eval2.policyVersion).toBe(eval1.policyVersion);
+    expect(eval2.policyVersion).toBe('1.0.0');
+
+    // 7. Contractual strings preserved
+    expect(EvaluationReasonCodes.REQUIRED_TERM_MATCH).toBe('RULES_REQUIRED_TERM_MATCH');
+    expect(EvaluationReasonCodes.DEFAULT_BASELINE).toBe('RULES_DEFAULT_BASELINE');
   });
 });

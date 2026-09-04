@@ -8,7 +8,7 @@ import {
  * Contractual reason code catalog for the deterministic rules engine.
  * These identifiers are stable machine codes, decoupled from human-readable copy.
  */
-export const EvaluationReasonCodes = {
+export const EvaluationReasonCodes = Object.freeze({
   // Baseline / Default
   DEFAULT_BASELINE: 'RULES_DEFAULT_BASELINE',
   NO_RULES_TRIGGERED: 'RULES_NO_RULES_TRIGGERED',
@@ -40,7 +40,7 @@ export const EvaluationReasonCodes = {
 
   // Hard Rejections
   HARD_EXCLUSION: 'RULES_HARD_EXCLUSION',
-} as const;
+} as const);
 
 export type EvaluationReasonCode =
   (typeof EvaluationReasonCodes)[keyof typeof EvaluationReasonCodes] | (string & {});

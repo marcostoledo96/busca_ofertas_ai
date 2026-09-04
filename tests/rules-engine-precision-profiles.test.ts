@@ -196,9 +196,12 @@ describe('packages/rules-engine — Precision Profiles & Extensibility', () => {
     expect(eval1.score).toBe(80);
     expect(eval1.policyVersion).toBe('1.0.0');
 
-    // 2. Verify runtime immutability of STANDARD_PROFILES
+    // 2. Verify runtime immutability of STANDARD_PROFILES and all standard profiles
     expect(Object.isFrozen(STANDARD_PROFILES)).toBe(true);
+    expect(Object.isFrozen(STANDARD_PROFILES.STRICT)).toBe(true);
     expect(Object.isFrozen(STANDARD_PROFILES.BALANCED)).toBe(true);
+    expect(Object.isFrozen(STANDARD_PROFILES.PERMISSIVE)).toBe(true);
+    expect(Object.isFrozen(STANDARD_PROFILES.MIXED)).toBe(true);
     expect(() => {
       // @ts-expect-error - testing runtime freeze protection against mutation
       STANDARD_PROFILES.BALANCED.matchThresholdModifier = 50;
@@ -236,7 +239,7 @@ describe('packages/rules-engine — Precision Profiles & Extensibility', () => {
     expect(eval2.policyVersion).toBe('1.0.0');
   });
 
-  it('strictly enforces explicit policyVersion when using custom profile registries', () => {
+  it('strictly enforces explicit canonical policyVersion when using custom profile registries (HIGH-02)', () => {
     const customRegistry = new PrecisionProfileRegistry();
     customRegistry.register({
       name: 'CUSTOM_STRICT',
@@ -254,7 +257,7 @@ describe('packages/rules-engine — Precision Profiles & Extensibility', () => {
       precisionProfile: 'CUSTOM_STRICT' as unknown as StandardPrecisionProfile,
     };
 
-    // 1. Omitting policyVersion when using a custom registry must fail closed
+    // 1. undefined -> FAIL (both omitted and explicit undefined)
     expect(() =>
       evaluateRules([rule], baseContext, customPolicy, {
         precisionProfileRegistry: customRegistry,
@@ -263,10 +266,35 @@ describe('packages/rules-engine — Precision Profiles & Extensibility', () => {
     expect(() =>
       evaluateRules([rule], baseContext, customPolicy, {
         precisionProfileRegistry: customRegistry,
+        policyVersion: undefined as unknown as string,
       }),
-    ).toThrow(/requires an explicit 'policyVersion'/);
+    ).toThrow(InvariantViolationError);
 
-    // 2. Passing the default policyVersion ('1.0.0') with a custom registry must also fail closed
+    // 2. empty string '' -> FAIL
+    expect(() =>
+      evaluateRules([rule], baseContext, customPolicy, {
+        precisionProfileRegistry: customRegistry,
+        policyVersion: '',
+      }),
+    ).toThrow(InvariantViolationError);
+
+    // 3. whitespace-only '   ' -> FAIL
+    expect(() =>
+      evaluateRules([rule], baseContext, customPolicy, {
+        precisionProfileRegistry: customRegistry,
+        policyVersion: '   ',
+      }),
+    ).toThrow(InvariantViolationError);
+
+    // 4. whitespace with tabs/newlines '\t  \n' -> FAIL
+    expect(() =>
+      evaluateRules([rule], baseContext, customPolicy, {
+        precisionProfileRegistry: customRegistry,
+        policyVersion: '\t  \n',
+      }),
+    ).toThrow(InvariantViolationError);
+
+    // 5. '1.0.0' exact default -> FAIL
     expect(() =>
       evaluateRules([rule], baseContext, customPolicy, {
         precisionProfileRegistry: customRegistry,
@@ -274,12 +302,43 @@ describe('packages/rules-engine — Precision Profiles & Extensibility', () => {
       }),
     ).toThrow(InvariantViolationError);
 
-    // 3. Supplying an explicit custom policyVersion succeeds
+    // 6. ' 1.0.0 ' padded with spaces -> FAIL (canonicalization prevents bypass)
+    expect(() =>
+      evaluateRules([rule], baseContext, customPolicy, {
+        precisionProfileRegistry: customRegistry,
+        policyVersion: ' 1.0.0 ',
+      }),
+    ).toThrow(InvariantViolationError);
+
+    // 7. '\t1.0.0\n' padded with tab/newline -> FAIL
+    expect(() =>
+      evaluateRules([rule], baseContext, customPolicy, {
+        precisionProfileRegistry: customRegistry,
+        policyVersion: '\t1.0.0\n',
+      }),
+    ).toThrow(InvariantViolationError);
+
+    // 8. Unicode whitespace '\u20031.0.0\u3000' -> FAIL
+    expect(() =>
+      evaluateRules([rule], baseContext, customPolicy, {
+        precisionProfileRegistry: customRegistry,
+        policyVersion: '\u20031.0.0\u3000',
+      }),
+    ).toThrow(InvariantViolationError);
+
+    // 9. ' custom-v2 ' -> PASS and canonicalized to 'custom-v2'
     const evalCustom = evaluateRules([rule], baseContext, customPolicy, {
       precisionProfileRegistry: customRegistry,
-      policyVersion: '2.0.0-custom-strict',
+      policyVersion: ' custom-v2 ',
     });
-    expect(evalCustom.policyVersion).toBe('2.0.0-custom-strict');
+    expect(evalCustom.policyVersion).toBe('custom-v2');
+
+    // 10. Standard route without custom registry produces DEFAULT_RULES_POLICY_VERSION ('1.0.0')
+    const evalStandard = evaluateRules([rule], baseContext, {
+      matchThreshold: 80,
+      reviewThreshold: 40,
+    });
+    expect(evalStandard.policyVersion).toBe('1.0.0');
   });
 
   it('guarantees that two distinct custom profile semantics cannot silently share or masquerade under the default policyVersion', () => {

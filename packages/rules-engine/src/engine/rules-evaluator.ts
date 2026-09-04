@@ -62,12 +62,16 @@ export const evaluateRules = (
     throw new InvariantViolationError('evaluateRules requires a valid EvaluationPolicy');
   }
 
-  // 1. Resolve precision profile & enforce explicit versioning for custom profiles
+  // 1. Resolve precision profile & enforce canonical explicit versioning for custom profiles
   const profileName = policy.precisionProfile ?? 'MIXED';
   let profile: PrecisionProfileConfig;
 
+  const rawPolicyVersion = options?.policyVersion;
+  const canonicalPolicyVersion =
+    typeof rawPolicyVersion === 'string' ? rawPolicyVersion.trim() : undefined;
+
   if (options?.precisionProfileRegistry) {
-    if (!options.policyVersion || options.policyVersion === DEFAULT_RULES_POLICY_VERSION) {
+    if (!canonicalPolicyVersion || canonicalPolicyVersion === DEFAULT_RULES_POLICY_VERSION) {
       throw new InvariantViolationError(
         `Evaluating with a custom precision profile registry requires an explicit 'policyVersion' distinct from default '${DEFAULT_RULES_POLICY_VERSION}' to prevent semantic drift`,
       );
@@ -150,7 +154,10 @@ export const evaluateRules = (
 
   const createdAt = options?.createdAt ?? options?.clock?.now() ?? new Date(0);
 
-  const policyVersion = options?.policyVersion ?? DEFAULT_RULES_POLICY_VERSION;
+  const policyVersion =
+    canonicalPolicyVersion && canonicalPolicyVersion.length > 0
+      ? canonicalPolicyVersion
+      : DEFAULT_RULES_POLICY_VERSION;
 
   return createEvaluation({
     id: evaluationId,
