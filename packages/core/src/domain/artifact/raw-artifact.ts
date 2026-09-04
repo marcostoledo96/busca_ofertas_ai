@@ -134,6 +134,13 @@ export function createRawArtifact(params: CreateRawArtifactParams): RawArtifact 
     throw new InvariantViolationError('Artifact expiresAt cannot be earlier than createdAt');
   }
 
+  const runId = params.runId ? params.runId.trim() : null;
+  const sourceRunId = params.sourceRunId ? params.sourceRunId.trim() : null;
+
+  if (sourceRunId !== null && runId === null) {
+    throw new InvariantViolationError('Artifact with sourceRunId must have a non-null runId');
+  }
+
   return Object.freeze({
     id: params.id.trim(),
     relativePath: params.relativePath.trim(),
@@ -144,8 +151,8 @@ export function createRawArtifact(params: CreateRawArtifactParams): RawArtifact 
     contentType: params.contentType.trim(),
     createdAt: new Date(params.createdAt.getTime()),
     expiresAt: new Date(params.expiresAt.getTime()),
-    runId: params.runId ? params.runId.trim() : null,
-    sourceRunId: params.sourceRunId ? params.sourceRunId.trim() : null,
+    runId,
+    sourceRunId,
     metadata: params.metadata ? Object.freeze({ ...params.metadata }) : null,
   });
 }

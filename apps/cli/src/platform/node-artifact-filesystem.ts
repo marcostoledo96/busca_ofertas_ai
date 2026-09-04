@@ -10,11 +10,78 @@ import {
   validateRelativeArtifactPath,
 } from '@busca-ofertas-ai/core';
 
+function isEnospc(err: unknown): boolean {
+  return (
+    err instanceof DiskFullError ||
+    (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOSPC')
+  );
+}
+
 export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
   private readonly artifactsRoot: string;
 
   constructor(artifactsRoot: string) {
     this.artifactsRoot = path.resolve(artifactsRoot);
+  }
+
+  private async verifyRoot(checkExists = false): Promise<void> {
+    try {
+      const stat = await fs.promises.lstat(this.artifactsRoot);
+      if (stat.isSymbolicLink()) {
+        throw new ArtifactSymlinkEscapeError(
+          `Artifacts root directory '${this.artifactsRoot}' is a symbolic link`,
+        );
+      }
+      if (!stat.isDirectory()) {
+        throw new ArtifactSymlinkEscapeError(
+          `Artifacts root '${this.artifactsRoot}' is not a directory`,
+        );
+      }
+    } catch (err: unknown) {
+      if (err instanceof ArtifactSymlinkEscapeError) {
+        throw err;
+      }
+      if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
+        if (checkExists) {
+          throw err;
+        }
+        return;
+      }
+      if (isEnospc(err)) {
+        throw new DiskFullError();
+      }
+      throw err;
+    }
+  }
+
+  private async verifyTmpDir(tmpDir: string, checkExists = false): Promise<void> {
+    try {
+      const stat = await fs.promises.lstat(tmpDir);
+      if (stat.isSymbolicLink()) {
+        throw new ArtifactSymlinkEscapeError(
+          `Artifacts temporary directory '${tmpDir}' is a symbolic link`,
+        );
+      }
+      if (!stat.isDirectory()) {
+        throw new ArtifactSymlinkEscapeError(
+          `Artifacts temporary path '${tmpDir}' is not a directory`,
+        );
+      }
+    } catch (err: unknown) {
+      if (err instanceof ArtifactSymlinkEscapeError) {
+        throw err;
+      }
+      if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
+        if (checkExists) {
+          throw err;
+        }
+        return;
+      }
+      if (isEnospc(err)) {
+        throw new DiskFullError();
+      }
+      throw err;
+    }
   }
 
   /**
@@ -55,12 +122,18 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
           );
         }
       } catch (err: unknown) {
+        if (err instanceof ArtifactSymlinkEscapeError) {
+          throw err;
+        }
         if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
           if (checkComponentsExist) {
             return resolved;
           }
           // Component doesn't exist yet, which is normal for writes
           break;
+        }
+        if (isEnospc(err)) {
+          throw new DiskFullError();
         }
         throw err;
       }
@@ -73,12 +146,22 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
     relativePath: string,
     bytes: Uint8Array,
   ): Promise<{ sizeBytes: number }> {
+    await this.verifyRoot(false);
     const destinationPath = await this.resolveAndVerifyPath(relativePath, false);
 
-    // Ensure root exists
-    await fs.promises.mkdir(this.artifactsRoot, { recursive: true, mode: 0o700 });
+    // 1. Ensure root exists with mode 0700
+    try {
+      await fs.promises.mkdir(this.artifactsRoot, { recursive: true, mode: 0o700 });
+    } catch (err: unknown) {
+      if (isEnospc(err)) {
+        throw new DiskFullError();
+      }
+      throw err;
+    }
 
-    // Check if destination already exists (fail closed: zero overwrite)
+    await this.verifyRoot(true);
+
+    // 2. Check if destination already exists (fail closed: zero overwrite)
     try {
       const destStat = await fs.promises.lstat(destinationPath);
       if (destStat.isSymbolicLink()) {
@@ -92,15 +175,28 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
       ) {
         throw err;
       }
-      // If error is not ENOENT, rethrow
       if (!(err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT')) {
+        if (isEnospc(err)) {
+          throw new DiskFullError();
+        }
         throw err;
       }
     }
 
-    // Stage write in .tmp directory
+    // 3. Stage write in .tmp directory
     const tmpDir = path.join(this.artifactsRoot, '.tmp');
-    await fs.promises.mkdir(tmpDir, { recursive: true, mode: 0o700 });
+    await this.verifyTmpDir(tmpDir, false);
+
+    try {
+      await fs.promises.mkdir(tmpDir, { recursive: true, mode: 0o700 });
+    } catch (err: unknown) {
+      if (isEnospc(err)) {
+        throw new DiskFullError();
+      }
+      throw err;
+    }
+
+    await this.verifyTmpDir(tmpDir, true);
 
     const tmpFileName = `tmp_${crypto.randomUUID()}.tmp`;
     const tmpFilePath = path.join(tmpDir, tmpFileName);
@@ -108,50 +204,73 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
     let handle: fs.promises.FileHandle | null = null;
     try {
       // Create exclusive file with 0600 permissions
-      handle = await fs.promises.open(tmpFilePath, 'wx', 0o600);
-      await handle.write(bytes);
-      await handle.sync();
-      await handle.close();
-      handle = null;
+      try {
+        handle = await fs.promises.open(tmpFilePath, 'wx', 0o600);
+      } catch (openErr: unknown) {
+        if (isEnospc(openErr)) {
+          throw new DiskFullError();
+        }
+        throw openErr;
+      }
+
+      try {
+        await handle.write(bytes);
+        await handle.sync();
+      } catch (writeErr: unknown) {
+        if (isEnospc(writeErr)) {
+          throw new DiskFullError();
+        }
+        throw writeErr;
+      } finally {
+        await handle.close();
+        handle = null;
+      }
 
       // Ensure destination directory exists
       const targetDir = path.dirname(destinationPath);
-      await fs.promises.mkdir(targetDir, { recursive: true, mode: 0o700 });
-
-      // Final pre-commit collision check
       try {
-        await fs.promises.lstat(destinationPath);
-        throw new ArtifactIdentityCollisionError(
-          `Artifact file already exists at '${relativePath}'`,
-        );
-      } catch (preCommitErr: unknown) {
-        if (preCommitErr instanceof ArtifactIdentityCollisionError) {
-          throw preCommitErr;
+        await fs.promises.mkdir(targetDir, { recursive: true, mode: 0o700 });
+      } catch (mkdirErr: unknown) {
+        if (isEnospc(mkdirErr)) {
+          throw new DiskFullError();
         }
-        if (!(
-          preCommitErr instanceof Error &&
-          'code' in preCommitErr &&
-          (preCommitErr as { code: string }).code === 'ENOENT'
-        )) {
-          throw preCommitErr;
-        }
+        throw mkdirErr;
       }
 
-      // Atomic rename
-      await fs.promises.rename(tmpFilePath, destinationPath);
+      // Verify target directory has no symlinks
+      const targetStat = await fs.promises.lstat(targetDir);
+      if (targetStat.isSymbolicLink()) {
+        throw new ArtifactSymlinkEscapeError(`Target directory '${targetDir}' is a symbolic link`);
+      }
+
+      // Atomic commit: hard-link temp to destination (atomically fails with EEXIST if destination exists)
+      try {
+        await fs.promises.link(tmpFilePath, destinationPath);
+      } catch (linkErr: unknown) {
+        if (
+          linkErr instanceof Error &&
+          'code' in linkErr &&
+          (linkErr as { code: string }).code === 'EEXIST'
+        ) {
+          throw new ArtifactIdentityCollisionError(
+            `Artifact file already exists at '${relativePath}'`,
+          );
+        }
+        if (isEnospc(linkErr)) {
+          throw new DiskFullError();
+        }
+        throw linkErr;
+      }
+
+      // Unlink temp file after successful commit
+      await fs.promises.unlink(tmpFilePath).catch(() => {});
+
       return { sizeBytes: bytes.length };
     } catch (err: unknown) {
-      if (handle) {
-        try {
-          await handle.close();
-        } catch {
-          // ignore
-        }
-      }
       // Cleanup temp file
       await fs.promises.unlink(tmpFilePath).catch(() => {});
 
-      if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOSPC') {
+      if (isEnospc(err)) {
         throw new DiskFullError();
       }
       throw err;
@@ -159,6 +278,21 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
   }
 
   public async readSanitizedFile(relativePath: string): Promise<Uint8Array | null> {
+    try {
+      await this.verifyRoot(true);
+    } catch (err: unknown) {
+      if (err instanceof ArtifactSymlinkEscapeError) {
+        throw err;
+      }
+      if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
+        return null;
+      }
+      if (isEnospc(err)) {
+        throw new DiskFullError();
+      }
+      throw err;
+    }
+
     const filePath = await this.resolveAndVerifyPath(relativePath, true);
     try {
       const stat = await fs.promises.lstat(filePath);
@@ -176,11 +310,29 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
       if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
         return null;
       }
+      if (isEnospc(err)) {
+        throw new DiskFullError();
+      }
       throw err;
     }
   }
 
   public async deleteFile(relativePath: string): Promise<boolean> {
+    try {
+      await this.verifyRoot(true);
+    } catch (err: unknown) {
+      if (err instanceof ArtifactSymlinkEscapeError) {
+        throw err;
+      }
+      if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
+        return false;
+      }
+      if (isEnospc(err)) {
+        throw new DiskFullError();
+      }
+      throw err;
+    }
+
     const filePath = await this.resolveAndVerifyPath(relativePath, true);
     try {
       const stat = await fs.promises.lstat(filePath);
@@ -198,11 +350,29 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
       if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
         return false;
       }
+      if (isEnospc(err)) {
+        throw new DiskFullError();
+      }
       throw err;
     }
   }
 
   public async exists(relativePath: string): Promise<boolean> {
+    try {
+      await this.verifyRoot(true);
+    } catch (err: unknown) {
+      if (err instanceof ArtifactSymlinkEscapeError) {
+        throw err;
+      }
+      if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
+        return false;
+      }
+      if (isEnospc(err)) {
+        throw new DiskFullError();
+      }
+      throw err;
+    }
+
     const filePath = await this.resolveAndVerifyPath(relativePath, true);
     try {
       const stat = await fs.promises.lstat(filePath);
@@ -218,6 +388,9 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
       }
       if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
         return false;
+      }
+      if (isEnospc(err)) {
+        throw new DiskFullError();
       }
       throw err;
     }

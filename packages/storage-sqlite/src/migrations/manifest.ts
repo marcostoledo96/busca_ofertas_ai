@@ -294,6 +294,7 @@ const prodMigration005: Migration = Object.freeze({
         metadata TEXT CHECK(metadata IS NULL OR json_valid(metadata)),
         FOREIGN KEY (source_run_id, run_id) REFERENCES source_runs(id, run_id) ON DELETE SET NULL,
         CONSTRAINT chk_raw_artifacts_dates CHECK (expires_at >= created_at),
+        CONSTRAINT chk_raw_artifacts_source_run_has_run CHECK (source_run_id IS NULL OR run_id IS NOT NULL),
         CONSTRAINT chk_raw_artifacts_relative_path CHECK (
           length(trim(relative_path)) > 0 AND
           relative_path NOT LIKE '/%' AND

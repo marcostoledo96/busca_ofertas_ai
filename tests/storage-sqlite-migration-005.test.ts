@@ -115,7 +115,81 @@ describe('Storage SQLite Raw Artifacts Migration 005 & Repository (BOAI-016)', (
         `,
         ).run();
       }).toThrow(/FOREIGN KEY/i);
+
+      // 3. Negative case: existing source_run_id with NULL run_id FAILS CHECK constraint chk_raw_artifacts_source_run_has_run
+      expect(() => {
+        db.prepare(
+          `
+          INSERT INTO raw_artifacts (
+            id, relative_path, kind, size_bytes, fingerprint, reason,
+            created_at, expires_at, run_id, source_run_id, content_type
+          ) VALUES (
+            'art-null-run-1', '2026-09/art_null_run_1.txt', 'HTTP_PAYLOAD', 100, 'fp-3', 'ERROR',
+            '2026-09-03T12:00:00.000Z', '2026-10-03T12:00:00.000Z', NULL, 'sr-alpha-1', 'text/plain'
+          );
+        `,
+        ).run();
+      }).toThrow(/CHECK constraint failed.*chk_raw_artifacts_source_run_has_run/i);
+
+      // 4. Negative case: nonexistent source_run_id with NULL run_id FAILS CHECK constraint chk_raw_artifacts_source_run_has_run
+      expect(() => {
+        db.prepare(
+          `
+          INSERT INTO raw_artifacts (
+            id, relative_path, kind, size_bytes, fingerprint, reason,
+            created_at, expires_at, run_id, source_run_id, content_type
+          ) VALUES (
+            'art-null-run-2', '2026-09/art_null_run_2.txt', 'HTTP_PAYLOAD', 100, 'fp-4', 'ERROR',
+            '2026-09-03T12:00:00.000Z', '2026-10-03T12:00:00.000Z', NULL, 'sr-nonexistent', 'text/plain'
+          );
+        `,
+        ).run();
+      }).toThrow(/CHECK constraint failed.*chk_raw_artifacts_source_run_has_run/i);
+
+      // 5. Positive case: NULL source_run_id with valid run_id succeeds
+      expect(() => {
+        db.prepare(
+          `
+          INSERT INTO raw_artifacts (
+            id, relative_path, kind, size_bytes, fingerprint, reason,
+            created_at, expires_at, run_id, source_run_id, content_type
+          ) VALUES (
+            'art-null-source', '2026-09/art_null_source.txt', 'HTTP_PAYLOAD', 100, 'fp-5', 'ERROR',
+            '2026-09-03T12:00:00.000Z', '2026-10-03T12:00:00.000Z', 'run-alpha', NULL, 'text/plain'
+          );
+        `,
+        ).run();
+      }).not.toThrow();
+
+      // 6. Positive case: NULL source_run_id with NULL run_id succeeds
+      expect(() => {
+        db.prepare(
+          `
+          INSERT INTO raw_artifacts (
+            id, relative_path, kind, size_bytes, fingerprint, reason,
+            created_at, expires_at, run_id, source_run_id, content_type
+          ) VALUES (
+            'art-orphan-valid', '2026-09/art_orphan_valid.txt', 'HTTP_PAYLOAD', 100, 'fp-6', 'ERROR',
+            '2026-09-03T12:00:00.000Z', '2026-10-03T12:00:00.000Z', NULL, NULL, 'text/plain'
+          );
+        `,
+        ).run();
+      }).not.toThrow();
     });
+  });
+
+  it('preserves migrations 001-004 metadata and sequence immutably', () => {
+    expect(PRODUCTION_MIGRATIONS).toHaveLength(5);
+    expect(PRODUCTION_MIGRATIONS[0]?.version).toBe(1);
+    expect(PRODUCTION_MIGRATIONS[0]?.name).toBe('001_create_schema_migrations');
+    expect(PRODUCTION_MIGRATIONS[1]?.version).toBe(2);
+    expect(PRODUCTION_MIGRATIONS[1]?.name).toBe('002_create_operational_persistence');
+    expect(PRODUCTION_MIGRATIONS[2]?.version).toBe(3);
+    expect(PRODUCTION_MIGRATIONS[2]?.name).toBe('003_create_observation_history');
+    expect(PRODUCTION_MIGRATIONS[3]?.version).toBe(4);
+    expect(PRODUCTION_MIGRATIONS[3]?.name).toBe('004_create_review_feedback_persistence');
+    expect(PRODUCTION_MIGRATIONS[4]?.version).toBe(5);
+    expect(PRODUCTION_MIGRATIONS[4]?.name).toBe('005_create_raw_artifacts_persistence');
   });
 
   it('migrates incrementally from v4 to v5 seamlessly retaining existing operational data', async () => {

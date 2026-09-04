@@ -61,6 +61,12 @@ function rehydrateRawArtifact(row: RawArtifactRow): RawArtifact {
     }
   }
 
+  if (row.source_run_id !== null && row.run_id === null) {
+    throw new StorageCorruptionError(
+      `Corrupted persisted RawArtifact '${row.id}': source_run_id is set but run_id is null`,
+    );
+  }
+
   return createRawArtifact({
     id: row.id,
     relativePath: row.relative_path,

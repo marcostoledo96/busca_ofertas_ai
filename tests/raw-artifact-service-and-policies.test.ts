@@ -12,6 +12,8 @@ import {
   type RawArtifact,
   type RawArtifactReason,
   type RawArtifactRetentionPolicy,
+  ArtifactStorageError,
+  InvariantViolationError,
 } from '@busca-ofertas-ai/core';
 import {
   createSqliteArtifactSanitizer,
@@ -440,6 +442,503 @@ describe('RawArtifactService and Retention Policies (BOAI-016)', () => {
       const secondSummary = await service.cleanupExpiredArtifacts(fixedNow);
       expect(secondSummary.found).toBe(0);
       expect(secondSummary.deleted).toBe(0);
+    });
+  });
+
+  describe('Focal Tests: Sanitization and Canaries (HIGH-01 & MEDIUM-02)', () => {
+    it('redacts entire Cookie header and prevents partial leakage with generic keys', async () => {
+      // 1. Single cookie value
+      const artSingle = await service.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'DIAGNOSTIC',
+        kind: 'HTTP_HEADERS',
+        content: 'Host: example.com\nCookie: session=CANARY_COOKIE_SINGLE\nUser-Agent: agent/1.0',
+        contentType: 'text/plain',
+      });
+      expect(artSingle).not.toBeNull();
+      const singleBytes = fsPort.files.get(artSingle!.relativePath);
+      expect(singleBytes).toBeDefined();
+      const singleText = new TextDecoder().decode(singleBytes);
+      expect(singleText).not.toContain('CANARY_COOKIE_SINGLE');
+      expect(singleText).toContain('[REDACTED]');
+      expect(singleText).toContain('Host: example.com');
+
+      // 2. Cookie with 3 values, 2nd and 3rd with generic key names that do not contain secret keywords
+      const artMulti = await service.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'DIAGNOSTIC',
+        kind: 'HTTP_HEADERS',
+        content:
+          'Host: example.com\nCookie: alpha=CANARY_C_MULTI_1; genericBeta=CANARY_C_MULTI_2; standardItem=CANARY_C_MULTI_3\nUser-Agent: agent/1.0',
+        contentType: 'text/plain',
+      });
+      expect(artMulti).not.toBeNull();
+      const multiBytes = fsPort.files.get(artMulti!.relativePath);
+      expect(multiBytes).toBeDefined();
+      const multiText = new TextDecoder().decode(multiBytes);
+      expect(multiText).not.toContain('CANARY_C_MULTI_1');
+      expect(multiText).not.toContain('CANARY_C_MULTI_2');
+      expect(multiText).not.toContain('CANARY_C_MULTI_3');
+      expect(multiText).toContain('[REDACTED]');
+      expect(multiText).toContain('Host: example.com');
+      expect(multiText).toContain('User-Agent: agent/1.0');
+    });
+
+    it('redacts Set-Cookie with attributes, Authorization, Proxy-Authorization, and standalone Bearer', async () => {
+      const headersContent = [
+        'Set-Cookie: authId=CANARY_SET_COOKIE; Domain=example.com; Path=/; Secure; HttpOnly; SameSite=Strict',
+        'Authorization: Basic CANARY_AUTH_HEADER',
+        'Proxy-Authorization: Digest CANARY_PROXY_HEADER',
+        'Error: request failed using Bearer CANARY_BEARER_STANDALONE in query',
+      ].join('\n');
+
+      const artifact = await service.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'ERROR',
+        kind: 'HTTP_LOG',
+        content: headersContent,
+        contentType: 'text/plain',
+      });
+
+      expect(artifact).not.toBeNull();
+      const storedBytes = fsPort.files.get(artifact!.relativePath);
+      expect(storedBytes).toBeDefined();
+      const text = new TextDecoder().decode(storedBytes);
+
+      expect(text).not.toContain('CANARY_SET_COOKIE');
+      expect(text).not.toContain('CANARY_AUTH_HEADER');
+      expect(text).not.toContain('CANARY_PROXY_HEADER');
+      expect(text).not.toContain('CANARY_BEARER_STANDALONE');
+      expect(text).toContain('[REDACTED]');
+    });
+
+    it('redacts configurable sensitive keys in JSON (MEDIUM-02)', async () => {
+      const inputJson = {
+        internalReference: 'CANARY_CUSTOM_1',
+        nested: {
+          sellerOpaqueField: 'CANARY_CUSTOM_2',
+        },
+        publicField: 'CANARY_PUBLIC_SAFE',
+      };
+
+      const artifact = await service.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'DIAGNOSTIC',
+        kind: 'CUSTOM_REDACTION',
+        content: inputJson,
+        contentType: 'application/json',
+        additionalSensitiveKeys: ['internalReference', 'sellerOpaqueField'],
+      });
+
+      expect(artifact).not.toBeNull();
+      const storedBytes = fsPort.files.get(artifact!.relativePath);
+      expect(storedBytes).toBeDefined();
+      const text = new TextDecoder().decode(storedBytes);
+
+      expect(text).not.toContain('CANARY_CUSTOM_1');
+      expect(text).not.toContain('CANARY_CUSTOM_2');
+      expect(text).toContain('CANARY_PUBLIC_SAFE');
+      expect(text).toContain('[REDACTED]');
+    });
+  });
+
+  describe('Focal Tests: Runtime Binary & ContentType Rejection (HIGH-03)', () => {
+    it('strictly rejects Buffer content with 0 filesystem writes and 0 SQLite rows', async () => {
+      const buffer = Buffer.from('CANARY_SECRET_BUFFER_BYTES');
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'BINARY_BUFFER',
+          content: buffer as unknown as string,
+          contentType: 'text/plain',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      expect(fsPort.files.size).toBe(0);
+      expect(repo.artifacts.size).toBe(0);
+    });
+
+    it('strictly rejects Uint8Array content with 0 filesystem writes and 0 SQLite rows', async () => {
+      const uint8 = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'BINARY_UINT8',
+          content: uint8 as unknown as string,
+          contentType: 'text/plain',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      expect(fsPort.files.size).toBe(0);
+      expect(repo.artifacts.size).toBe(0);
+    });
+
+    it('strictly rejects ArrayBuffer and DataView with 0 filesystem writes and 0 SQLite rows', async () => {
+      const arrayBuffer = new ArrayBuffer(16);
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'BINARY_AB',
+          content: arrayBuffer as unknown as string,
+          contentType: 'text/plain',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      const dataView = new DataView(arrayBuffer);
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'BINARY_DV',
+          content: dataView as unknown as string,
+          contentType: 'text/plain',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      expect(fsPort.files.size).toBe(0);
+      expect(repo.artifacts.size).toBe(0);
+    });
+
+    it('strictly rejects disallowed object types (Date, Map, Set, custom class)', async () => {
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'CLASS_DATE',
+          content: new Date() as unknown as Record<string, unknown>,
+          contentType: 'application/json',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'CLASS_MAP',
+          content: new Map() as unknown as Record<string, unknown>,
+          contentType: 'application/json',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      class CustomPayload {
+        secret = 'foo';
+      }
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'CLASS_CUSTOM',
+          content: new CustomPayload() as unknown as Record<string, unknown>,
+          contentType: 'application/json',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      expect(fsPort.files.size).toBe(0);
+      expect(repo.artifacts.size).toBe(0);
+    });
+
+    it('strictly rejects arbitrary binary MIME types and enforces contentType coherence', async () => {
+      // Disallowed binary mime
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'IMAGE',
+          content: 'fake image bytes',
+          contentType: 'image/png',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'OCTET',
+          content: 'raw stream',
+          contentType: 'application/octet-stream',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      // Object content requires JSON contentType
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'MISMATCH',
+          content: { key: 'val' },
+          contentType: 'text/plain',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      // JSON contentType requires valid JSON string
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'INVALID_JSON',
+          content: '{ unclosed json...',
+          contentType: 'application/json',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      expect(fsPort.files.size).toBe(0);
+      expect(repo.artifacts.size).toBe(0);
+    });
+  });
+
+  describe('Focal Tests: sourceRunId/runId Invariant and Budget Protection (HIGH-02)', () => {
+    it('rejects sourceRunId without runId in domain entity creation', () => {
+      expect(() =>
+        createRawArtifact({
+          id: 'test-inv-1',
+          relativePath: '2026-09/art_test-inv-1.txt',
+          kind: 'DIAGNOSTIC',
+          sizeBytes: 10,
+          fingerprint: 'fp',
+          reason: 'DIAGNOSTIC',
+          contentType: 'text/plain',
+          createdAt: fixedNow,
+          expiresAt: new Date(fixedNow.getTime() + 86400000),
+          sourceRunId: 'sr-without-run',
+          runId: null,
+        }),
+      ).toThrow(InvariantViolationError);
+    });
+
+    it('rejects sourceRunId without runId in storeArtifact with 0 writes and 0 rows', async () => {
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'ORPHAN_SOURCE_RUN',
+          content: 'sample diagnostic',
+          contentType: 'text/plain',
+          sourceRunId: 'sr-orphan-1',
+          runId: null,
+        }),
+      ).rejects.toThrow(InvariantViolationError);
+
+      expect(fsPort.files.size).toBe(0);
+      expect(repo.artifacts.size).toBe(0);
+    });
+
+    it('proves that an artifact associated with sourceRun cannot evade run budget', async () => {
+      // Configure service with tight budget: 100 bytes
+      const tightService = new RawArtifactService({
+        storagePort: fsPort,
+        repository: repo,
+        sanitizer,
+        hasher,
+        clock: { now: () => fixedNow },
+        idGenerator: { generate: () => 'tight-art-1' },
+        limits: {
+          maxArtifactSizeBytes: 1024,
+          maxRunBudgetBytes: 100,
+          maxArtifactsPerRun: 10,
+        },
+      });
+
+      // Storing an 80-byte artifact succeeds
+      const first = await tightService.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'ERROR',
+        kind: 'DIAGNOSTIC',
+        content: 'a'.repeat(80),
+        contentType: 'text/plain',
+        runId: 'run-budget-test',
+        sourceRunId: 'sr-budget-test-1',
+      });
+      expect(first).not.toBeNull();
+
+      // Second artifact with sourceRunId cannot evade budget because runId is mandatory
+      await expect(
+        tightService.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'ERROR',
+          kind: 'DIAGNOSTIC',
+          content: 'b'.repeat(50),
+          contentType: 'text/plain',
+          runId: 'run-budget-test',
+          sourceRunId: 'sr-budget-test-2',
+        }),
+      ).rejects.toThrow(RunArtifactBudgetExceededError);
+
+      expect(await repo.getCountByRunId('run-budget-test')).toBe(1);
+    });
+  });
+
+  describe('Focal Tests: Entity-First Validation and Observable Compensation (MEDIUM-01)', () => {
+    it('produces 0 orphan files when kind or contentType is empty', async () => {
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: '   ',
+          content: 'valid text',
+          contentType: 'text/plain',
+        }),
+      ).rejects.toThrow(InvariantViolationError);
+
+      await expect(
+        service.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'VALID_KIND',
+          content: 'valid text',
+          contentType: '   ',
+        }),
+      ).rejects.toThrow(UnsupportedArtifactContentError);
+
+      expect(fsPort.files.size).toBe(0);
+      expect(repo.artifacts.size).toBe(0);
+    });
+
+    it('compensates and deletes file when repository.save fails', async () => {
+      const failingRepo = new InMemoryRawArtifactRepository();
+      failingRepo.save = () => Promise.reject(new Error('Simulated SQLite disk write failure'));
+
+      const compService = new RawArtifactService({
+        storagePort: fsPort,
+        repository: failingRepo,
+        sanitizer,
+        hasher,
+        clock: { now: () => fixedNow },
+        idGenerator: { generate: () => 'comp-art-1' },
+      });
+
+      await expect(
+        compService.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'TEST_KIND',
+          content: 'test content',
+          contentType: 'text/plain',
+        }),
+      ).rejects.toThrow('Simulated SQLite disk write failure');
+
+      // The file was deleted by compensation
+      expect(fsPort.files.size).toBe(0);
+    });
+
+    it('throws an observable composite error when both save and compensating delete fail', async () => {
+      const failingRepo = new InMemoryRawArtifactRepository();
+      failingRepo.save = () => Promise.reject(new Error('Simulated SQLite DB error'));
+
+      const failingFs = new InMemoryArtifactFileSystem();
+      failingFs.deleteFile = () => Promise.reject(new Error('Simulated unlink permission denied'));
+
+      const compService = new RawArtifactService({
+        storagePort: failingFs,
+        repository: failingRepo,
+        sanitizer,
+        hasher,
+        clock: { now: () => fixedNow },
+        idGenerator: { generate: () => 'comp-fail-1' },
+      });
+
+      await expect(
+        compService.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'TEST_KIND',
+          content: 'test content',
+          contentType: 'text/plain',
+        }),
+      ).rejects.toThrow(ArtifactStorageError);
+
+      try {
+        await compService.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'TEST_KIND',
+          content: 'test content',
+          contentType: 'text/plain',
+        });
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(ArtifactStorageError);
+        const storageErr = err as ArtifactStorageError;
+        expect(storageErr.code).toBe('ARTIFACT_COMPENSATION_FAILED');
+        expect(storageErr.message).toContain('Database save failed');
+        expect(storageErr.message).toContain('compensating file deletion');
+      }
+    });
+  });
+
+  describe('Focal Tests: Concurrent Budget Enforcement (MEDIUM-05)', () => {
+    it('prevents concurrent stores in the same run from exceeding limits', async () => {
+      // Budget: max 1000 bytes. Seed current usage at 800 bytes.
+      const runId = 'concurrent-budget-run';
+      const initialArt = createRawArtifact({
+        id: 'seed-art',
+        relativePath: '2026-09/art_seed.txt',
+        kind: 'DIAGNOSTIC',
+        sizeBytes: 800,
+        fingerprint: 'fp-seed',
+        reason: 'DIAGNOSTIC',
+        contentType: 'text/plain',
+        createdAt: fixedNow,
+        expiresAt: new Date(fixedNow.getTime() + 86400000),
+        runId,
+      });
+      await repo.save(initialArt);
+
+      const concurrentService = new RawArtifactService({
+        storagePort: fsPort,
+        repository: repo,
+        sanitizer,
+        hasher,
+        clock: { now: () => fixedNow },
+        idGenerator: {
+          generate: () => `concurrent-${idCounter++}`,
+        },
+        limits: {
+          maxArtifactSizeBytes: 1024,
+          maxRunBudgetBytes: 1000,
+          maxArtifactsPerRun: 10,
+        },
+      });
+
+      // Both stores want to write 150 bytes: 800 + 150 = 950 <= 1000, but 950 + 150 = 1100 > 1000
+      const content = 'c'.repeat(150);
+      const results = await Promise.allSettled([
+        concurrentService.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'ERROR',
+          kind: 'CONCURRENT',
+          content,
+          contentType: 'text/plain',
+          runId,
+        }),
+        concurrentService.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'ERROR',
+          kind: 'CONCURRENT',
+          content,
+          contentType: 'text/plain',
+          runId,
+        }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      const firstRejected = rejected[0];
+      expect(firstRejected).toBeDefined();
+      if (firstRejected && firstRejected.status === 'rejected') {
+        expect(firstRejected.reason).toBeInstanceOf(RunArtifactBudgetExceededError);
+      }
+
+      const finalBytes = await repo.getTotalSizeBytesByRunId(runId);
+      expect(finalBytes).toBeLessThanOrEqual(1000);
+      expect(finalBytes).toBe(950);
+
+      const finalCount = await repo.getCountByRunId(runId);
+      expect(finalCount).toBe(2); // seed + exactly 1 fulfilled
     });
   });
 });

@@ -200,7 +200,10 @@ export {
   calculateArtifactExpirationDate,
 } from './domain/artifact/raw-artifact.js';
 
-export { type ArtifactSanitizerPort } from './domain/artifact/sanitizer-port.js';
+export {
+  type ArtifactSanitizerPort,
+  type SanitizerOptions,
+} from './domain/artifact/sanitizer-port.js';
 
 export {
   ArtifactStorageError,

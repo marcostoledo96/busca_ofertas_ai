@@ -1,4 +1,4 @@
-import type { ArtifactSanitizerPort } from '@busca-ofertas-ai/core';
+import type { ArtifactSanitizerPort, SanitizerOptions } from '@busca-ofertas-ai/core';
 import { sanitizeString, sanitizeObject } from './sanitizer.js';
 import { validateNoSensitiveData } from './secret-detector.js';
 
@@ -7,19 +7,43 @@ import { validateNoSensitiveData } from './secret-detector.js';
  * sanitization and secret-detection primitives of @busca-ofertas-ai/storage-sqlite.
  */
 export class SqliteArtifactSanitizer implements ArtifactSanitizerPort {
-  sanitizeText(text: string): string {
-    return sanitizeString(text);
+  private readonly defaultOptions: SanitizerOptions | undefined;
+
+  constructor(defaultOptions?: SanitizerOptions) {
+    this.defaultOptions = defaultOptions;
   }
 
-  sanitizeData<T>(data: T): T {
-    return sanitizeObject(data);
+  private mergeOptions(options?: SanitizerOptions): SanitizerOptions | undefined {
+    if (!this.defaultOptions && !options) {
+      return undefined;
+    }
+    return {
+      additionalSensitiveKeys: [
+        ...(this.defaultOptions?.additionalSensitiveKeys ?? []),
+        ...(options?.additionalSensitiveKeys ?? []),
+      ],
+      additionalSensitivePatterns: [
+        ...(this.defaultOptions?.additionalSensitivePatterns ?? []),
+        ...(options?.additionalSensitivePatterns ?? []),
+      ],
+    };
   }
 
-  validateNoSensitiveData(data: unknown): void {
-    validateNoSensitiveData(data, 'artifact');
+  sanitizeText(text: string, options?: SanitizerOptions): string {
+    return sanitizeString(text, this.mergeOptions(options));
+  }
+
+  sanitizeData<T>(data: T, options?: SanitizerOptions): T {
+    return sanitizeObject(data, 0, this.mergeOptions(options));
+  }
+
+  validateNoSensitiveData(data: unknown, options?: SanitizerOptions): void {
+    validateNoSensitiveData(data, 'artifact', 20, this.mergeOptions(options));
   }
 }
 
-export function createSqliteArtifactSanitizer(): ArtifactSanitizerPort {
-  return new SqliteArtifactSanitizer();
+export function createSqliteArtifactSanitizer(
+  defaultOptions?: SanitizerOptions,
+): ArtifactSanitizerPort {
+  return new SqliteArtifactSanitizer(defaultOptions);
 }
