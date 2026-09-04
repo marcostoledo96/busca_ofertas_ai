@@ -46,6 +46,7 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(typeof StorageModule.OpportunityIdentityCollisionError).toBe('function');
     expect(typeof StorageModule.FeedbackIdentityCollisionError).toBe('function');
     expect(typeof StorageModule.SensitiveDataDetectedError).toBe('function');
+    expect(typeof StorageModule.RawArtifactIdentityCollisionError).toBe('function');
 
     // Crypto
     expect(typeof StorageModule.NodeCryptoHasher).toBe('function');
@@ -55,6 +56,8 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(typeof StorageModule.sanitizeString).toBe('function');
     expect(typeof StorageModule.sanitizeErrorMessage).toBe('function');
     expect(typeof StorageModule.sanitizeObject).toBe('function');
+    expect(typeof StorageModule.SqliteArtifactSanitizer).toBe('function');
+    expect(typeof StorageModule.createSqliteArtifactSanitizer).toBe('function');
     expect(StorageModule.REDACTED_PLACEHOLDER).toBe('[REDACTED]');
 
     // Repositories and factory
@@ -65,6 +68,7 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(typeof StorageModule.SqliteEvaluationRepository).toBe('function');
     expect(typeof StorageModule.SqliteOpportunityRepository).toBe('function');
     expect(typeof StorageModule.SqliteFeedbackRepository).toBe('function');
+    expect(typeof StorageModule.SqliteRawArtifactRepository).toBe('function');
     expect(typeof StorageModule.SqliteExecutionLock).toBe('function');
     expect(typeof StorageModule.createSqliteRepositories).toBe('function');
 
@@ -72,7 +76,7 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(StorageModule.STORAGE_SQLITE_PACKAGE_NAME).toBe('@busca-ofertas-ai/storage-sqlite');
     expect(StorageModule.SCHEMA_MIGRATIONS_TABLE_NAME).toBe('schema_migrations');
     expect(Array.isArray(StorageModule.PRODUCTION_MIGRATIONS)).toBe(true);
-    expect(StorageModule.PRODUCTION_MIGRATIONS.length).toBe(4);
+    expect(StorageModule.PRODUCTION_MIGRATIONS.length).toBe(5);
     expect(StorageModule.PRODUCTION_MIGRATIONS[0]!.version).toBe(1);
     expect(StorageModule.PRODUCTION_MIGRATIONS[0]!.name).toBe('001_create_schema_migrations');
     expect(StorageModule.PRODUCTION_MIGRATIONS[1]!.version).toBe(2);
@@ -82,6 +86,10 @@ describe('Storage SQLite Architecture & Module Boundaries (BOAI-010 & BOAI-011)'
     expect(StorageModule.PRODUCTION_MIGRATIONS[3]!.version).toBe(4);
     expect(StorageModule.PRODUCTION_MIGRATIONS[3]!.name).toBe(
       '004_create_review_feedback_persistence',
+    );
+    expect(StorageModule.PRODUCTION_MIGRATIONS[4]!.version).toBe(5);
+    expect(StorageModule.PRODUCTION_MIGRATIONS[4]!.name).toBe(
+      '005_create_raw_artifacts_persistence',
     );
   });
 

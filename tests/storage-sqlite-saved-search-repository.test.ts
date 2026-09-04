@@ -113,7 +113,7 @@ describe('SqliteSavedSearchRepository (BOAI-011 / Findings B & C)', () => {
           maxEvaluationsPerRun: 25,
         },
         retention: {
-          rawArtifacts: 'ALL',
+          rawArtifacts: 'ALL_LIMITED',
           rawDataDays: 60,
         },
         createdAt: new Date('2026-08-30T12:00:00.000Z'),

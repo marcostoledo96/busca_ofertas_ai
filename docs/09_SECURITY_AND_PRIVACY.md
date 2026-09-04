@@ -90,13 +90,35 @@ No construir perfiles de vendedores ni conservar datos personales no necesarios.
 
 ## Raw artifacts
 
-- desactivables por fuente;
-- predeterminado: solo errores y `REVIEW`;
-- retención predeterminada: 30 días;
-- sanitización antes de escribir;
-- inventario en SQLite;
-- cleanup explícito y testeado;
-- jamás incluir secretos de request/response.
+- **Políticas canónicas**: `NONE`, `ERRORS_ONLY`, `ERRORS_AND_REVIEW` (default) y `ALL_LIMITED`. Configuraciones existentes con legacy `ALL` se canonicalizan a `ALL_LIMITED` en la proyección de dominio sin perder compatibilidad.
+- **Retención y vencimiento**: Configuración predeterminada de 30 días (`rawDataDays: 30`). El cálculo del vencimiento se realiza al momento de la creación (`expiresAt = createdAt + rawDataDays * 86400000`) y se almacena en SQLite en formato canónico ISO UTC.
+- **Sanitización estricta y Fail-Closed**: Todo contenido de texto o JSON pasa por `ArtifactSanitizerPort` antes de ser almacenado. Patrones sensibles (tokens Bearer, claves de API, headers de Cookies completos sin importar cantidad o nombres de claves, Set-Cookie con atributos, Authorization, Proxy-Authorization, contraseñas) y claves configurables (`additionalSensitiveKeys`, `additionalSensitivePatterns`) se redactan determinísticamente a `[REDACTED]`. Si `validateNoSensitiveData()` detecta secretos remanentes no redactados, la operación aborta fail-closed inmediatamente (0 bytes escritos en disco y 0 filas insertadas en la base).
+- **Tipos de contenido soportados**: Exclusivamente texto codificado en UTF-8 (`text/plain`, `text/html`, etc.) y estructuras serializables JSON (`application/json`). Se rechazan tipos no soportados o blobs binarios en runtime (`Buffer`, `Uint8Array`, `ArrayBuffer`, `DataView`, `Date`, `Map`, `Set`, etc.) sin tocar disco ni base de datos.
+- **Límites de tamaño y presupuesto**:
+  - Límite por artifact: 5 MB (`maxArtifactSizeBytes`).
+  - Presupuesto por run: 50 MB o 100 artifacts (`maxRunBudgetBytes` y `maxArtifactsPerRun`). Superar estos límites emite errores tipados (`ArtifactSizeLimitExceededError` o `RunArtifactBudgetExceededError`).
+- **Ubicación y permisos restrictivos**:
+  - Directorio base: `$XDG_DATA_HOME/busca-ofertas-ai/artifacts/`.
+  - Estructura: subdirectorios mensuales `YYYY-MM/` con permisos `0700` y archivos `art_<uuid>.<ext>` con permisos `0600`.
+  - Los nombres de archivo se generan internamente mediante UUIDs criptográficos. Jamás se utiliza input externo, títulos ni URLs como nombres de archivo.
+- **Defensa contra Path Traversal y Symlinks**:
+  - El adapter filesystem valida estrictamente la ruta relativa (rechaza paths absolutos `/`, segmentos `..`, separadores `\`, caracteres de control y bytes nulos).
+  - Se verifica que `artifactsRoot` y `artifactsRoot/.tmp` no sean symlinks ni archivos regulares.
+  - Cada componente del path se inspecciona mediante `lstat` para mitigar escapes a través de symlinks tanto en directorios intermedios como en el archivo destino.
+- **Escritura atómica e inmutabilidad**:
+  - Los archivos se escriben primero en un directorio temporal `.tmp/` bajo el root de artifacts con flag exclusivo `wx`, permisos `0600`, sincronización a disco vía `fsync()`.
+  - La publicación a destino se realiza mediante un enlace duro (`link`), que garantiza a nivel del kernel que la operación falle atómicamente con `EEXIST` sin sobrescribir si el archivo destino ya existía (previniendo colisiones e identidades duplicadas en concurrencia), seguido del desenlace (`unlink`) del archivo temporal. Si ocurre error, el temporal se limpia inmediatamente.
+  - Si el almacenamiento se agota en cualquier fase, los errores del sistema de archivos (`ENOSPC`) se capturan y traducen a `DiskFullError`, garantizando 0 archivos corruptos y limpieza de temporales.
+- **Coherencia relacional en SQLite**:
+  - Tabla `raw_artifacts` creada mediante la migración 005 con:
+    - Clave foránea compuesta `(source_run_id, run_id) REFERENCES source_runs(id, run_id) ON DELETE SET NULL`
+    - Clave foránea `run_id REFERENCES runs(id) ON DELETE SET NULL`
+    - Restricción de verificación `CONSTRAINT chk_raw_artifacts_source_run_has_run CHECK (source_run_id IS NULL OR run_id IS NOT NULL)`
+  - Garantiza que ningún artifact pueda asociarse a un `source_run_id` sin especificar su `run_id`, y previene cross-associations entre ejecuciones distintas.
+- **Limpieza (Cleanup)**:
+  - **Limpieza manual**: Accesible desde el submenú de Configuración ("Limpiar artifacts vencidos"). Muestra un conteo y tamaño estimado de artifacts expirados, solicita confirmación explícita (cancelar no borra nada) y ejecuta la eliminación reportando un resumen sanitizado (`encontrados`, `eliminados`, `ya ausentes`, `fallidos`).
+  - **Limpieza al inicio**: Configurable mediante `cleanupOnStartup: boolean` (deshabilitada por defecto `false`). Cuando se activa, depura artifacts vencidos consultando directamente el campo `expiresAt` de SQLite.
+  - **Orden de limpieza y convergencia**: Primero se valida y elimina el archivo físico en disco, y luego se borra el registro en SQLite. Si el archivo físico ya no existía en disco, el registro en SQLite se depura convergiendo el estado (`alreadyMissing++`). Si la eliminación del archivo falla, el registro en SQLite se preserva (`failed++`).
 
 ## HTML local
 

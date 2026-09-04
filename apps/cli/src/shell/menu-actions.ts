@@ -1,4 +1,5 @@
 import type { SourceRegistry } from '@busca-ofertas-ai/configuration';
+import type { RawArtifactService } from '@busca-ofertas-ai/core';
 import { EXIT_CODES, type ExitCode } from '../runtime/exit-codes.js';
 import type { TerminalPort } from '../runtime/terminal.js';
 import type { ProgressReporter } from '../runtime/progress.js';
@@ -106,15 +107,18 @@ export class ConfigurationActionHandler implements MenuAction {
   private readonly sourceRegistry: SourceRegistry;
   private readonly configStore: SavedSearchConfigStore;
   private readonly textFilePort: TextFilePort;
+  private readonly rawArtifactService?: RawArtifactService | undefined;
 
   constructor(params: {
     sourceRegistry: SourceRegistry;
     configStore: SavedSearchConfigStore;
     textFilePort: TextFilePort;
+    rawArtifactService?: RawArtifactService | undefined;
   }) {
     this.sourceRegistry = params.sourceRegistry;
     this.configStore = params.configStore;
     this.textFilePort = params.textFilePort;
+    this.rawArtifactService = params.rawArtifactService;
   }
 
   public async execute(context: ActionExecutionContext): Promise<ActionResult> {
@@ -125,6 +129,7 @@ export class ConfigurationActionHandler implements MenuAction {
       sourceRegistry: this.sourceRegistry,
       configStore: this.configStore,
       textFilePort: this.textFilePort,
+      rawArtifactService: this.rawArtifactService,
     });
 
     await submenu.run();

@@ -11,9 +11,12 @@ import {
 import {
   openSqliteDatabase,
   createSqliteRepositories,
+  createSqliteArtifactSanitizer,
+  createNodeCryptoHasher,
   type SqliteDatabase,
 } from '@busca-ofertas-ai/storage-sqlite';
 import { resolveXdgAppPaths } from './platform/xdg-paths.js';
+import { NodeArtifactFileSystemAdapter } from './platform/node-artifact-filesystem.js';
 import type { ExitCode } from './runtime/exit-codes.js';
 import { TerminalPort, NodeTerminalAdapter } from './runtime/terminal.js';
 import { SignalManagerPort, ProcessSignalManager } from './runtime/signals.js';
@@ -24,6 +27,7 @@ import { MenuFormatter, CONTRACTUAL_MENU_OPTIONS } from './presentation/menu-for
 import {
   ReviewQueueService,
   RecordReviewFeedbackUseCase,
+  RawArtifactService,
   SystemClock,
   UuidIdGenerator,
   type ExternalUrlOpenerPort,
@@ -62,6 +66,8 @@ export interface CliApplicationOptions {
   readonly reviewQueueService?: ReviewQueueService;
   readonly recordFeedbackUseCase?: RecordReviewFeedbackUseCase;
   readonly externalUrlOpener?: ExternalUrlOpenerPort;
+  readonly rawArtifactService?: RawArtifactService;
+  readonly cleanupOnStartup?: boolean;
 }
 
 export interface CliApplication {
@@ -74,6 +80,7 @@ export interface CliApplication {
   readonly sourceRegistry: SourceRegistry;
   readonly configStore: SavedSearchConfigStore;
   readonly textFilePort: TextFilePort;
+  readonly rawArtifactService?: RawArtifactService;
   run(): Promise<ExitCode>;
 }
 
@@ -116,6 +123,7 @@ export interface CreateDefaultMenuActionsOptions {
   readonly reviewQueueService?: ReviewQueueService | undefined;
   readonly recordFeedbackUseCase?: RecordReviewFeedbackUseCase | undefined;
   readonly externalUrlOpener?: ExternalUrlOpenerPort | undefined;
+  readonly rawArtifactService?: RawArtifactService | undefined;
 }
 
 /**
@@ -144,12 +152,13 @@ export function createDefaultMenuActions(
 
   let reviewQueue = param instanceof MenuFormatter ? undefined : param?.reviewQueueService;
   let recordFeedback = param instanceof MenuFormatter ? undefined : param?.recordFeedbackUseCase;
+  let rawArtifacts = param instanceof MenuFormatter ? undefined : param?.rawArtifactService;
   const urlOpener =
     param instanceof MenuFormatter
       ? new NodeExternalUrlOpener()
       : (param?.externalUrlOpener ?? new NodeExternalUrlOpener());
 
-  if (!reviewQueue || !recordFeedback) {
+  if (!reviewQueue || !recordFeedback || !rawArtifacts) {
     const db = param instanceof MenuFormatter ? undefined : param?.sqliteDatabase;
     const resolvedDb =
       db ??
@@ -182,6 +191,19 @@ export function createDefaultMenuActions(
         clock: new SystemClock(),
         idGenerator: new UuidIdGenerator(),
       });
+
+    if (!rawArtifacts) {
+      const paths = resolveXdgAppPaths();
+      const artifactFs = new NodeArtifactFileSystemAdapter(paths.artifactsDir);
+      rawArtifacts = new RawArtifactService({
+        storagePort: artifactFs,
+        repository: repos.rawArtifacts,
+        sanitizer: createSqliteArtifactSanitizer(),
+        hasher: createNodeCryptoHasher(),
+        clock: new SystemClock(),
+        idGenerator: new UuidIdGenerator(),
+      });
+    }
   }
 
   for (const item of CONTRACTUAL_MENU_OPTIONS) {
@@ -215,6 +237,7 @@ export function createDefaultMenuActions(
           sourceRegistry: reg,
           configStore: store,
           textFilePort: textPort,
+          rawArtifactService: rawArtifacts,
         }),
       );
     } else {
@@ -255,12 +278,13 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
     options?.configStore ?? new NodeFileSystemSavedSearchConfigStore(defaultStorageDir);
   const textFilePort = options?.textFilePort ?? new NodeTextFileAdapter();
 
-  // Wire SQLite persistence for review infrastructure
+  // Wire SQLite persistence for review infrastructure and raw artifacts
   let dbToClose: SqliteDatabase | undefined;
   let reviewQueueService = options?.reviewQueueService;
   let recordFeedbackUseCase = options?.recordFeedbackUseCase;
+  let rawArtifactService = options?.rawArtifactService;
 
-  if (!reviewQueueService || !recordFeedbackUseCase) {
+  if (!reviewQueueService || !recordFeedbackUseCase || !rawArtifactService) {
     let db = options?.sqliteDatabase;
     if (!db) {
       const dbPath = options?.databasePath ?? resolveXdgAppPaths().databasePath;
@@ -290,6 +314,19 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
         clock: new SystemClock(),
         idGenerator: new UuidIdGenerator(),
       });
+
+    if (!rawArtifactService) {
+      const paths = resolveXdgAppPaths();
+      const artifactFs = new NodeArtifactFileSystemAdapter(paths.artifactsDir);
+      rawArtifactService = new RawArtifactService({
+        storagePort: artifactFs,
+        repository: repos.rawArtifacts,
+        sanitizer: createSqliteArtifactSanitizer(),
+        hasher: createNodeCryptoHasher(),
+        clock: new SystemClock(),
+        idGenerator: new UuidIdGenerator(),
+      });
+    }
   }
 
   const actions =
@@ -305,6 +342,7 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
       reviewQueueService,
       recordFeedbackUseCase,
       externalUrlOpener: options?.externalUrlOpener,
+      rawArtifactService,
     });
 
   // Connect terminal interrupt to central SignalManager and capture unsubscription
@@ -334,8 +372,21 @@ export function createCliApplication(options?: CliApplicationOptions): CliApplic
     sourceRegistry,
     configStore,
     textFilePort,
+    rawArtifactService,
     run: async (): Promise<ExitCode> => {
       try {
+        if (options?.cleanupOnStartup === true && rawArtifactService) {
+          try {
+            const cleanupResult = await rawArtifactService.cleanupExpiredArtifacts();
+            diagnostics.info(
+              `Startup cleanup finished: found=${cleanupResult.found}, deleted=${cleanupResult.deleted}, alreadyMissing=${cleanupResult.alreadyMissing}, failed=${cleanupResult.failed}`,
+            );
+          } catch (cleanupErr) {
+            diagnostics.warn(
+              `Startup raw artifacts cleanup encountered an error: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
+            );
+          }
+        }
         signalManager.registerCleanup(async () => {
           if (unsubscribeInterrupt) {
             unsubscribeInterrupt();

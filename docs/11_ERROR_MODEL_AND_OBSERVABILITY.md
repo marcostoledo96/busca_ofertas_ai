@@ -103,6 +103,21 @@ Cuando cambie un contrato:
 - artifact opcional con vencimiento;
 - versión del adapter y fixture más cercano.
 
+## Errores de almacenamiento de artifacts
+
+Para garantizar el principio de fallo explícito (`fail-closed`) y la seguridad del sistema local-first, las fallas en el ciclo de vida de artifacts crudos se modelan con tipos de error dedicados:
+
+- `ArtifactSizeLimitExceededError`: el artifact individual supera el tamaño máximo permitido (5 MB).
+- `RunArtifactBudgetExceededError`: el run ha consumido su presupuesto total en bytes (50 MB) o cantidad de artifacts (100).
+- `ArtifactPathTraversalError`: la ruta relativa contiene secuencias prohibidas (`..`, `/`, `\`, control chars, NUL) o escapa del directorio raíz.
+- `ArtifactSymlinkEscapeError`: se detecta un symlink en la raíz, en el directorio `.tmp/`, en cualquier componente intermedio o en el destino.
+- `ArtifactIdentityCollisionError`: intento de escribir sobre un archivo existente en el storage físico sin sobrescritura autorizada o colisión detectada atómicamente a nivel del kernel vía `link()`.
+- `DiskFullError`: agotamiento de espacio en disco (`ENOSPC`) capturado en cualquier fase de persistencia física (raíz, `.tmp`, apertura, escritura, sincronización o enlace).
+- `UnsupportedArtifactContentError`: el contenido es binario runtime (`Buffer`, `Uint8Array`, `ArrayBuffer`, `DataView`, etc.), tipos de objeto no serializables (`Date`, `Map`, `Set`), o no cumple con la coherencia entre contenido y `contentType`.
+- `ArtifactStorageError`: error de persistencia o fallo observable en la compensación de almacenamiento (`ARTIFACT_COMPENSATION_FAILED`).
+- `RawArtifactIdentityCollisionError`: colisión de clave primaria al insertar el registro en SQLite.
+- `SensitiveDataDetectedError`: detección de secretos remanentes tras sanitización, abortando fail-closed con 0 bytes escritos y 0 registros persistidos.
+
 ## Timeouts y cancelación
 
 Cada operación externa usa:

@@ -270,11 +270,55 @@ const prodMigration004: Migration = Object.freeze({
   },
 });
 
+const prodMigration005: Migration = Object.freeze({
+  version: 5,
+  name: '005_create_raw_artifacts_persistence',
+  up(context: MigrationContext): void {
+    context.exec(`
+      -- Ensure composite uniqueness on source_runs(id, run_id) to enforce FK coherence with raw_artifacts
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_source_runs_id_run_id ON source_runs(id, run_id);
+
+      -- raw_artifacts: Inventory of sanitized diagnostic and review evidence
+      CREATE TABLE IF NOT EXISTS raw_artifacts (
+        id TEXT PRIMARY KEY,
+        relative_path TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK(length(trim(kind)) > 0),
+        size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+        fingerprint TEXT NOT NULL CHECK(length(trim(fingerprint)) > 0),
+        reason TEXT NOT NULL CHECK(reason IN ('ERROR', 'REVIEW', 'DIAGNOSTIC')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+        source_run_id TEXT,
+        content_type TEXT NOT NULL CHECK(length(trim(content_type)) > 0),
+        metadata TEXT CHECK(metadata IS NULL OR json_valid(metadata)),
+        FOREIGN KEY (source_run_id, run_id) REFERENCES source_runs(id, run_id) ON DELETE SET NULL,
+        CONSTRAINT chk_raw_artifacts_dates CHECK (expires_at >= created_at),
+        CONSTRAINT chk_raw_artifacts_source_run_has_run CHECK (source_run_id IS NULL OR run_id IS NOT NULL),
+        CONSTRAINT chk_raw_artifacts_relative_path CHECK (
+          length(trim(relative_path)) > 0 AND
+          relative_path NOT LIKE '/%' AND
+          instr(relative_path, '..') = 0 AND
+          instr(relative_path, char(92)) = 0 AND
+          instr(relative_path, char(0)) = 0
+        )
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_raw_artifacts_expires_at ON raw_artifacts(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_raw_artifacts_run_id ON raw_artifacts(run_id);
+      CREATE INDEX IF NOT EXISTS idx_raw_artifacts_source_run_id ON raw_artifacts(source_run_id);
+      CREATE INDEX IF NOT EXISTS idx_raw_artifacts_reason ON raw_artifacts(reason);
+      CREATE INDEX IF NOT EXISTS idx_raw_artifacts_fingerprint ON raw_artifacts(fingerprint);
+    `);
+  },
+});
+
 export const PRODUCTION_MIGRATIONS: readonly Migration[] = Object.freeze([
   prodMigration001,
   prodMigration002,
   prodMigration003,
   prodMigration004,
+  prodMigration005,
 ]);
 
 export function validateMigrationManifest(migrations: readonly Migration[]): readonly Migration[] {

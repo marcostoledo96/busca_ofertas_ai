@@ -13,6 +13,7 @@ function isAppPaths(value: unknown): value is AppPaths {
     'searchesDir' in value &&
     'dataRoot' in value &&
     'reportsDir' in value &&
+    'artifactsDir' in value &&
     'stateRoot' in value &&
     'sessionsDir' in value &&
     'logsDir' in value &&
@@ -38,6 +39,7 @@ export async function ensureAppDirectories(
     paths.searchesDir,
     paths.dataRoot,
     paths.reportsDir,
+    paths.artifactsDir,
     paths.stateRoot,
     paths.sessionsDir,
     paths.logsDir,

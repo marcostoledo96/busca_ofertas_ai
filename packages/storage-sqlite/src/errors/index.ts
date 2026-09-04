@@ -39,6 +39,7 @@ export {
   EvaluationIdentityCollisionError,
   OpportunityIdentityCollisionError,
   FeedbackIdentityCollisionError,
+  RawArtifactIdentityCollisionError,
   SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './storage-errors.js';

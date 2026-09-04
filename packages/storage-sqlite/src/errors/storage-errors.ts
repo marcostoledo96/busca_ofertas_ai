@@ -23,6 +23,7 @@ export type SqliteStorageErrorCode =
   | 'EVALUATION_IDENTITY_COLLISION'
   | 'OPPORTUNITY_IDENTITY_COLLISION'
   | 'FEEDBACK_IDENTITY_COLLISION'
+  | 'RAW_ARTIFACT_IDENTITY_COLLISION'
   | 'SENSITIVE_DATA_DETECTED';
 
 export interface SqliteStorageErrorOptions {
@@ -509,6 +510,19 @@ export class SensitiveDataDetectedError extends SqliteStorageError {
   constructor(message: string, options?: SqliteStorageErrorOptions) {
     super(message, 'SENSITIVE_DATA_DETECTED', options);
     this.name = 'SensitiveDataDetectedError';
+  }
+}
+
+export class RawArtifactIdentityCollisionError extends SqliteStorageError {
+  readonly artifactId: string;
+
+  constructor(artifactId: string, message?: string, options?: SqliteStorageErrorOptions) {
+    const msg =
+      message ??
+      `RawArtifact identity conflict on artifact ID '${artifactId}': an artifact record with this ID already exists.`;
+    super(msg, 'RAW_ARTIFACT_IDENTITY_COLLISION', options);
+    this.name = 'RawArtifactIdentityCollisionError';
+    this.artifactId = artifactId;
   }
 }
 

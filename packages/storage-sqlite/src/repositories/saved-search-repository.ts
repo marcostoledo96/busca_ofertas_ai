@@ -12,6 +12,7 @@ import {
   type EvaluationPolicy,
   type AiPolicy,
   type RetentionPolicy,
+  type RawArtifactRetentionPolicy,
   type PriceCurrency,
   type ListingCondition,
   createSavedSearch,
@@ -81,7 +82,13 @@ const VALID_PRECISION_PROFILES: ReadonlySet<string> = new Set([
   'PERMISSIVE',
   'MIXED',
 ]);
-const VALID_RAW_ARTIFACTS: ReadonlySet<string> = new Set(['ERRORS_AND_REVIEW', 'ALL', 'NONE']);
+const VALID_RAW_ARTIFACTS: ReadonlySet<string> = new Set([
+  'NONE',
+  'ERRORS_ONLY',
+  'ERRORS_AND_REVIEW',
+  'ALL_LIMITED',
+  'ALL',
+]);
 
 function isRecord(val: unknown): val is Record<string, unknown> {
   return typeof val === 'object' && val !== null && !Array.isArray(val);
@@ -448,8 +455,12 @@ function validateRetention(val: unknown, entityContext: string): RetentionPolicy
       `Corrupted persisted SavedSearch in '${entityContext}': retention.rawDataDays must be an integer >= 0`,
     );
   }
+  const rawPolicy = val['rawArtifacts'];
+  const canonicalPolicy: RawArtifactRetentionPolicy =
+    rawPolicy === 'ALL' ? 'ALL_LIMITED' : (rawPolicy as RawArtifactRetentionPolicy);
+
   return {
-    rawArtifacts: val['rawArtifacts'] as 'ERRORS_AND_REVIEW' | 'ALL' | 'NONE',
+    rawArtifacts: canonicalPolicy,
     rawDataDays: val['rawDataDays'],
   };
 }

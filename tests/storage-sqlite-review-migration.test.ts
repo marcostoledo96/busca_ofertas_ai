@@ -12,44 +12,47 @@ import {
 
 describe('Storage SQLite Review & Feedback Migration 004 (BOAI-015)', () => {
   it('migrates clean database through all 4 migrations and creates all tables, triggers, and indices', () => {
-    withTempDatabase((db) => {
-      const result = db.migrate();
-      expect(result.currentVersion).toBe(4);
-      expect(result.newlyAppliedCount).toBe(4);
+    withTempDatabase(
+      (db) => {
+        const result = db.migrate();
+        expect(result.currentVersion).toBe(4);
+        expect(result.newlyAppliedCount).toBe(4);
 
-      // Check tables exist
-      const tables = db
-        .prepare<{ name: string }, []>(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('evaluations', 'opportunities', 'feedback') ORDER BY name ASC;",
-        )
-        .all();
-      expect(tables.map((t) => t.name)).toEqual(['evaluations', 'feedback', 'opportunities']);
+        // Check tables exist
+        const tables = db
+          .prepare<{ name: string }, []>(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('evaluations', 'opportunities', 'feedback') ORDER BY name ASC;",
+          )
+          .all();
+        expect(tables.map((t) => t.name)).toEqual(['evaluations', 'feedback', 'opportunities']);
 
-      // Check triggers exist
-      const triggers = db
-        .prepare<{ name: string }, []>(
-          "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name = 'feedback' ORDER BY name ASC;",
-        )
-        .all();
-      expect(triggers.map((t) => t.name)).toEqual([
-        'trg_feedback_no_delete',
-        'trg_feedback_no_update',
-      ]);
+        // Check triggers exist
+        const triggers = db
+          .prepare<{ name: string }, []>(
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name = 'feedback' ORDER BY name ASC;",
+          )
+          .all();
+        expect(triggers.map((t) => t.name)).toEqual([
+          'trg_feedback_no_delete',
+          'trg_feedback_no_update',
+        ]);
 
-      // Check indices exist
-      const indices = db
-        .prepare<{ name: string }, []>(
-          "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN ('evaluations', 'opportunities', 'feedback') AND name NOT LIKE 'sqlite_%' ORDER BY name ASC;",
-        )
-        .all();
-      const indexNames = indices.map((i) => i.name);
-      expect(indexNames).toContain('idx_evaluations_decision');
-      expect(indexNames).toContain('idx_opportunities_saved_search_id');
-      expect(indexNames).toContain('idx_opportunities_observation_id');
-      expect(indexNames).toContain('idx_opportunities_evaluation_id');
-      expect(indexNames).toContain('idx_feedback_opportunity_created');
-      expect(indexNames).toContain('idx_feedback_decision');
-    });
+        // Check indices exist
+        const indices = db
+          .prepare<{ name: string }, []>(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN ('evaluations', 'opportunities', 'feedback') AND name NOT LIKE 'sqlite_%' ORDER BY name ASC;",
+          )
+          .all();
+        const indexNames = indices.map((i) => i.name);
+        expect(indexNames).toContain('idx_evaluations_decision');
+        expect(indexNames).toContain('idx_opportunities_saved_search_id');
+        expect(indexNames).toContain('idx_opportunities_observation_id');
+        expect(indexNames).toContain('idx_opportunities_evaluation_id');
+        expect(indexNames).toContain('idx_feedback_opportunity_created');
+        expect(indexNames).toContain('idx_feedback_decision');
+      },
+      { customMigrations: PRODUCTION_MIGRATIONS.slice(0, 4) },
+    );
   });
 
   it('enforces table check constraints on evaluations, opportunities, and feedback', () => {

@@ -1,3 +1,4 @@
+import type { SanitizerOptions } from '@busca-ofertas-ai/core';
 import { SensitiveDataDetectedError } from '../errors/storage-errors.js';
 
 const FORBIDDEN_NORMALIZED_KEYS = new Set<string>([
@@ -9,6 +10,8 @@ const FORBIDDEN_NORMALIZED_KEYS = new Set<string>([
   'authtoken',
   'bearertoken',
   'authorization',
+  'proxyauthorization',
+  'proxyauth',
   'cookie',
   'cookies',
   'cookieheader',
@@ -23,7 +26,7 @@ const FORBIDDEN_NORMALIZED_KEYS = new Set<string>([
 const normalizeKey = (key: string): string => key.toLowerCase().replace(/[-_]/g, '');
 
 const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
-  /\bAuthorization\s*:/i,
+  /\b(?:Authorization|Proxy-Authorization)\s*:/i,
   /\b(?:Set-Cookie|Cookie)\s*:/i,
   /\bBearer\s+\S+/i,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b/i,
@@ -35,14 +38,19 @@ const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
 
 const FORBIDDEN_SESSION_REF_PATTERNS: readonly RegExp[] = [
   /(?:Set-Cookie|Cookie)\s*:/i,
-  /Authorization\s*:/i,
+  /(?:Authorization|Proxy-Authorization)\s*:/i,
   /\bBearer\b/i,
   /password\s*=/i,
   /token\s*=/i,
   /api_key\s*=/i,
 ] as const;
 
-export function validateNoSensitiveData(value: unknown, path = 'options', maxDepth = 20): void {
+export function validateNoSensitiveData(
+  value: unknown,
+  path = 'options',
+  maxDepth = 20,
+  options?: SanitizerOptions,
+): void {
   if (value === null || value === undefined) {
     return;
   }
@@ -54,6 +62,18 @@ export function validateNoSensitiveData(value: unknown, path = 'options', maxDep
         throw new SensitiveDataDetectedError(
           `Sensitive credential pattern detected at '${path}'. Direct persistence of secrets is forbidden.`,
         );
+      }
+    }
+    if (options?.additionalSensitivePatterns) {
+      for (const pattern of options.additionalSensitivePatterns) {
+        if (pattern.global || pattern.sticky) {
+          pattern.lastIndex = 0;
+        }
+        if (pattern.test(value)) {
+          throw new SensitiveDataDetectedError(
+            `Sensitive custom pattern detected at '${path}'. Direct persistence of secrets is forbidden.`,
+          );
+        }
       }
     }
     return;
@@ -81,7 +101,7 @@ export function validateNoSensitiveData(value: unknown, path = 'options', maxDep
 
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      validateNoSensitiveData(value[i], `${path}[${i}]`, maxDepth - 1);
+      validateNoSensitiveData(value[i], `${path}[${i}]`, maxDepth - 1, options);
     }
     return;
   }
@@ -89,12 +109,19 @@ export function validateNoSensitiveData(value: unknown, path = 'options', maxDep
   if (typeof value === 'object') {
     for (const [k, v] of Object.entries(value)) {
       const normalized = normalizeKey(k);
-      if (FORBIDDEN_NORMALIZED_KEYS.has(normalized)) {
+      const isCustomSensitiveUnredacted =
+        Boolean(
+          options?.additionalSensitiveKeys?.some(
+            (customKey) => normalizeKey(customKey) === normalized,
+          ),
+        ) && v !== '[REDACTED]';
+
+      if (FORBIDDEN_NORMALIZED_KEYS.has(normalized) || isCustomSensitiveUnredacted) {
         throw new SensitiveDataDetectedError(
-          `Forbidden sensitive key '${k}' detected at '${path}.${k}'. Direct persistence of secrets is forbidden. Use sessionRef instead.`,
+          `Forbidden sensitive key '${k}' detected at '${path}.${k}'. Direct persistence of secrets is forbidden.`,
         );
       }
-      validateNoSensitiveData(v, `${path}.${k}`, maxDepth - 1);
+      validateNoSensitiveData(v, `${path}.${k}`, maxDepth - 1, options);
     }
   }
 }

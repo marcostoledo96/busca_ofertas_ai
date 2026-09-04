@@ -6,6 +6,7 @@ import { Evaluation } from '../domain/evaluation/evaluation.js';
 import { Feedback } from '../domain/opportunity/feedback.js';
 import { Run } from '../domain/run/run.js';
 import { SourceRun } from '../domain/run/source-run.js';
+import { RawArtifact } from '../domain/artifact/raw-artifact.js';
 
 export interface SavedSearchRevisionRecord {
   readonly id: string;
@@ -128,4 +129,15 @@ export interface RunRepository {
   listSourceRunsByRunId(runId: string): Promise<readonly SourceRun[]>;
   getSummaryByRunId(runId: string): Promise<RunSummary | null>;
   getSourceRunMetadata(sourceRunId: string): Promise<SourceRunExecutionMetadata | null>;
+}
+
+export interface RawArtifactRepository {
+  save(artifact: RawArtifact): Promise<void>;
+  getById(id: string): Promise<RawArtifact | null>;
+  listByRunId(runId: string): Promise<readonly RawArtifact[]>;
+  listBySourceRunId(sourceRunId: string): Promise<readonly RawArtifact[]>;
+  listExpired(now: Date): Promise<readonly RawArtifact[]>;
+  deleteById(id: string): Promise<boolean>;
+  getTotalSizeBytesByRunId(runId: string): Promise<number>;
+  getCountByRunId(runId: string): Promise<number>;
 }

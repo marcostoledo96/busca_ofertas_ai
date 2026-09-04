@@ -46,6 +46,7 @@ export {
   EvaluationIdentityCollisionError,
   OpportunityIdentityCollisionError,
   FeedbackIdentityCollisionError,
+  RawArtifactIdentityCollisionError,
   SensitiveDataDetectedError,
   isSqliteStorageError,
 } from './errors/index.js';
@@ -84,6 +85,10 @@ export {
   sanitizeObject,
 } from './sanitization/sanitizer.js';
 export { validateNoSensitiveData, validateSessionRef } from './sanitization/secret-detector.js';
+export {
+  SqliteArtifactSanitizer,
+  createSqliteArtifactSanitizer,
+} from './sanitization/sqlite-artifact-sanitizer.js';
 
 // Crypto Hasher
 export { NodeCryptoHasher, createNodeCryptoHasher } from './crypto/hasher.js';
@@ -98,6 +103,7 @@ export {
   SqliteEvaluationRepository,
   SqliteOpportunityRepository,
   SqliteFeedbackRepository,
+  SqliteRawArtifactRepository,
   SqliteExecutionLock,
   createSqliteRepositories,
 } from './repositories/index.js';
