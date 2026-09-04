@@ -68,11 +68,11 @@ El motor soporta un AST validado y seguro para combinar reglas mediante operador
 - Prohíbe operadores desconocidos o aridades inválidas.
 - Rechaza identificadores de reglas no registrados.
 - Detecta referencias circulares en tiempo de ejecución.
-- Límite de profundidad máxima (default: 10) y recuento total de nodos (default: 50).
+- Límite de profundidad máxima (default: 5) y recuento total de nodos (default: 50).
 
 ## Perfiles de Precisión
 
-El motor soporta cuatro perfiles genéricos:
+El motor soporta cuatro perfiles genéricos inmutables en runtime (`STANDARD_PROFILES`):
 
 | Perfil       | Modificador Umbrales | Severidad Moneda Ambigua | Descripción                                                               |
 | ------------ | -------------------- | ------------------------ | ------------------------------------------------------------------------- |
@@ -81,9 +81,11 @@ El motor soporta cuatro perfiles genéricos:
 | `PERMISSIVE` | Match -5 / Review -5 | `INFO`                   | Alta tolerancia para maximizar recall hacia revisión.                     |
 | `MIXED`      | 0 / 0                | `SOFT`                   | Perfil híbrido por defecto que combina señales suaves.                    |
 
+La resolución estándar de perfiles es completamente pura y sin estado (`resolveStandardPrecisionProfile`).
+
 ### Extensibilidad sin Modificar el Evaluador Genérico
 
-Nuevas issues o dominios de producto pueden registrar perfiles adicionales mediante `PrecisionProfileRegistry`:
+Nuevas issues o dominios de producto pueden registrar perfiles adicionales mediante `PrecisionProfileRegistry` de forma aislada y explícita. Para prevenir contaminación o desvíos semánticos ocultos bajo la versión por defecto (`1.0.0`), toda evaluación con perfiles personalizados requiere declarar un `policyVersion` explícito:
 
 ```typescript
 const registry = new PrecisionProfileRegistry();
@@ -94,6 +96,12 @@ registry.register({
   ambiguousPriceSeverity: 'HARD',
   missingPriceSeverity: 'HARD',
   defaultBaseScore: 10,
+});
+
+// La evaluación con custom registry requiere policyVersion explícito:
+const evalResult = evaluateRules(rules, context, policy, {
+  precisionProfileRegistry: registry,
+  policyVersion: '2.0.0-custom-dominio',
 });
 ```
 

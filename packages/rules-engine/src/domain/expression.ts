@@ -30,7 +30,7 @@ export interface ValidationOptions {
   readonly maxNodes?: number;
 }
 
-export const DEFAULT_MAX_DEPTH = 10;
+export const DEFAULT_MAX_DEPTH = 5;
 export const DEFAULT_MAX_NODES = 50;
 
 /**

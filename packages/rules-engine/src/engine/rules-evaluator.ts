@@ -15,7 +15,8 @@ import { type RuleEvaluationContext } from '../domain/context.js';
 import { EvaluationReasonCodes, createEngineReason } from '../domain/reason-codes.js';
 import {
   type PrecisionProfileRegistry,
-  defaultPrecisionProfileRegistry,
+  type PrecisionProfileConfig,
+  resolveStandardPrecisionProfile,
 } from '../domain/precision-profile.js';
 import { computeScore } from './score-calculator.js';
 import { sortReasonsCanonically } from './reason-aggregator.js';
@@ -61,10 +62,21 @@ export const evaluateRules = (
     throw new InvariantViolationError('evaluateRules requires a valid EvaluationPolicy');
   }
 
-  // 1. Resolve precision profile
-  const profileRegistry = options?.precisionProfileRegistry ?? defaultPrecisionProfileRegistry;
+  // 1. Resolve precision profile & enforce explicit versioning for custom profiles
   const profileName = policy.precisionProfile ?? 'MIXED';
-  const profile = profileRegistry.get(profileName);
+  let profile: PrecisionProfileConfig;
+
+  if (options?.precisionProfileRegistry) {
+    if (!options.policyVersion || options.policyVersion === DEFAULT_RULES_POLICY_VERSION) {
+      throw new InvariantViolationError(
+        `Evaluating with a custom precision profile registry requires an explicit 'policyVersion' distinct from default '${DEFAULT_RULES_POLICY_VERSION}' to prevent semantic drift`,
+      );
+    }
+    profile = options.precisionProfileRegistry.get(profileName);
+  } else {
+    // Pure, stateless resolver reading from deeply frozen STANDARD_PROFILES
+    profile = resolveStandardPrecisionProfile(profileName);
+  }
 
   // 2. Compute effective thresholds based on profile
   const rawMatchThreshold = policy.matchThreshold + profile.matchThresholdModifier;

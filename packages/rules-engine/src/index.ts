@@ -46,9 +46,11 @@ export {
 export {
   type StandardPrecisionProfile,
   type PrecisionProfileConfig,
+  type PrecisionProfileRegistryOptions,
   STANDARD_PROFILES,
+  isStandardPrecisionProfile,
+  resolveStandardPrecisionProfile,
   PrecisionProfileRegistry,
-  defaultPrecisionProfileRegistry,
 } from './domain/precision-profile.js';
 
 // Engine

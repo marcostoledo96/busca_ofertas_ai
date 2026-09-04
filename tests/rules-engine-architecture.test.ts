@@ -99,4 +99,35 @@ describe('packages/rules-engine — Architectural Boundaries & Module Isolation'
     expect(content).toContain('rules-engine-forbidden-dependencies');
     expect(content).toContain('^packages/rules-engine/');
   });
+
+  it('strictly prohibits packages/rules-engine/src from using unauthorized ambient APIs or dynamic code evaluation', async () => {
+    const tsFiles = await getAllTsFiles(rulesEngineSrcDir);
+    expect(tsFiles.length).toBeGreaterThan(0);
+
+    const forbiddenAmbientPatterns = [
+      /\bDate\.now\s*\(/,
+      /\bMath\.random\s*\(/,
+      /\bcrypto\.randomUUID\s*\(/,
+      /\bglobalThis\.crypto\.randomUUID\s*\(/,
+      /\bfetch\s*\(/,
+      /\bglobalThis\.fetch\s*\(/,
+      /\beval\s*\(/,
+      /new\s+Function\s*\(/,
+      /['"]node:vm['"]/,
+      /\bvm\.runIn\w*\s*\(/,
+    ];
+
+    for (const filePath of tsFiles) {
+      const relativePath = path.relative(rulesEngineSrcDir, filePath);
+      const content = await fs.promises.readFile(filePath, 'utf-8');
+
+      for (const pattern of forbiddenAmbientPatterns) {
+        const matches = pattern.test(content);
+        expect(
+          matches,
+          `File ${relativePath} must not contain forbidden ambient API or dynamic execution matching ${pattern.toString()}`,
+        ).toBe(false);
+      }
+    }
+  });
 });

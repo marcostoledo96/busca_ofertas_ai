@@ -170,34 +170,87 @@ describe('packages/rules-engine — Boolean Expressions & AST Validation', () =>
       );
     });
 
-    it('enforces depth and node count defensive limits', () => {
-      // Build deep chain exceeding default max depth of 10
-      let current: BooleanExpressionNode = { kind: 'RULE', ruleId: 'rule_a' };
-      for (let i = 0; i < 12; i++) {
-        current = {
-          kind: 'NOT',
-          expression: current,
-        };
-      }
+    it('enforces exact depth boundary of DEFAULT_MAX_DEPTH = 5', () => {
+      // Depth 1: root RULE
+      const depth1: BooleanExpressionNode = { kind: 'RULE', ruleId: 'rule_a' };
+      // Depth 2: NOT(RULE)
+      const depth2: BooleanExpressionNode = { kind: 'NOT', expression: depth1 };
+      // Depth 3: NOT(NOT(RULE))
+      const depth3: BooleanExpressionNode = { kind: 'NOT', expression: depth2 };
+      // Depth 4: NOT(NOT(NOT(RULE)))
+      const depth4: BooleanExpressionNode = { kind: 'NOT', expression: depth3 };
+      // Depth 5: exactly equal to DEFAULT_MAX_DEPTH (5)
+      const depth5: BooleanExpressionNode = { kind: 'NOT', expression: depth4 };
 
-      expect(() => validateBooleanExpression(current, availableIds)).toThrow(
-        /exceeds maximum allowed depth/,
+      // Depth 5 must succeed
+      expect(() => validateBooleanExpression(depth5, availableIds)).not.toThrow();
+      const validated = validateBooleanExpression(depth5, availableIds);
+      expect(validated.kind).toBe('NOT');
+
+      // Depth 6: exceeds DEFAULT_MAX_DEPTH (5) -> must throw InvariantViolationError
+      const depth6: BooleanExpressionNode = { kind: 'NOT', expression: depth5 };
+      expect(() => validateBooleanExpression(depth6, availableIds)).toThrow(
+        InvariantViolationError,
+      );
+      expect(() => validateBooleanExpression(depth6, availableIds)).toThrow(
+        /exceeds maximum allowed depth of 5/,
       );
 
-      // Custom low depth limit
+      // Custom maxDepth option: maxDepth = 3
+      expect(() => validateBooleanExpression(depth3, availableIds, { maxDepth: 3 })).not.toThrow();
+      expect(() => validateBooleanExpression(depth4, availableIds, { maxDepth: 3 })).toThrow(
+        /exceeds maximum allowed depth of 3/,
+      );
+    });
+
+    it('enforces exact node count boundary of DEFAULT_MAX_NODES = 50', () => {
+      // Construct a wide, valid tree (depth 2) to test node count without tripping depth limit
+      // 1 root AND node + 49 child RULE nodes = exactly 50 nodes
+      const children49: BooleanExpressionNode[] = Array.from({ length: 49 }, () => ({
+        kind: 'RULE' as const,
+        ruleId: 'rule_a',
+      }));
+      const ast50: BooleanExpressionNode = {
+        kind: 'AND',
+        expressions: children49,
+      };
+
+      // Exactly 50 nodes must PASS
+      expect(() => validateBooleanExpression(ast50, availableIds)).not.toThrow();
+      const validated = validateBooleanExpression(ast50, availableIds);
+      expect(validated.kind).toBe('AND');
+
+      // 1 root AND node + 50 child RULE nodes = exactly 51 nodes
+      const children50: BooleanExpressionNode[] = Array.from({ length: 50 }, () => ({
+        kind: 'RULE' as const,
+        ruleId: 'rule_a',
+      }));
+      const ast51: BooleanExpressionNode = {
+        kind: 'AND',
+        expressions: children50,
+      };
+
+      // 51 nodes must FAIL
+      expect(() => validateBooleanExpression(ast51, availableIds)).toThrow(InvariantViolationError);
+      expect(() => validateBooleanExpression(ast51, availableIds)).toThrow(
+        /exceeds maximum allowed node count of 50/,
+      );
+
+      // Custom maxNodes option: maxNodes = 4
+      const ast4Nodes: BooleanExpressionNode = {
+        kind: 'AND',
+        expressions: [
+          { kind: 'RULE', ruleId: 'rule_a' },
+          { kind: 'RULE', ruleId: 'rule_b' },
+          { kind: 'RULE', ruleId: 'rule_c' },
+        ],
+      }; // 1 root + 3 children = 4 nodes
       expect(() =>
-        validateBooleanExpression(
-          {
-            kind: 'NOT',
-            expression: {
-              kind: 'NOT',
-              expression: { kind: 'RULE', ruleId: 'rule_a' },
-            },
-          },
-          availableIds,
-          { maxDepth: 2 },
-        ),
-      ).toThrow(/exceeds maximum allowed depth/);
+        validateBooleanExpression(ast4Nodes, availableIds, { maxNodes: 4 }),
+      ).not.toThrow();
+      expect(() => validateBooleanExpression(ast50, availableIds, { maxNodes: 4 })).toThrow(
+        /exceeds maximum allowed node count of 4/,
+      );
     });
   });
 
