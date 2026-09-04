@@ -147,6 +147,15 @@ interface EvaluationReason {
 
 Un motivo `HARD` rechazado por reglas no puede ser revertido por IA.
 
+#### Motor determinista de reglas (`rules-engine`)
+
+- **Contrato de regla**: Toda regla implementa `evaluate(context: RuleEvaluationContext): RuleResult`, siendo una función pura sin I/O ni efectos colaterales.
+- **`RuleResult`**: Contiene `ruleId`, `triggered: boolean`, `impact: number`, `severity: EvaluationSeverity` y `reasons: EvaluationReason[]`.
+- **Invariante `HARD`**: Si al menos una razón de severidad `HARD` se activa, la decisión es estrictamente `REJECT`, sin posibilidad de compensación por puntaje (incluso con score 100) ni evaluación posterior de IA.
+- **Score acotado y conmutativo**: `0 <= score <= 100`. La combinación de impactos es asociativa y conmutativa, garantizando que el orden de reglas independientes no altera el resultado.
+- **Expresiones booleanas compuestas**: AST validado defensivamente (`RULE`, `AND`, `OR`, `NOT`). Un operador compuesto jamás puede ocultar o descartar una razón `HARD`.
+- **Perfiles de precisión**: `STRICT`, `BALANCED`, `PERMISSIVE`, `MIXED`. Modulan umbrales efectivos y severidades de ambigüedad de forma genérica. Extensibles mediante registro sin alterar el evaluador central.
+
 ### Feedback
 
 Representa una decisión o corrección humana explícita registrada por el usuario sobre una oportunidad evaluada.

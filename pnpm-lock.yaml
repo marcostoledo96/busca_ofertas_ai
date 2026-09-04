@@ -26,6 +26,9 @@ importers:
       '@busca-ofertas-ai/report-html':
         specifier: workspace:*
         version: link:packages/report-html
+      '@busca-ofertas-ai/rules-engine':
+        specifier: workspace:*
+        version: link:packages/rules-engine
       '@busca-ofertas-ai/run-export':
         specifier: workspace:*
         version: link:packages/run-export
@@ -121,6 +124,12 @@ importers:
   packages/core: {}
 
   packages/report-html: {}
+
+  packages/rules-engine:
+    dependencies:
+      '@busca-ofertas-ai/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/run-export:
     dependencies:

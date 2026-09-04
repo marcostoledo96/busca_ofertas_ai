@@ -1,0 +1,31 @@
+{
+  "name": "@busca-ofertas-ai/rules-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@busca-ofertas-ai/core": "workspace:*"
+  }
+}
