@@ -39,6 +39,7 @@ export interface RawArtifactServiceOptions {
   readonly idGenerator: IdGenerator;
   readonly limits?: RawArtifactLimits;
   readonly defaultAdditionalSensitiveKeys?: readonly string[];
+  readonly defaultAdditionalSensitivePatterns?: readonly RegExp[];
 }
 
 export interface StoreArtifactParams {
@@ -52,6 +53,7 @@ export interface StoreArtifactParams {
   readonly sourceRunId?: string | null;
   readonly metadata?: Readonly<Record<string, unknown>> | null;
   readonly additionalSensitiveKeys?: readonly string[];
+  readonly additionalSensitivePatterns?: readonly RegExp[];
 }
 
 export interface CleanupSummary {
@@ -155,11 +157,7 @@ function validateContentType(contentType: string): { isJson: boolean; extension:
   }
   const ct = contentType.trim().toLowerCase();
   const isText = ct.startsWith('text/');
-  const isJson =
-    ct === 'application/json' ||
-    ct.startsWith('application/json;') ||
-    ct.endsWith('+json') ||
-    ct.includes('+json;');
+  const isJson = ct === 'application/json' || ct.startsWith('application/json;');
 
   if (!isText && !isJson) {
     throw new UnsupportedArtifactContentError(
@@ -186,6 +184,7 @@ export class RawArtifactService {
   private readonly idGenerator: IdGenerator;
   private readonly limits: Required<RawArtifactLimits>;
   private readonly defaultAdditionalSensitiveKeys: readonly string[] | undefined;
+  private readonly defaultAdditionalSensitivePatterns: readonly RegExp[] | undefined;
   private readonly runLock = new RunArtifactLock();
 
   constructor(options: RawArtifactServiceOptions) {
@@ -196,6 +195,7 @@ export class RawArtifactService {
     this.clock = options.clock;
     this.idGenerator = options.idGenerator;
     this.defaultAdditionalSensitiveKeys = options.defaultAdditionalSensitiveKeys;
+    this.defaultAdditionalSensitivePatterns = options.defaultAdditionalSensitivePatterns;
     this.limits = Object.freeze({
       maxArtifactSizeBytes:
         options.limits?.maxArtifactSizeBytes ?? DEFAULT_RAW_ARTIFACT_LIMITS.maxArtifactSizeBytes,
@@ -237,6 +237,10 @@ export class RawArtifactService {
       additionalSensitiveKeys: [
         ...(this.defaultAdditionalSensitiveKeys ?? []),
         ...(params.additionalSensitiveKeys ?? []),
+      ],
+      additionalSensitivePatterns: [
+        ...(this.defaultAdditionalSensitivePatterns ?? []),
+        ...(params.additionalSensitivePatterns ?? []),
       ],
     };
 
@@ -441,6 +445,14 @@ export class RawArtifactService {
         }
       } catch {
         failed++;
+      }
+    }
+
+    if (typeof this.storagePort.cleanStagingDirectory === 'function') {
+      try {
+        await this.storagePort.cleanStagingDirectory();
+      } catch {
+        // Non-blocking staging scavenger failure
       }
     }
 

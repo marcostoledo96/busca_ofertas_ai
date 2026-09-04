@@ -55,6 +55,9 @@ export function sanitizeString(input: string, options?: SanitizerOptions): strin
 
   if (options?.additionalSensitivePatterns) {
     for (const pattern of options.additionalSensitivePatterns) {
+      if (pattern.global || pattern.sticky) {
+        pattern.lastIndex = 0;
+      }
       sanitized = sanitized.replace(pattern, REDACTED_PLACEHOLDER);
     }
   }

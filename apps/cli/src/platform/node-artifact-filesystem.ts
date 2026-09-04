@@ -5,6 +5,7 @@ import {
   type ArtifactFileSystemPort,
   ArtifactIdentityCollisionError,
   ArtifactPathTraversalError,
+  ArtifactStorageError,
   ArtifactSymlinkEscapeError,
   DiskFullError,
   validateRelativeArtifactPath,
@@ -214,13 +215,46 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
       }
 
       try {
-        await handle.write(bytes);
-        await handle.sync();
-      } catch (writeErr: unknown) {
-        if (isEnospc(writeErr)) {
-          throw new DiskFullError();
+        // Full write loop (MEDIUM-B): persists all bytes and detects short writes deterministically
+        let offset = 0;
+        while (offset < bytes.length) {
+          const remaining = bytes.length - offset;
+          const slice = bytes.subarray(offset);
+          let writeResult: { bytesWritten: number; buffer: Uint8Array };
+          try {
+            writeResult = await handle.write(slice, 0, remaining);
+          } catch (writeErr: unknown) {
+            if (isEnospc(writeErr)) {
+              throw new DiskFullError();
+            }
+            throw writeErr;
+          }
+
+          if (writeResult.bytesWritten <= 0) {
+            throw new ArtifactStorageError(
+              `Short write encountered without progress: wrote ${offset} of ${bytes.length} bytes`,
+              'SHORT_WRITE_FAILED',
+            );
+          }
+
+          offset += writeResult.bytesWritten;
         }
-        throw writeErr;
+
+        if (offset !== bytes.length) {
+          throw new ArtifactStorageError(
+            `Incomplete write: expected ${bytes.length} bytes, wrote ${offset} bytes`,
+            'SHORT_WRITE_FAILED',
+          );
+        }
+
+        try {
+          await handle.sync();
+        } catch (syncErr: unknown) {
+          if (isEnospc(syncErr)) {
+            throw new DiskFullError();
+          }
+          throw syncErr;
+        }
       } finally {
         await handle.close();
         handle = null;
@@ -262,13 +296,68 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
         throw linkErr;
       }
 
-      // Unlink temp file after successful commit
-      await fs.promises.unlink(tmpFilePath).catch(() => {});
+      // Mandatory post-publication protocol (MEDIUM-A):
+      // Staging temporary must be unlinked; failure must be observable and rolled back.
+      let unlinked = false;
+      let lastUnlinkError: unknown = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await fs.promises.unlink(tmpFilePath);
+          unlinked = true;
+          break;
+        } catch (unlinkErr: unknown) {
+          lastUnlinkError = unlinkErr;
+          if (
+            unlinkErr instanceof Error &&
+            'code' in unlinkErr &&
+            (unlinkErr as { code: string }).code === 'ENOENT'
+          ) {
+            unlinked = true;
+            break;
+          }
+        }
+      }
+
+      if (!unlinked) {
+        // Rollback published destination link to prevent unmanaged duplicate hardlinks
+        let rollbackError: unknown = null;
+        try {
+          await fs.promises.unlink(destinationPath);
+        } catch (destErr: unknown) {
+          rollbackError = destErr;
+        }
+
+        if (rollbackError) {
+          throw new ArtifactStorageError(
+            `Failed to unlink staging file '${tmpFilePath}' AND failed to rollback destination file '${destinationPath}'`,
+            'ARTIFACT_COMPENSATION_FAILED',
+            { cause: new AggregateError([lastUnlinkError, rollbackError]) },
+          );
+        }
+
+        throw new ArtifactStorageError(
+          `Failed to unlink staging temporary file '${tmpFilePath}' after link; rolled back destination file '${destinationPath}'`,
+          'ARTIFACT_STAGING_CLEANUP_FAILED',
+          { cause: lastUnlinkError },
+        );
+      }
 
       return { sizeBytes: bytes.length };
     } catch (err: unknown) {
-      // Cleanup temp file
-      await fs.promises.unlink(tmpFilePath).catch(() => {});
+      // Pre-commit cleanup of staging temporary file
+      try {
+        await fs.promises.unlink(tmpFilePath);
+      } catch (cleanErr: unknown) {
+        if (!(
+          cleanErr instanceof Error &&
+          'code' in cleanErr &&
+          (cleanErr as { code: string }).code === 'ENOENT'
+        )) {
+          if (err instanceof Error && !('stagingCleanupError' in err)) {
+            Object.assign(err, { stagingCleanupError: cleanErr });
+          }
+        }
+      }
 
       if (isEnospc(err)) {
         throw new DiskFullError();
@@ -394,5 +483,57 @@ export class NodeArtifactFileSystemAdapter implements ArtifactFileSystemPort {
       }
       throw err;
     }
+  }
+
+  /**
+   * Scavenges abandoned application-generated temporary files from .tmp/.
+   * Operates strictly within the verified root directory, rejects symlinks,
+   * matches only app temporary patterns (tmp_<uuid>.tmp), and ignores foreign files.
+   */
+  public async cleanStagingDirectory(): Promise<{ scanned: number; deleted: number }> {
+    await this.verifyRoot(true);
+    const tmpDir = path.join(this.artifactsRoot, '.tmp');
+    try {
+      await this.verifyTmpDir(tmpDir, true);
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
+        return { scanned: 0, deleted: 0 };
+      }
+      throw err;
+    }
+
+    const entries = await fs.promises.readdir(tmpDir, { withFileTypes: true });
+    let scanned = 0;
+    let deleted = 0;
+
+    const appTempPattern =
+      /^tmp_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/i;
+
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      if (!appTempPattern.test(entry.name)) {
+        continue;
+      }
+
+      scanned++;
+      const fullPath = path.join(tmpDir, entry.name);
+      try {
+        const stat = await fs.promises.lstat(fullPath);
+        if (stat.isSymbolicLink() || !stat.isFile()) {
+          continue;
+        }
+        await fs.promises.unlink(fullPath);
+        deleted++;
+      } catch {
+        // Non-fatal per-file error, leave for subsequent pass
+      }
+    }
+
+    return { scanned, deleted };
   }
 }

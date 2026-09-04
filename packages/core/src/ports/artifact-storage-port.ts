@@ -123,4 +123,10 @@ export interface ArtifactFileSystemPort {
    * Checks whether the file exists at the given relative path.
    */
   exists(relativePath: string): Promise<boolean>;
+
+  /**
+   * Safely scans and removes orphaned application-generated temporary files from staging (.tmp).
+   * Ignores symlinks and foreign files.
+   */
+  cleanStagingDirectory?(): Promise<{ scanned: number; deleted: number }>;
 }

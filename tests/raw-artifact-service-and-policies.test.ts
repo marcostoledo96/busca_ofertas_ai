@@ -12,6 +12,7 @@ import {
   type RawArtifact,
   type RawArtifactReason,
   type RawArtifactRetentionPolicy,
+  type SanitizerOptions,
   ArtifactStorageError,
   InvariantViolationError,
 } from '@busca-ofertas-ai/core';
@@ -939,6 +940,208 @@ describe('RawArtifactService and Retention Policies (BOAI-016)', () => {
 
       const finalCount = await repo.getCountByRunId(runId);
       expect(finalCount).toBe(2); // seed + exactly 1 fulfilled
+    });
+  });
+
+  describe('Strict Content-Type Validation (LOW)', () => {
+    it('accepts application/json and application/json with optional parameters', async () => {
+      const jsonArtifact = await service.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'DIAGNOSTIC',
+        kind: 'API_RESPONSE',
+        content: JSON.stringify({ status: 'ok' }),
+        contentType: 'application/json',
+      });
+      expect(jsonArtifact).not.toBeNull();
+      expect(jsonArtifact?.contentType).toBe('application/json');
+
+      const jsonWithParams = await service.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'DIAGNOSTIC',
+        kind: 'API_RESPONSE',
+        content: JSON.stringify({ status: 'ok_params' }),
+        contentType: 'application/json; charset=utf-8',
+      });
+      expect(jsonWithParams).not.toBeNull();
+      expect(jsonWithParams?.contentType).toBe('application/json; charset=utf-8');
+    });
+
+    it('accepts text/* MIME types with optional parameters', async () => {
+      const textPlain = await service.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'DIAGNOSTIC',
+        kind: 'LOG',
+        content: 'log line 1\nlog line 2',
+        contentType: 'text/plain; charset=utf-8',
+      });
+      expect(textPlain).not.toBeNull();
+
+      const textHtml = await service.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'DIAGNOSTIC',
+        kind: 'PAGE',
+        content: '<html><body>test</body></html>',
+        contentType: 'text/html',
+      });
+      expect(textHtml).not.toBeNull();
+    });
+
+    const rejectedStructuredJsonTypes = [
+      'application/problem+json',
+      'application/problem+json; charset=utf-8',
+      'application/ld+json',
+      'application/vnd.api+json',
+      'application/custom+json',
+      'application/feed+json',
+      'application/merge-patch+json',
+      'application/xml',
+      'application/octet-stream',
+      'image/png',
+    ];
+
+    for (const rejectedType of rejectedStructuredJsonTypes) {
+      it(`rejects structured suffix or unsupported type '${rejectedType}' with 0 writes and 0 rows`, async () => {
+        const initialFilesCount = fsPort.files.size;
+        const initialRowsCount = repo.artifacts.size;
+
+        await expect(
+          service.storeArtifact({
+            policy: 'ALL_LIMITED',
+            reason: 'DIAGNOSTIC',
+            kind: 'PAYLOAD',
+            content: '{"error": "test"}',
+            contentType: rejectedType,
+          }),
+        ).rejects.toThrow(UnsupportedArtifactContentError);
+
+        expect(fsPort.files.size).toBe(initialFilesCount);
+        expect(repo.artifacts.size).toBe(initialRowsCount);
+      });
+    }
+  });
+
+  describe('End-to-End and Fail-Closed additionalSensitivePatterns (COBERTURA)', () => {
+    it('redacts custom canary pattern end-to-end from persisted artifact file', async () => {
+      const canaryToken = 'CANARY_SECRET_ALPHA99';
+      const customPattern = /CANARY_SECRET_[A-Z0-9]+/g;
+
+      const artifact = await service.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'DIAGNOSTIC',
+        kind: 'CANARY_TEST',
+        content: `Error occurred with auth token ${canaryToken} during execution`,
+        contentType: 'text/plain',
+        additionalSensitivePatterns: [customPattern],
+      });
+
+      expect(artifact).not.toBeNull();
+      if (!artifact) {
+        throw new Error('Expected artifact to be defined');
+      }
+
+      // Read back persisted file from storage
+      const persistedBytes = fsPort.files.get(artifact.relativePath);
+      expect(persistedBytes).toBeDefined();
+      if (!persistedBytes) {
+        throw new Error('Expected persistedBytes to be defined');
+      }
+      const persistedContent = new TextDecoder().decode(persistedBytes);
+
+      expect(persistedContent).not.toContain(canaryToken);
+      expect(persistedContent).toContain(
+        'Error occurred with auth token [REDACTED] during execution',
+      );
+
+      // Verify repository record matches the sanitized content
+      const saved = await repo.getById(artifact.id);
+      expect(saved).not.toBeNull();
+      expect(saved?.sizeBytes).toBe(persistedBytes.length);
+      expect(saved?.fingerprint).toBe(hasher.hash(persistedContent));
+    });
+
+    it('redacts custom canary pattern in JSON artifact via service constructor default options', async () => {
+      const canarySecret = 'CANARY_CONSTRUCTOR_TOKEN_123';
+      const customPattern = /CANARY_CONSTRUCTOR_TOKEN_\d+/g;
+
+      const customService = new RawArtifactService({
+        storagePort: fsPort,
+        repository: repo,
+        sanitizer,
+        hasher,
+        clock: { now: () => fixedNow },
+        idGenerator: { generate: () => `art-canary-${idCounter++}` },
+        defaultAdditionalSensitivePatterns: [customPattern],
+      });
+
+      const artifact = await customService.storeArtifact({
+        policy: 'ALL_LIMITED',
+        reason: 'DIAGNOSTIC',
+        kind: 'JSON_PAYLOAD',
+        content: {
+          session: 'session-ok',
+          nested: {
+            customTrace: `prefix_${canarySecret}_suffix`,
+          },
+        },
+        contentType: 'application/json',
+      });
+
+      expect(artifact).not.toBeNull();
+      if (!artifact) {
+        throw new Error('Expected artifact to be defined');
+      }
+
+      const persistedBytes = fsPort.files.get(artifact.relativePath);
+      expect(persistedBytes).toBeDefined();
+      if (!persistedBytes) {
+        throw new Error('Expected persistedBytes to be defined');
+      }
+      const parsed = JSON.parse(new TextDecoder().decode(persistedBytes)) as {
+        nested: { customTrace: string };
+      };
+
+      expect(parsed.nested.customTrace).toBe('prefix_[REDACTED]_suffix');
+      expect(new TextDecoder().decode(persistedBytes)).not.toContain(canarySecret);
+    });
+
+    it('fails closed when sanitizer fails to redact sensitive pattern (0 writes, 0 rows)', async () => {
+      // Create a faulty sanitizer whose sanitizeText ignores additionalSensitivePatterns,
+      // but whose validateNoSensitiveData uses the standard detector to catch unredacted leaks.
+      const leakySanitizer = {
+        sanitizeText: (text: string) => text, // Leaks the text without redacting
+        sanitizeData: <T>(data: T) => data,
+        validateNoSensitiveData: (data: unknown, options?: SanitizerOptions) => {
+          // Real validator from storage-sqlite detects the leak and throws SensitiveDataDetectedError
+          sanitizer.validateNoSensitiveData(data, options);
+        },
+      };
+
+      const failClosedService = new RawArtifactService({
+        storagePort: fsPort,
+        repository: repo,
+        sanitizer: leakySanitizer,
+        hasher,
+        clock: { now: () => fixedNow },
+        idGenerator: { generate: () => `art-leak-${idCounter++}` },
+      });
+
+      const initialFilesCount = fsPort.files.size;
+      const initialRowsCount = repo.artifacts.size;
+
+      await expect(
+        failClosedService.storeArtifact({
+          policy: 'ALL_LIMITED',
+          reason: 'DIAGNOSTIC',
+          kind: 'LEAK_CHECK',
+          content: 'Payload with unredacted CANARY_LEAK_TOKEN_XYZ',
+          contentType: 'text/plain',
+          additionalSensitivePatterns: [/CANARY_LEAK_TOKEN_[A-Z]+/g],
+        }),
+      ).rejects.toThrow(SensitiveDataDetectedError);
+
+      // Verify strict fail-closed: 0 writes to filesystem, 0 rows in database
+      expect(fsPort.files.size).toBe(initialFilesCount);
+      expect(repo.artifacts.size).toBe(initialRowsCount);
     });
   });
 });

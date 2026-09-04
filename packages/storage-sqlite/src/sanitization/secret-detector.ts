@@ -66,6 +66,9 @@ export function validateNoSensitiveData(
     }
     if (options?.additionalSensitivePatterns) {
       for (const pattern of options.additionalSensitivePatterns) {
+        if (pattern.global || pattern.sticky) {
+          pattern.lastIndex = 0;
+        }
         if (pattern.test(value)) {
           throw new SensitiveDataDetectedError(
             `Sensitive custom pattern detected at '${path}'. Direct persistence of secrets is forbidden.`,
