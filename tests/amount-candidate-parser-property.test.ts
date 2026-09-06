@@ -125,4 +125,26 @@ describe('BOAI-018: parseAmountCandidate Property-Based Invariant Tests', () => 
       expect(() => parseAmountCandidate(fuzzStr)).not.toThrow();
     }
   });
+
+  it('Property G: Terminal punctuation does not degrade mil multiplier to plain integer (HIGH-01 regression)', () => {
+    const rng = new DeterministicRng(606);
+    const punctuations = ['.', ',', ';', '!', '?', ')', '...', '."', '!)'];
+
+    for (let i = 0; i < 150; i++) {
+      const base = rng.nextInt(1, 999);
+      const punct = punctuations[rng.nextInt(0, punctuations.length - 1)]!;
+      const formats = [
+        `ARS ${String(base)} mil${punct}`,
+        `${String(base)} mil${punct}`,
+        `${String(base)} mil pesos${punct}`,
+      ];
+
+      for (const str of formats) {
+        const result = parseAmountCandidate(str);
+        expect(result.amount).toBe(base * 1000);
+        expect(result.status).toBe('EXTRACTED');
+        expect(result.evidence).toContain('MULTIPLIER_MIL');
+      }
+    }
+  });
 });

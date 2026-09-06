@@ -188,6 +188,32 @@ describe('BOAI-018: parseAmountCandidate Unit Test Matrix', () => {
       expect(millas.amount).toBeNull();
       expect(millas.status).toBe('NO_NUMERIC_AMOUNT');
     });
+
+    it('correctly handles mil followed by punctuation without degrading to plain integer (HIGH-01)', () => {
+      const dot = parseAmountCandidate('250 mil.');
+      expect(dot.amount).toBe(250000);
+      expect(dot.status).toBe('EXTRACTED');
+      expect(dot.evidence).toContain(AmountParsingEvidenceCodes.MULTIPLIER_MIL);
+
+      const arsDot = parseAmountCandidate('ARS 250 mil.');
+      expect(arsDot.amount).toBe(250000);
+      expect(arsDot.status).toBe('EXTRACTED');
+      expect(arsDot.confidence).toBe(1.0);
+      expect(arsDot.evidence).toContain(AmountParsingEvidenceCodes.MULTIPLIER_MIL);
+      expect(arsDot.evidence).toContain(AmountParsingEvidenceCodes.ARS_PREFIX);
+
+      const comma = parseAmountCandidate('250 mil,');
+      expect(comma.amount).toBe(250000);
+      expect(comma.status).toBe('EXTRACTED');
+
+      const semi = parseAmountCandidate('250 mil;');
+      expect(semi.amount).toBe(250000);
+      expect(semi.status).toBe('EXTRACTED');
+
+      const paren = parseAmountCandidate('precio (250 mil)');
+      expect(paren.amount).toBe(250000);
+      expect(paren.status).toBe('EXTRACTED');
+    });
   });
 
   describe('5. Entradas sin precio / ausencia esperada de importe (Sección 11 y 22)', () => {
@@ -490,6 +516,87 @@ describe('BOAI-018: parseAmountCandidate Unit Test Matrix', () => {
       const r1 = parseAmountCandidate('ARS 250.000');
       const r2 = parseArsAmountText('ARS 250.000');
       expect(r1).toEqual(r2);
+    });
+  });
+
+  describe('15. Audit Findings Regressions: Evidence Codes Freeze (MEDIUM-01)', () => {
+    it('is deeply frozen at runtime and prevents mutation', () => {
+      expect(Object.isFrozen(AmountParsingEvidenceCodes)).toBe(true);
+
+      expect(() => {
+        // @ts-expect-error Testing runtime mutation attempt
+        AmountParsingEvidenceCodes.NUMERIC_TOKEN = 'MUTATED';
+      }).toThrow();
+
+      expect(() => {
+        // @ts-expect-error Testing runtime mutation attempt
+        AmountParsingEvidenceCodes.MULTIPLIER_MIL = 'MUTATED';
+      }).toThrow();
+
+      expect(AmountParsingEvidenceCodes.NUMERIC_TOKEN).toBe('NUMERIC_TOKEN');
+      expect(AmountParsingEvidenceCodes.MULTIPLIER_MIL).toBe('MULTIPLIER_MIL');
+    });
+
+    it('produces identical output before and after mutation attempt', () => {
+      const before = parseAmountCandidate('ARS 250.000');
+      try {
+        // @ts-expect-error Testing runtime mutation attempt
+        AmountParsingEvidenceCodes.NUMERIC_TOKEN = 'MUTATED';
+      } catch {
+        // Expected throw
+      }
+      const after = parseAmountCandidate('ARS 250.000');
+      expect(before).toEqual(after);
+    });
+  });
+
+  describe('16. Audit Findings Regressions: Explicit USD Precedence (MEDIUM-02)', () => {
+    it('gives explicit US$ 300 precedence over generic dollar symbol', () => {
+      const result = parseAmountCandidate('US$ 300');
+      expect(result.amount).toBe(300);
+      expect(result.status).toBe('EXTRACTED');
+      expect(result.confidence).toBe(0.5);
+      expect(result.currencySignals).toContain('USD');
+      expect(result.evidence).toContain(AmountParsingEvidenceCodes.USD_PREFIX);
+      expect(result.evidence).not.toContain(
+        AmountParsingEvidenceCodes.CURRENCY_AMBIGUOUS_DOLLAR_SIGN,
+      );
+    });
+
+    it('gives explicit U$S 300 precedence over generic dollar symbol', () => {
+      const result = parseAmountCandidate('U$S 300');
+      expect(result.amount).toBe(300);
+      expect(result.status).toBe('EXTRACTED');
+      expect(result.confidence).toBe(0.5);
+      expect(result.currencySignals).toContain('USD');
+      expect(result.evidence).toContain(AmountParsingEvidenceCodes.USD_PREFIX);
+      expect(result.evidence).not.toContain(
+        AmountParsingEvidenceCodes.CURRENCY_AMBIGUOUS_DOLLAR_SIGN,
+      );
+    });
+
+    it('retains USD 300 behavior with confidence 0.5', () => {
+      const result = parseAmountCandidate('USD 300');
+      expect(result.amount).toBe(300);
+      expect(result.status).toBe('EXTRACTED');
+      expect(result.confidence).toBe(0.5);
+      expect(result.currencySignals).toContain('USD');
+      expect(result.evidence).toContain(AmountParsingEvidenceCodes.USD_PREFIX);
+      expect(result.evidence).not.toContain(
+        AmountParsingEvidenceCodes.CURRENCY_AMBIGUOUS_DOLLAR_SIGN,
+      );
+    });
+
+    it('retains $300 as ambiguous dollar sign with confidence 0.6 and without USD signal', () => {
+      const result = parseAmountCandidate('$300');
+      expect(result.amount).toBe(300);
+      expect(result.status).toBe('EXTRACTED');
+      expect(result.confidence).toBe(0.6);
+      expect(result.currencySignals).toEqual(['DOLLAR_SYMBOL']);
+      expect(result.currencySignals).not.toContain('USD');
+      expect(result.evidence).toContain(AmountParsingEvidenceCodes.DOLLAR_SYMBOL);
+      expect(result.evidence).toContain(AmountParsingEvidenceCodes.CURRENCY_AMBIGUOUS_DOLLAR_SIGN);
+      expect(result.evidence).not.toContain(AmountParsingEvidenceCodes.USD_PREFIX);
     });
   });
 });

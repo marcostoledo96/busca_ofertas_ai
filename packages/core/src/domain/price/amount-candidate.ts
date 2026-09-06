@@ -16,7 +16,7 @@ export type CurrencyTextSignal =
 /**
  * Stable, structured evidence codes emitted during extraction.
  */
-export const AmountParsingEvidenceCodes = {
+export const AmountParsingEvidenceCodes = Object.freeze({
   NUMERIC_TOKEN: 'NUMERIC_TOKEN',
   SEPARATOR_DOT_THOUSANDS: 'SEPARATOR_DOT_THOUSANDS',
   SEPARATOR_SPACE_THOUSANDS: 'SEPARATOR_SPACE_THOUSANDS',
@@ -48,7 +48,7 @@ export const AmountParsingEvidenceCodes = {
   NUMERIC_OVERFLOW: 'NUMERIC_OVERFLOW',
   NEGATIVE_AMOUNT_UNSUPPORTED: 'NEGATIVE_AMOUNT_UNSUPPORTED',
   INPUT_EXCEEDS_MAX_LENGTH: 'INPUT_EXCEEDS_MAX_LENGTH',
-} as const;
+} as const);
 
 export type AmountParsingEvidenceCode =
   (typeof AmountParsingEvidenceCodes)[keyof typeof AmountParsingEvidenceCodes];
@@ -182,14 +182,17 @@ const detectCurrencySignals = (text: string): CurrencyTextSignal[] => {
   } else if (PESOS_SIGNAL_REGEX.test(text)) {
     signals.push('PESOS');
   }
-  if (DOLLAR_SIGNAL_REGEX.test(text)) {
-    signals.push('DOLLAR_SYMBOL');
-  }
   if (USD_SIGNAL_REGEX.test(text)) {
     signals.push('USD');
   }
   if (DOLARES_SIGNAL_REGEX.test(text)) {
     signals.push('DOLARES');
+  }
+
+  // A generic dollar symbol is recognized only if there is a '$' not part of explicit USD (US$ or U$S)
+  const textWithoutUsd = text.replace(/(?<![\p{L}\p{N}])(?:us\$|u\$s|usd)(?![\p{L}\p{N}])/giu, '');
+  if (DOLLAR_SIGNAL_REGEX.test(textWithoutUsd)) {
+    signals.push('DOLLAR_SYMBOL');
   }
 
   return signals;
@@ -249,7 +252,7 @@ const scanNumericCandidates = (
 
   // 1. Scan for "mil" suffix multiplier: e.g. "250 mil", "250.000 mil"
   // Must respect unicode boundaries: avoids "250 militares", "250 milímetros", "250 millas"
-  const milRegex = /(?<![\p{L}\p{N}])(\d{1,3}(?:\.\d{3})+|\d+)\s+mil(?![.\p{L}\p{N}])/giu;
+  const milRegex = /(?<![\p{L}\p{N}])(\d{1,3}(?:\.\d{3})+|\d+)\s+mil(?![\p{L}\p{N}])/giu;
   let milMatch: RegExpExecArray | null;
   while ((milMatch = milRegex.exec(text)) !== null) {
     const rawNumberPart = milMatch[1]!;
@@ -643,12 +646,12 @@ export const parseAmountCandidate = (rawText: string): ParsedAmountCandidate => 
     if (/(?<![\p{L}\p{N}])ars\s*$/iu.test(textBefore)) {
       localEvidence.push(AmountParsingEvidenceCodes.ARS_PREFIX);
       localSignals.push('ARS');
-    } else if (/\$\s*$/u.test(textBefore)) {
-      localEvidence.push(AmountParsingEvidenceCodes.DOLLAR_SYMBOL);
-      localSignals.push('DOLLAR_SYMBOL');
     } else if (/(?<![\p{L}\p{N}])(?:usd|us\$|u\$s)\s*$/iu.test(textBefore)) {
       localEvidence.push(AmountParsingEvidenceCodes.USD_PREFIX);
       localSignals.push('USD');
+    } else if (/\$\s*$/u.test(textBefore)) {
+      localEvidence.push(AmountParsingEvidenceCodes.DOLLAR_SYMBOL);
+      localSignals.push('DOLLAR_SYMBOL');
     }
 
     // Suffix signals
@@ -706,13 +709,6 @@ export const parseAmountCandidate = (rawText: string): ParsedAmountCandidate => 
         status = 'EXTRACTED';
         confidence = 0.9;
       } else if (
-        localSignals.includes('DOLLAR_SYMBOL') ||
-        globalCurrencySignals.includes('DOLLAR_SYMBOL')
-      ) {
-        status = 'EXTRACTED';
-        confidence = 0.6;
-        localEvidence.push(AmountParsingEvidenceCodes.CURRENCY_AMBIGUOUS_DOLLAR_SIGN);
-      } else if (
         localSignals.includes('USD') ||
         localSignals.includes('DOLARES') ||
         globalCurrencySignals.includes('USD') ||
@@ -720,6 +716,13 @@ export const parseAmountCandidate = (rawText: string): ParsedAmountCandidate => 
       ) {
         status = 'EXTRACTED';
         confidence = 0.5;
+      } else if (
+        localSignals.includes('DOLLAR_SYMBOL') ||
+        globalCurrencySignals.includes('DOLLAR_SYMBOL')
+      ) {
+        status = 'EXTRACTED';
+        confidence = 0.6;
+        localEvidence.push(AmountParsingEvidenceCodes.CURRENCY_AMBIGUOUS_DOLLAR_SIGN);
       } else {
         // Standalone or plain number without explicit currency
         status = 'EXTRACTED';
