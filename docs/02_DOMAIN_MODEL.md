@@ -209,6 +209,22 @@ interface ResolvedPrice {
 }
 ```
 
+### ParsedAmountCandidate
+
+Representación de la extracción determinista de un importe candidato desde texto crudo (BOAI-018), antes de resolver moneda (BOAI-019) o tipo de precio (BOAI-020).
+
+```typescript
+interface ParsedAmountCandidate {
+  readonly rawText: string;
+  readonly amount: number | null;
+  readonly confidence: number;
+  readonly status: "EXTRACTED" | "NO_NUMERIC_AMOUNT" | "AMBIGUOUS" | "INVALID_NUMERIC";
+  readonly evidence: readonly string[];
+  readonly currencySignals: readonly string[];
+  readonly candidates: readonly ParsedAmountCandidateToken[];
+}
+```
+
 ### SourceHealth
 
 ```typescript

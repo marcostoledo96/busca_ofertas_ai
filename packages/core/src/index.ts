@@ -17,7 +17,7 @@ export {
 
 export { type Hasher } from './domain/common/hasher.js';
 
-// Price & Currency Value Objects
+// Price & Currency Value Objects & Amount Parser
 export {
   type PriceCurrency,
   type PriceResolution,
@@ -28,6 +28,17 @@ export {
   type CreateResolvedPriceParams,
   createResolvedPrice,
 } from './domain/price/resolved-price.js';
+
+export {
+  type AmountCandidateStatus,
+  type CurrencyTextSignal,
+  type AmountParsingEvidenceCode,
+  AmountParsingEvidenceCodes,
+  type ParsedAmountCandidateToken,
+  type ParsedAmountCandidate,
+  parseAmountCandidate,
+  parseArsAmountText,
+} from './domain/price/amount-candidate.js';
 
 // Evaluation & Reasons
 export {

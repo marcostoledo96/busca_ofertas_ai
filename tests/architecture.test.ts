@@ -5,6 +5,8 @@ describe('Architecture & Module Boundary Invariants (BOAI-002)', () => {
   it('exports pure domain contracts, entities, factories, and ports from entrypoint', () => {
     // Assert required exports exist on the public entrypoint
     expect(typeof CoreModule.createResolvedPrice).toBe('function');
+    expect(typeof CoreModule.parseAmountCandidate).toBe('function');
+    expect(typeof CoreModule.parseArsAmountText).toBe('function');
     expect(typeof CoreModule.createEvaluationReason).toBe('function');
     expect(typeof CoreModule.createEvaluation).toBe('function');
     expect(typeof CoreModule.createListing).toBe('function');
